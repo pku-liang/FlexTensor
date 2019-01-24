@@ -1,5 +1,24 @@
 import numpy as np
 import torch
+from auto_schedule.config import UNSURE
+
+
+def to_int(expr):
+    try:
+        res = int(expr)
+    except Exception:
+        res = UNSURE
+    return res
+
+
+def to_tuple(expr_tuple):
+    return tuple([to_int(x) for x in expr_tuple])
+
+
+def split_part_names(original, parts):
+    assert isinstance(original, str) and isinstance(parts, int)
+    ret = [original + "." + str(i) for i in range(parts)]
+    return ret
 
 
 def lower_bound(ary, beg, end, target):

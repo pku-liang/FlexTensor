@@ -56,7 +56,7 @@ def normal_axis_state():
     return AxisState(0, 0, 0, 0)
 
 
-class Env(object):
+class ComputeGraph(object):
     """
     class Env is contains all the useful information of a compute definition,
     and it is used for agents in reinforcement learning process

@@ -4,7 +4,7 @@ import torch.optim as optim
 import auto_schedule.Environment as Environment
 from auto_schedule.config import *
 from auto_schedule.training_examples import FUNC_TABLE
-from auto_schedule import Env
+from auto_schedule import ComputeGraph
 from auto_schedule import ReverseBFSVisitor, SimpleEvaluator, NaturalScheduler
 
 
@@ -26,7 +26,7 @@ CPU_MSG = TragetMessage("llvm", 0.64, 2.56, 358.4, 1, 1)
 
 def train_single_operator(compute, args, scheduler, target, target_msg):
     ops, arg_bufs = compute(*args)
-    env = Env(ops)
+    env = ComputeGraph(ops)
     visitor = ReverseBFSVisitor()
     track = visitor.get_visit_msg(env).track
     evaluator = SimpleEvaluator()
