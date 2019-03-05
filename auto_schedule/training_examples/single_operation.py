@@ -34,7 +34,16 @@ def matmul(N, M, L, dtype="float32"):
     return C.op, [A, B, C]
 
 
-@register(args=(256, 256, 3, 3, 1, 1))
+@register(args=(25, 10, 100, 10))
+def matmul_batch(B, N, M, L, dtype="float32"):
+    A = tvm.placeholder((B, N, M), dtype=dtype, name="A")
+    mB = tvm.placeholder((M, L), dtype=dtype, name="B")
+    k = tvm.reduce_axis((0, M), name="k")
+    C = tvm.compute((B, N, L), lambda b, i, j: tvm.sum(A[b, i, k] * mB[k, j], axis=k), name="C")
+    return C.op, [A, mB, C]
+
+
+@register(args=(25, 25, 3, 3, 1, 1))
 def conv2d(N, M, K, L, stride=1, padding=0, dtype="float32"):
     A = tvm.placeholder((N, M), dtype=dtype, name="A")
     W = tvm.placeholder((K, L), dtype=dtype, name="W")
@@ -168,7 +177,7 @@ def conv3d_channel(N, M, P, C, K, L, Q, O, stride=1, padding=0, dtype="float32")
     return Output.op, [A, W, Output]
 
 
-@register(args=(16, 32, 32, 32, 3, 5, 5, 5, 10, 1, 2))
+@register(args=(16, 32, 32, 32, 3, 5, 5, 5, 10, 2, 2))
 def conv3d_channel_batch(B, N, M, P, C, K, L, Q, O, stride=1, padding=0, dtype="float32"):
     A = tvm.placeholder((B, N, M, P, C), dtype=dtype, name="A")
     W = tvm.placeholder((K, L, Q, C, O), dtype=dtype, name="W")
@@ -188,3 +197,14 @@ def conv3d_channel_batch(B, N, M, P, C, K, L, Q, O, stride=1, padding=0, dtype="
                              axis=[rx, ry, rz, rc]),
                          name="Output")
     return Output.op, [A, W, Output]
+
+
+@register(args=(102, 102))
+def gaussian_blur3x3(M, N, dtype="float32"):
+    A = tvm.placeholder((M, N), dtype=dtype, name="A")
+    pad = (3 - 1) // 2
+    Apad = tvm.compute((M + 2 * pad, N), lambda i, j: tvm.select(tvm.all(i >= pad, i < M + pad), A[i - pad, j], 0.0), name="Apad")
+    B = tvm.compute((M, N), lambda i, j: (Apad[i, j] + Apad[i + 1, j] + Apad[i + 2, j]) / 3, name="B")
+    Bpad = tvm.compute((M, N + 2 * pad), lambda i, j: tvm.select(tvm.all(j >= pad, j < N + pad), B[i, j - pad], 0.0), name="Bpad")
+    C = tvm.compute((M, N), lambda i, j: (Bpad[i, j] + Bpad[i, j + 1] + Bpad[i, j + 2]) / 3, name="C")
+    return C.op, [A, C]

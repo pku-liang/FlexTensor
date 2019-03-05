@@ -1,86 +1,107 @@
+import tvm
 import torch
 import numpy as np
-import torch.optim as optim
-import auto_schedule.Environment as Environment
-from auto_schedule.config import *
+import logging
 from auto_schedule.training_examples import FUNC_TABLE
-from auto_schedule import ComputeGraph
-from auto_schedule import ReverseBFSVisitor, SimpleEvaluator, NaturalScheduler
+from auto_schedule.scheduler import graph_analysis, op_schedule_cpu_general_dx, evaluate
+from auto_schedule.models import OpScheduleCPU
 
 
-class TragetMessage(object):
-    def __init__(self, target, l1_cache, l2_cache, l3_cache, block, thread):
-        if target == "llvm":
-            self.msg = [0, 0, l1_cache, l2_cache, l3_cache, block, thread]
-        elif target == "cuda":
-            self.msg = [1, 1, l1_cache, l2_cache, l3_cache, block, thread]
-        if len(self.msg) < TARGET_MSG_LEN:
-            res = TARGET_MSG_LEN - len(self.msg)
-            for i in range(res):
-                self.msg.append(0)
-        self.msg = torch.FloatTensor(self.msg)
+MAX_CPU = 8
+C1 = 1
+C2 = 1
+LR = 0.01
+MT = 0.7
 
 
-CPU_MSG = TragetMessage("llvm", 0.64, 2.56, 358.4, 1, 1)
+class Entity(object):
+    def __init__(self, func, args):
+        self.func = func
+        self.args = args
 
 
-def train_single_operator(compute, args, scheduler, target, target_msg):
-    ops, arg_bufs = compute(*args)
-    env = ComputeGraph(ops)
-    visitor = ReverseBFSVisitor()
-    track = visitor.get_visit_msg(env).track
-    evaluator = SimpleEvaluator()
-    opt = optim.SGD(scheduler.parameters(), lr=0.02, momentum=0.5)
-
-    loss_lst = []
-    perform_lst = []
-    mem = []
-    for i in range(10):
-        for j in range(16):
-            scheduler.train()
-            res = scheduler(track, env, ops, arg_bufs, target, target_msg)
-            mem.append(res)
-            if len(mem) > MEM_CPACITY:
-                mem = mem[1:]
-            sample_index = np.random.randint(0, 64 * len(mem), (4,))
-            loss = 0.0
-            for index in sample_index:
-                outer = index // 64
-                inner = index % 64
-                sample = mem[outer]
-                sm, op2schedule = sample.sm_lst[inner], sample.op2schedule_lst[inner]
-                op2choice_cpat, op2choice_split = sample.op2choice_cpat_lst[inner], sample.op2choice_split_lst[inner]
-                op2output_cpat, op2output_split = sample.op2output_cpat, sample.op2output_split
-                sm.reset()
-                for op in track:
-                    node = env.op2node[op]
-                    if not isinstance(node, Environment.ComputeVertex):
-                        continue
-                    before = evaluator.evaluate(sm.s, sm.arg_bufs, sm.target, dev_id=1)
-                    sm.schedule_for(op, op2schedule[op])
-                    after = evaluator.evaluate(sm.s, sm.arg_bufs, sm.target, dev_id=1)
-                    reward = (before - after) / before
-                    for choice in op2choice_cpat[op]:
-                        loss = loss + (reward - op2output_cpat[op][0][choice]) ** 2
-                    for k, choice in enumerate(op2choice_split[op]):
-                        loss = loss + (reward - op2output_split[op][k][0][choice[0]]) ** 2
-                        loss = loss + (reward - op2output_split[op][k][1][choice[1]]) ** 2
-            opt.zero_grad()
-            loss_lst.append(float(loss))
-            loss.backward(retain_graph=True)
-            opt.step()
-
-            scheduler.eval()
-            res = scheduler(track, env, ops, arg_bufs, target, target_msg)
-            sm = res.sm_lst[0]
-            performance = evaluator.evaluate(sm.s, sm.arg_bufs, sm.target, dev_id=1)
-            perform_lst.append(performance)
-            print("i=", i, "  j=", j, "  loss=", loss, "  performance=", performance)
-    np.savetxt("loss.txt", np.array(loss_lst))
-    np.savetxt("performance.txt", np.array(perform_lst))
+def train_op_schedule_cpu_general_dx(entities, epoch, batch_size):
+    p = 0
+    dim = 5
+    num_sample = len(entities)
+    model = OpScheduleCPU(dim, 3, 128)
+    optimizer = torch.optim.Adadelta(model.parameters(), lr=LR)
+    model.train()
+    for i in range(epoch):
+        count = 0
+        acc_loss = 0.0
+        optimizer.zero_grad()
+        model.train()
+        while count < batch_size:
+            func = entities[p].func
+            args = entities[p].args
+            ops, bufs = func(*args)
+            s = tvm.create_schedule(ops)
+            pre_cost = evaluate(s, bufs, "llvm", np.random.randint(0, MAX_CPU), 10, timeout=60.0)
+            if not isinstance(ops, (list, tuple)):
+                ops = [ops]
+            bfs_order, down_graph = graph_analysis(ops)
+            group_points = []
+            for op in bfs_order:
+                if not isinstance(op, tvm.tensor.ComputeOp):
+                    continue
+                # if able_inline(op, down_graph):
+                # s[op].compute_inline()
+                else:
+                    group_points.append(op)
+            device = torch.device("cpu:0")
+            # improve = 1.0
+            # for op in group_points:
+            #     imp, _ = op_schedule_cpu_general_dx(dim, s, op, model, device, random=False)
+            #     improve = improve * (1 + imp)
+            improve, _ = op_schedule_cpu_general_dx(dim, s, group_points[0], model, device, random=False)
+            post_cost = evaluate(s, bufs, "llvm", np.random.randint(0, MAX_CPU), 10, timeout=60.0)
+            target = (pre_cost - post_cost) / pre_cost * 100
+            loss_one = C1 * torch.pow(improve - target, 2)
+            loss_two = C2 * torch.pow(100 - (improve + (target - improve).detach()), 2)
+            acc_loss = acc_loss + loss_one + loss_two
+            count += 1
+            p = (p + 1) % num_sample
+            print("    ({}, {}) part_one={}, part_two={}".format(float(improve.detach()), target, float(loss_one.detach()), float(loss_two.detach())))
+        acc_loss.backward()
+        optimizer.step()
+        torch.save(model.state_dict(), "models/test.pkl")
+        print("epoch={}, loss={}\n".format(i + 1, float(acc_loss.detach())), flush=True)
+        with open("train_test.log", "a") as f:
+            f.write("epoch={}, loss={}\n".format(i + 1, float(acc_loss.detach())))
+        model.eval()
+        for entity in entities:
+            func = entity.func
+            args = entity.args
+            ops, bufs = func(*args)
+            s = tvm.create_schedule(ops)
+            if not isinstance(ops, (list, tuple)):
+                ops = [ops]
+            bfs_order, down_graph = graph_analysis(ops)
+            group_points = []
+            for op in bfs_order:
+                if not isinstance(op, tvm.tensor.ComputeOp):
+                    continue
+                # if able_inline(op, down_graph):
+                # s[op].compute_inline()
+                else:
+                    group_points.append(op)
+            device = torch.device("cpu:0")
+            # improve = 1.0
+            # for op in group_points:
+            #     imp, _ = op_schedule_cpu_general_dx(dim, s, op, model, device, random=False)
+            #     improve = improve * (1 + imp)
+            op_schedule_cpu_general_dx(dim, s, group_points[0], model, device, random=False)
+            time_cost = evaluate(s, bufs, "llvm", np.random.randint(0, MAX_CPU), 10, timeout=60.0)
+            print("{}{} use {}ms\n".format(func.__name__, args, time_cost))
 
 
 if __name__ == "__main__":
-    matmul, args = FUNC_TABLE["conv2d"].func, FUNC_TABLE["conv2d"].args
-    scheduler = NaturalScheduler(type='random', batch_size=64)
-    train_single_operator(matmul, args, scheduler, "llvm", CPU_MSG)
+    entities = []
+    # func = FUNC_TABLE["conv2d_channel_batch"].func
+    # args = (1, 224, 224, 3, 3, 3, 4, 1, 1)
+    # entities.append(Entity(func, args))
+    func = FUNC_TABLE["matmul_batch"].func
+    args = (1, 1024, 1024, 1024)
+    entities.append(Entity(func, args))
+    train_op_schedule_cpu_general_dx(entities, 20, 4)

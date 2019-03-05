@@ -4,6 +4,10 @@ from collections import deque
 from auto_schedule.utils import to_int, to_tuple, split_part_names
 
 
+NODE_LST = []
+NODE_TABLE = dict()
+
+
 class ASTNode(object):
     def __init__(self, children_number):
         self.parent = None
@@ -50,11 +54,14 @@ class ForNode(ASTNode):
         return clone_self
 
     def __eq__(self, other):
-        return isinstance(other, ForNode) and other.children[0].var_name == self.children[0].var_name \
-            and other.children[2].value == self.children[2].value
+        return isinstance(other, ForNode) and self.children[0].var_name == other.children[0].var_name and self.children[
+            2].value == self.children[2].value
 
     def __ne__(self, other):
         return not self == other
+
+
+NODE_LST.append(ForNode)
 
 
 class SeqNode(ASTNode):
@@ -68,6 +75,9 @@ class SeqNode(ASTNode):
         return clone_self
 
 
+NODE_LST.append(SeqNode)
+
+
 class BchNode(ASTNode):
     def __init__(self, c, body_true, body_false):
         super(BchNode, self).__init__(3)
@@ -78,6 +88,9 @@ class BchNode(ASTNode):
     def clone(self):
         clone_self = BchNode(None, None, None)
         return clone_self
+
+
+NODE_LST.append(BchNode)
 
 
 class FltNode(ASTNode):
@@ -95,6 +108,9 @@ class FltNode(ASTNode):
         print(indent, self.value, "(float)")
 
 
+NODE_LST.append(FltNode)
+
+
 class IntNode(ASTNode):
     def __init__(self, val):
         super(IntNode, self).__init__(0)
@@ -108,6 +124,9 @@ class IntNode(ASTNode):
 
     def print(self, indent):
         print(indent, self.value, "(int)")
+
+
+NODE_LST.append(IntNode)
 
 
 class BinNode(ASTNode):
@@ -126,9 +145,15 @@ class AddNode(BinNode):
         super(AddNode, self).__init__(l, r)
 
 
+NODE_LST.append(AddNode)
+
+
 class SubNode(BinNode):
     def __init__(self, l, r):
         super(SubNode, self).__init__(l, r)
+
+
+NODE_LST.append(SubNode)
 
 
 class MulNode(BinNode):
@@ -136,9 +161,15 @@ class MulNode(BinNode):
         super(MulNode, self).__init__(l, r)
 
 
+NODE_LST.append(MulNode)
+
+
 class DivNode(BinNode):
     def __init__(self, l, r):
         super(DivNode, self).__init__(l, r)
+
+
+NODE_LST.append(DivNode)
 
 
 class AndNode(BinNode):
@@ -146,9 +177,15 @@ class AndNode(BinNode):
         super(AndNode, self).__init__(l, r)
 
 
-class OrNode(BinNode):
+NODE_LST.append(AndNode)
+
+
+class LorNode(BinNode):
     def __init__(self, l, r):
-        super(OrNode, self).__init__(l, r)
+        super(LorNode, self).__init__(l, r)
+
+
+NODE_LST.append(LorNode)
 
 
 class NotNode(ASTNode):
@@ -161,9 +198,15 @@ class NotNode(ASTNode):
         return clone_self
 
 
+NODE_LST.append(NotNode)
+
+
 class IncNode(BinNode):
     def __init__(self, l, r):
         super(IncNode, self).__init__(l, r)
+
+
+NODE_LST.append(IncNode)
 
 
 class EqlNode(BinNode):
@@ -171,9 +214,15 @@ class EqlNode(BinNode):
         super(EqlNode, self).__init__(l, r)
 
 
+NODE_LST.append(EqlNode)
+
+
 class EeqNode(BinNode):
     def __init__(self, l, r):
         super(EeqNode, self).__init__(l, r)
+
+
+NODE_LST.append(EeqNode)
 
 
 class NeqNode(BinNode):
@@ -181,9 +230,15 @@ class NeqNode(BinNode):
         super(NeqNode, self).__init__(l, r)
 
 
+NODE_LST.append(NeqNode)
+
+
 class LeqNode(BinNode):
     def __init__(self, l, r):
         super(LeqNode, self).__init__(l, r)
+
+
+NODE_LST.append(LeqNode)
 
 
 class LesNode(BinNode):
@@ -191,14 +246,23 @@ class LesNode(BinNode):
         super(LesNode, self).__init__(l, r)
 
 
+NODE_LST.append(LesNode)
+
+
 class GeqNode(BinNode):
     def __init__(self, l, r):
         super(GeqNode, self).__init__(l, r)
 
 
+NODE_LST.append(GeqNode)
+
+
 class GreNode(BinNode):
     def __init__(self, l, r):
         super(GreNode, self).__init__(l, r)
+
+
+NODE_LST.append(GreNode)
 
 
 class VstNode(ASTNode):
@@ -224,6 +288,9 @@ class VstNode(ASTNode):
         return clone_self
 
 
+NODE_LST.append(VstNode)
+
+
 class VarNode(ASTNode):
     def __init__(self, var_name):
         super(VarNode, self).__init__(0)
@@ -235,6 +302,9 @@ class VarNode(ASTNode):
 
     def print(self, indent):
         print(indent, self.var_name)
+
+
+NODE_LST.append(VarNode)
 
 
 class OprNode(ASTNode):
@@ -250,14 +320,26 @@ class OprNode(ASTNode):
         print(indent, self.op)
 
 
+NODE_LST.append(OprNode)
+
+
 class NopNode(ASTNode):
-    def __init__(self, tree_root):
+    def __init__(self, op, tree_root):
         super(NopNode, self).__init__(1)
         self.set_child(tree_root, 0)
+        self.op = op
 
     def clone(self):
-        clone_self = NopNode(None)
+        clone_self = NopNode(self.op, None)
         return clone_self
+
+
+NODE_LST.append(NopNode)
+
+
+# from Node class to label
+for i, NODE in enumerate(NODE_LST):
+    NODE_TABLE[NODE] = i
 
 
 class AST(object):
@@ -345,18 +427,21 @@ class AST(object):
         while all_node_lst[p] != later_last_spatial:
             all_node_lst[p].set_child(all_node_lst[p + 1], 3)
             p += 1
+        p += 1
         if p < len(all_node_lst):   # has reduce for nodes
             assert isinstance(spatial_end_body, SeqNode)
             later_last_spatial.set_child(spatial_end_body, 3)
-            spatial_end_body.set_child(all_node_lst[p + 1], 1)
-            p += 1
+            spatial_end_body.set_child(all_node_lst[p], 1)
             while p < len(all_node_lst) - 1:
                 all_node_lst[p].set_child(all_node_lst[p + 1], 3)
                 p += 1
             all_node_lst[p].set_child(end_body, 3)
         else:
-            assert spatial_end_body == end_body
-            later_last_spatial.set_child(spatial_end_body, 3)
+            if isinstance(spatial_end_body, SeqNode):
+                later_last_spatial.set_child(spatial_end_body, 3)
+                spatial_end_body.set_child(end_body, 1)
+            else:
+                later_last_spatial.set_child(end_body, 3)
         self.root.set_child(all_node_lst[0], 0)
 
     def clone(self):
@@ -377,6 +462,57 @@ class AST(object):
         if isinstance(clone_node, ForNode):
             loop_msg[clone_node.children[0].var_name] = clone_node
         return clone_node
+
+    def flatten(self, loop_msg_dict, op=None):
+        flattened = []
+        if op is None:
+            cur_op = None
+            self._recursive_flatten(cur_op, self.root, loop_msg_dict, flattened)
+        else:
+            assert isinstance(op, AST)
+            cur_op = op.root.op
+            self._recursive_flatten(cur_op, op.root, loop_msg_dict, flattened)
+        return flattened
+
+    def _recursive_flatten(self, op, root, loop_msg_dict, flattened):
+        if root is None:
+            return
+        assert isinstance(root, ASTNode)
+        if isinstance(root, NopNode):
+            op = root.op
+        flattened.append(root)
+        if isinstance(root, VarNode) and not isinstance(root.parent, ForNode):
+            for_node = loop_msg_dict[op].for_node_dict[root.var_name]
+            position = loop_msg_dict[op].iter_var_names.index(root.var_name)
+            flattened.append(IntNode(position))
+            flattened.append(IntNode(for_node.children[2].value))
+        for child in root.children:
+            self._recursive_flatten(op, child, loop_msg_dict, flattened)
+
+    def collect_iter_var_feature(self, loop_msg, sub_tree, iter_var_name):
+        feature = []
+        self._recursive_collect_feature(sub_tree.root, loop_msg, iter_var_name, feature)
+        return feature
+
+    def _recursive_collect_feature(self, root, loop_msg, iter_var_name, feature):
+        if root is None:
+            return False
+        if isinstance(root, VarNode) and root.var_name == iter_var_name:
+            feature.append(root)
+            for_node = loop_msg.for_node_dict[iter_var_name]
+            feature.append(IntNode(for_node.children[2].value))
+            feature.append(IntNode(loop_msg.iter_var_names.index(iter_var_name)))
+            return True
+        flag = False
+        for child in root.children:
+            if self._recursive_collect_feature(child, loop_msg, iter_var_name, feature):
+                flag = True
+        if flag:
+            for child in root.children:
+                if child is not None:
+                    feature.append(child)
+            return True and not isinstance(root, (ForNode, SeqNode, BchNode, VstNode))
+        return False
 
     @classmethod
     def concat_subtree(cls, tree_lst):
@@ -433,6 +569,10 @@ class LoopMessage(object):
     def get_for_node(self, iter_var_name):
         assert iter_var_name in self.iter_var_names
         return self.for_node_dict[iter_var_name]
+
+    def get_iter_var_extent(self, iter_var_name):
+        assert iter_var_name in self.iter_var_names
+        return self.for_node_dict[iter_var_name].children[2].value
 
     def is_reduce(self, iter_var_name):
         assert iter_var_name in self.iter_var_names
@@ -542,15 +682,19 @@ class Action(object):
     def apply(self, *args, **kwargs):
         raise NotImplementedError()
 
+    def to_json(self, *args):
+        raise NotImplementedError()
+
 
 class Split(Action):
-    def __init__(self, op, iter_var_name, factor):
+    def __init__(self, op, iter_var_name, factor, reduce=False):
         super(Split, self).__init__(op)
         self.iter_var_name = iter_var_name
         self.factor = factor
+        self.reduce = reduce
 
     def clone(self):
-        clone_self = Split(self.op, self.iter_var_name, self.factor)
+        clone_self = Split(self.op, self.iter_var_name, self.factor, self.reduce)
         return clone_self
 
     def apply(self, env):
@@ -558,6 +702,19 @@ class Split(Action):
         iter_var = loop_msg.get_iter_var(self.iter_var_name)
         outer, inner = env.sch[self.op].split(iter_var, factor=self.factor)
         return [outer, inner]
+
+    def to_json(self, op_order_dict):
+        return {
+            "type": "split",
+            "op": op_order_dict[self.op],
+            "axis": self.iter_var_name,
+            "factor": self.factor,
+            "reduce": self.reduce
+                }
+
+    def __str__(self):
+        ret = "split(" + str(self.op) + ", " + self.iter_var_name + ", " + str(self.factor) + ")"
+        return ret
 
 
 class Reorder(Action):
@@ -577,9 +734,213 @@ class Reorder(Action):
         env.sch[self.op].reorder(*iter_var_lst)
         return self.iter_var_name_lst
 
+    def __str__(self):
+        ret = "reorder(" + str(self.op) + ", " + ", ".join(self.iter_var_name_lst) + ")"
+        return ret
+
+    def to_json(self, op_order_dict):
+        return {
+            "type": "reorder",
+            "op": op_order_dict[self.op],
+            "axis_lst": self.iter_var_name_lst
+        }
+
+
+class Fuse(Action):
+    def __init__(self, op, iter_var_name_lst):
+        super(Fuse, self).__init__(op)
+        self.iter_var_name_lst = iter_var_name_lst
+
+    def clone(self):
+        clone_self = Fuse(self.op, self.iter_var_name_lst)
+        return clone_self
+
+    def apply(self, env):
+        loop_msg = env.loop_msg_dict[self.op]
+        iter_var_lst = []
+        for iter_var_name in self.iter_var_name_lst:
+            iter_var = loop_msg.get_iter_var(iter_var_name)
+            iter_var_lst.append(iter_var)
+        fused_iter_var = env.sch[self.op].fuse(*iter_var_lst)
+        return fused_iter_var
+
+    def __str__(self):
+        ret = "fuse(" + str(self.op) + ", ".join(self.iter_var_name_lst) + ")"
+        return ret
+
+    def to_json(self, op_order_dict):
+        return {
+            "type": "fuse",
+            "op": op_order_dict[self.op],
+            "axis_lst": self.iter_var_name_lst
+        }
+
+
+class ComputeAt(Action):
+    def __init__(self, op, next_op, iter_var_name):
+        super(ComputeAt, self).__init__(op)
+        self.next_op = next_op
+        self.iter_var_name = iter_var_name
+
+    def clone(self):
+        clone_self = ComputeAt(self.op, self.next_op, self.iter_var_name)
+        return clone_self
+
+    def apply(self, env):
+        next_loop_msg = env.loop_msg_dict[self.next_op]
+        iter_var = next_loop_msg.get_iter_var(self.iter_var_name)
+        env.sch[self.op].compute_at(env.sch[self.next_op], iter_var)
+
+    def __str__(self):
+        ret = "compute_at(" + str(self.op) + ", " + str(self.next_op) + ", " + self.iter_var_name + ")"
+        return ret
+
+    def to_json(self, op_order_dict):
+        return {
+            "type": "compute_at",
+            "op": op_order_dict[self.op],
+            "next_op": self.next_op,
+            "axis": self.iter_var_name
+        }
+
+
+class ComputeInline(Action):
+    def __init__(self, op):
+        super(ComputeInline, self).__init__(op)
+
+    def clone(self):
+        clone_self = ComputeInline(self.op)
+        return clone_self
+
+    def apply(self, env):
+        env.sch[self.op].compute_inline()
+
+    def __str__(self):
+        ret = "compute_inline(" + str(self.op) + ")"
+        return ret
+
+    def to_json(self, op_order_dict):
+        return {
+            "type": "compute_inline",
+            "op": op_order_dict[self.op],
+        }
+
+
+class Parallel(Action):
+    def __init__(self, op, iter_var_name):
+        super(Parallel, self).__init__(op)
+        self.iter_var_name = iter_var_name
+
+    def clone(self):
+        clone_self = Parallel(self.op, self.iter_var_name)
+        return clone_self
+
+    def apply(self, env):
+        loop_msg = env.loop_msg_dict[self.op]
+        iter_var = loop_msg.get_iter_var(self.iter_var_name)
+        env.sch[self.op].parallel(iter_var)
+
+    def __str__(self):
+        ret = "parallel(" + str(self.op) + ", " + self.iter_var_name + ")"
+        return ret
+
+    def to_json(self, op_order_dict):
+        return {
+            "type": "parallel",
+            "op": op_order_dict[self.op],
+            "axis": self.iter_var_name
+        }
+
+
+class Unroll(Action):
+    def __init__(self, op, iter_var_name):
+        super(Unroll, self).__init__(op)
+        self.iter_var_name = iter_var_name
+
+    def clone(self):
+        clone_self = Unroll(self.op, self.iter_var_name)
+        return clone_self
+
+    def apply(self, env):
+        loop_msg = env.loop_msg_dict[self.op]
+        iter_var = loop_msg.get_iter_var(self.iter_var_name)
+        env.sch[self.op].unroll(iter_var)
+
+    def __str__(self):
+        ret = "unroll(" + str(self.op) + ", " + self.iter_var_name + ")"
+        return ret
+
+    def to_json(self, op_order_dict):
+        return {
+            "type": "unroll",
+            "op": op_order_dict[self.op],
+            "axis": self.iter_var_name
+        }
+
+
+class Vectorize(Action):
+    def __init__(self, op, iter_var_name):
+        super(Vectorize, self).__init__(op)
+        self.iter_var_name = iter_var_name
+
+    def clone(self):
+        clone_self = Vectorize(self.op, self.iter_var_name)
+        return clone_self
+
+    def apply(self, env):
+        loop_msg = env.loop_msg_dict[self.op]
+        iter_var = loop_msg.get_iter_var(self.iter_var_name)
+        env.sch[self.op].vectorize(iter_var)
+
+    def __str__(self):
+        ret = "vectorize(" + str(self.op) + ", " + self.iter_var_name + ")"
+        return ret
+
+    def to_json(self, op_order_dict):
+        return {
+            "type": "vectorize",
+            "op": op_order_dict[self.op],
+            "axis": self.iter_var_name
+        }
+
+
+class Bind(Action):
+    def __init__(self, op):
+        super(Bind, self).__init__(op)
+
+    def clone(self):
+        pass
+
+    def apply(self, *args, **kwargs):
+        pass
+
+
+class CacheRead(Action):
+    def __init__(self, op):
+        super(CacheRead, self).__init__(op)
+
+    def clone(self):
+        pass
+
+    def apply(self, *args, **kwargs):
+        pass
+
+
+class CacheWrite(Action):
+    def __init__(self, op):
+        super(CacheWrite, self).__init__(op)
+
+    def clone(self):
+        pass
+
+    def apply(self, *args, **kwargs):
+        pass
+
 
 class Environment(object):
-    def __init__(self, ops):
+    def __init__(self, compute_name, args, ops):
+        self.compute_name = compute_name
+        self.args = args
         self.ops = ops
         self.sch = None
         self.tree = None
@@ -625,52 +986,66 @@ class Environment(object):
         assert isinstance(action, Action)
         self.action_lst.append(action)
 
-    def take_action(self, action):
-        clone_self = self.clone()
+    def take_action(self, action, no_clone=True):
+        if no_clone:
+            clone_self = self
+        else:
+            clone_self = self.clone()
         clone_self.add_action(action)
         if isinstance(action, Split):
             clone_self.split(action)
         elif isinstance(action, Reorder):
             clone_self.reorder(action)
+        elif isinstance(action, ComputeAt):
+            clone_self.compute_at(action)
+        elif isinstance(action, ComputeInline):
+            clone_self.compute_inline(action)
+        elif isinstance(action, Parallel):
+            clone_self.parallel(action)
+        elif isinstance(action, Unroll):
+            clone_self.unroll(action)
+        elif isinstance(action, Vectorize):
+            clone_self.vectorize(action)
+        elif isinstance(action, Bind):
+            clone_self.bind(action)
+        elif isinstance(action, CacheRead):
+            clone_self.cache_read(action)
+        elif isinstance(action, CacheWrite):
+            clone_self.cache_write(action)
         else:
-            raise NotImplementedError()
+            raise NotImplementedError("No support for {} in tvm".format(str(action)))
         return clone_self
 
+    def get_iter_var_extent(self, op, iter_var_name):
+        assert isinstance(iter_var_name, str)
+        return self.loop_msg_dict[op].get_iter_var_extent(iter_var_name)
+
     def clone(self):
-        clone_self = build_environment(self.ops)
-        count = 0
+        clone_self = build_environment(self.compute_name, self.args, self.ops)
         for act in self.action_lst:
             clone_self.add_action(act)
             if isinstance(act, Split):
                 clone_self.split(act)
             elif isinstance(act, Reorder):
                 clone_self.reorder(act)
+            elif isinstance(act, ComputeAt):
+                clone_self.compute_at(act)
+            elif isinstance(act, ComputeInline):
+                clone_self.compute_inline(act)
+            elif isinstance(act, Parallel):
+                clone_self.parallel(act)
+            elif isinstance(act, Unroll):
+                clone_self.unroll(act)
+            elif isinstance(act, Vectorize):
+                clone_self.vectorize(act)
+            elif isinstance(act, Bind):
+                clone_self.bind(act)
+            elif isinstance(act, CacheRead):
+                clone_self.cache_read(act)
+            elif isinstance(act, CacheWrite):
+                clone_self.cache_write(act)
             else:
-                raise NotImplementedError()
-        return clone_self
-
-    def old_clone(self):
-        clone_sch = tvm.create_schedule(self.ops)
-        clone_tree, for_node_loop_msg = self.tree.clone()
-        clone_ref = self.ref.clone()
-        clone_self = Environment(self.ops)
-        clone_self.set_schedule(clone_sch)
-        clone_self.set_tree(clone_tree)
-        clone_self.set_ref(clone_ref)
-        clone_self.initial_loop_msg_dict = self.initial_loop_msg_dict
-        for op, loop_msg in self.initial_loop_msg_dict.items():
-            clone_self.loop_msg_dict[op] = loop_msg.clone()
-        for act in self.action_lst:
-            clone_self.add_action(act)
-            res = act.apply(clone_self)
-            if isinstance(act, Split):
-                clone_self.loop_msg_dict[act.op].update_iter_var_lst_only(act.iter_var_name, res)
-            elif isinstance(act, Reorder):
-                clone_self.loop_msg_dict[act.op].reorder(res)
-            else:
-                raise NotImplementedError()
-        for op, loop_msg in clone_self.loop_msg_dict.items():
-            loop_msg.update_for_node_dict_once(self.loop_msg_dict[op].reduce_set, for_node_loop_msg)
+                raise NotImplementedError("No support for {} in tvm".format(str(act)))
         return clone_self
 
     def split(self, action):
@@ -691,6 +1066,53 @@ class Environment(object):
         action.apply(self)
         self.loop_msg_dict[op].reorder(iter_var_name_lst)
         return self
+
+    def compute_at(self, action):
+        op = action.op
+        next_op = action.next_op
+        iter_var_name = action.iter_var_name
+        sub_tree = self.ref.get(op)
+        next_sub_tree = self.ref.get(next_op)
+        sub_tree.compute_at(next_sub_tree, iter_var_name)
+
+    def compute_inline(self, action):
+        raise NotImplementedError()
+
+    def parallel(self, action):
+        raise NotImplementedError()
+
+    def unroll(self, action):
+        raise NotImplementedError()
+
+    def vectorize(self, action):
+        raise NotImplementedError()
+
+    def bind(self, action):
+        raise NotImplementedError()
+
+    def cache_read(self, action):
+        raise NotImplementedError()
+
+    def cache_write(self, action):
+        raise NotImplementedError()
+
+    def flatten_tree(self, op=None):
+        if isinstance(op, tvm.tensor.ComputeOp):
+            return self.tree.flatten(self.loop_msg_dict, self.ref.get(op))
+        else:
+            return self.tree.flatten(self.loop_msg_dict, None)
+
+    def collect_iter_var_feature(self, op, axis):
+        loop_msg = self.loop_msg_dict[op]
+        sub_tree = self.ref.get(op)
+        return self.tree.collect_iter_var_feature(loop_msg, sub_tree, axis)
+
+    def to_json(self, op_order_dict):
+        return {
+            "compute_name": self.compute_name,
+            "args": str(self.args),
+            "actions": [act.to_json(op_order_dict) for act in self.action_lst]
+        }
 
     def print(self, tree=False):
         if tree:
@@ -735,7 +1157,7 @@ def recursive_collect_all_for_nodes(root, result):
             recursive_collect_all_for_nodes(child, result)
 
 
-def bfs_traverse(ops):
+def bfs_traverse(ops, reverse=True):
     ret = []
     visited = set()
     q = deque()
@@ -749,16 +1171,17 @@ def bfs_traverse(ops):
             if t.op not in visited:
                 q.append(t.op)
                 visited.add(t.op)
-    ret = list(reversed(ret))   # from input to output
+    if reverse:
+        ret = list(reversed(ret))   # from input to output
     return ret
 
 
-def build_environment(ops):
+def build_environment(compute_name, args, ops):
     if not isinstance(ops, (list, tuple)):
         ops = [ops]
     s = tvm.create_schedule(ops)
     op_lst = bfs_traverse(ops)
-    env = Environment(ops)
+    env = Environment(compute_name, args, ops)
     sub_tree_lst = []
     ref_msg = Reference()
     for op in op_lst:
@@ -846,7 +1269,7 @@ def build_single_operation_tree(op, ref_msg):
                 sub_tree_lst.append(sub_tree)
             right_sub_tree = AST.concat_subtree(sub_tree_lst)
             loop_lst[-1].set_child(right_sub_tree.root, 3)
-        nop_node = NopNode(loop_lst[0])
+        nop_node = NopNode(op, loop_lst[0])
         tree.set_root(nop_node)
         ref_msg.add(op, tree)
         return tree, loop_msg
@@ -922,7 +1345,7 @@ def build_or_tree(or_expr):
     tree = AST()
     left_tree = build_expr_tree(or_expr.a)
     right_tree = build_expr_tree(or_expr.b)
-    or_node = OrNode(left_tree.root, right_tree.root)
+    or_node = LorNode(left_tree.root, right_tree.root)
     tree.set_root(or_node)
     return tree
 
@@ -1070,16 +1493,3 @@ def build_statement_tree(op, vst_tree, pos, reduce=False):
         eql_node = EqlNode(vst_tree.root, expr_tree.root)
         tree.set_root(eql_node)
     return tree
-
-
-if __name__ == "__main__":
-    from auto_schedule.training_examples import FUNC_TABLE
-    conv2d = FUNC_TABLE["conv3d_channel_batch"].func
-    args = FUNC_TABLE["conv3d_channel_batch"].args
-    ops, bufs = conv2d(*args)
-    env = build_environment(ops)
-    new_env = env.take_action(Split(ops, ops.axis[1].var.name, 8))
-    new_env = new_env.take_action(Reorder(ops, ["j", "i.0", "b", "i.1"]))
-    new_env = new_env.take_action(Split(ops, "i.0", 8))
-    new_env = new_env.take_action(Reorder(ops, ["rx", "j", "ry", "b", "rc"]))
-    new_env.print()
