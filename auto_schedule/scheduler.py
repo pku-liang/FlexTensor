@@ -5,7 +5,7 @@ import math
 import time
 import multiprocessing as multi
 from auto_schedule.utils import to_tuple, permute, interleave, gen_group
-from auto_schedule.models import OpScheduleCPU, ScheduleModel
+from auto_schedule.models import OpScheduleCPUd5, ScheduleModel
 from collections import deque
 
 
@@ -528,8 +528,8 @@ class Schedule(object):
         self.schedule_diary = None
 
 
-def op_schedule_cpu_general_dx(dim, s, op, model, device, random=False):
-    improve_lst = []
+def op_schedule_cpu_general_dx(dim, s, op, model, random=False, sampling=True):
+    ret_dict = dict()
     record = Record()
     if len(op.body) != 1:
         raise ValueError("only support one output operation")
@@ -570,7 +570,7 @@ def op_schedule_cpu_general_dx(dim, s, op, model, device, random=False):
         cha = dim - len(tmp)
         if cha < 0:
             raise ValueError("Dimension of Operation should <= {}".format(dim))
-        input_shapes[t.op.name] = [1] * cha + tmp
+        input_shapes[t.op.name] = [1] * cha + [x for x in tmp]
     # align
     # spatial
     cha = dim - len(op.axis)
@@ -600,14 +600,14 @@ def op_schedule_cpu_general_dx(dim, s, op, model, device, random=False):
         reduce_iter_var_dict[iter_var.var.name] = i + cha
     # spatial split
     split_candidates = spatial_axis_names
-    split_decision, improve = model("spatial", split_candidates, spatial_axis_extents, iter_var_feature, input_shapes, device, random)
-    improve_lst.append(improve)
+    split_decision, value_lst = model("spatial", split_candidates, spatial_axis_extents, iter_var_feature, input_shapes, random, sampling)
+    ret_dict["spatial"] = value_lst
     spatial_split_factors = [f for f in split_decision]
     spatial_outer_extents = [math.ceil(spatial_axis_extents[i] / spatial_split_factors[i]) for i in range(dim)]
     # reduce
     reduce_candidates = reduce_axis_names
-    split_decision, improve = model("reduce", reduce_candidates, reduce_axis_extents, iter_var_feature, input_shapes, device, random)
-    improve_lst.append(improve)
+    split_decision, value_lst = model("reduce", reduce_candidates, reduce_axis_extents, iter_var_feature, input_shapes, random, sampling)
+    ret_dict["reduce"] = value_lst
     reduce_split_factors = [f for f in split_decision]
     reduce_outer_extents = [math.ceil(reduce_axis_extents[i] / reduce_split_factors[i]) for i in range(dim)]
     # reorder
@@ -617,14 +617,16 @@ def op_schedule_cpu_general_dx(dim, s, op, model, device, random=False):
     for i in range(dim):
         part_one_extents[part_one_iter_var_names[i]] = spatial_outer_extents[i]
     reorder_candidates = permute(part_one_iter_var_names)
-    reorder_decision, improve = model("reorder_one", reorder_candidates, part_one_extents, iter_var_feature, input_shapes, device, random)
-    improve_lst.append(improve)
+    reorder_choice, logits = model("reorder_one", part_one_iter_var_names, part_one_extents, iter_var_feature, input_shapes, random, sampling)
+    ret_dict["reorder_one"] = logits
+    reorder_decision = reorder_candidates[reorder_choice]
     part_one_order = reorder_decision
     # parallel
     parallel_candidates = gen_group(reorder_decision, padding="none")
     parallel_extents = part_one_extents
-    parallel_decision, improve = model("parallel", parallel_candidates, parallel_extents, iter_var_feature, input_shapes, device, random)
-    improve_lst.append(improve)
+    parallel_choice, logits = model("parallel", reorder_decision, parallel_extents, iter_var_feature, input_shapes, random, sampling)
+    parallel_decision = parallel_candidates[parallel_choice]
+    ret_dict["parallel"] = logits
     use_parallel = [True if dec != "none" else False for dec in parallel_decision]
     # part two
     part_two_iter_var_names = ["none" if reduce_outer_extents[i] == 1 else reduce_axis_names[i] for i in range(dim)]
@@ -632,8 +634,9 @@ def op_schedule_cpu_general_dx(dim, s, op, model, device, random=False):
     for i in range(dim):
         part_two_extents[part_two_iter_var_names[i]] = reduce_outer_extents[i]
     reorder_candidates = permute(part_two_iter_var_names)
-    reorder_decision, improve = model("reorder_two", reorder_candidates, part_two_extents, iter_var_feature, input_shapes, device, random)
-    improve_lst.append(improve)
+    reorder_choice, logits = model("reorder_two", part_two_iter_var_names, part_two_extents, iter_var_feature, input_shapes, random, sampling)
+    reorder_decision = reorder_candidates[reorder_choice]
+    ret_dict["reorder_two"] = logits
     part_two_order = reorder_decision
     # part three
     part_three_names_a = ["none" if spatial_split_factors[i] == 1 else spatial_axis_names[i] for i in range(dim)]
@@ -643,10 +646,12 @@ def op_schedule_cpu_general_dx(dim, s, op, model, device, random=False):
     for i in range(dim):
         part_three_extents[part_three_names_a[i]] = spatial_split_factors[i]
         part_three_extents[part_three_names_b[i]] = reduce_split_factors[i]
-    reorder_decision, improve = model("reorder_three", reorder_candidates, part_three_extents, iter_var_feature, input_shapes, device, random)
-    improve_lst.append(improve)
+    reorder_choice, logits = model("reorder_three", part_three_names_a + part_three_names_b, part_three_extents, iter_var_feature, input_shapes, random, sampling)
+    reorder_decision = reorder_candidates[reorder_choice]
+    ret_dict["reorder_three"] = logits
     part_three_order = reorder_decision
 
+    # record the diary
     diary = []
     diary.append(spatial_outer_extents)
     diary.append(spatial_split_factors)
@@ -785,9 +790,7 @@ def op_schedule_cpu_general_dx(dim, s, op, model, device, random=False):
         p -= 1
     if p >= 0:
         s[LocalCache].unroll(real_order[p])
-    improve = sum(improve_lst)
-    print("check", [float(x.detach()) for x in improve_lst], " improve=", float(improve.detach()))
-    return improve, diary
+    return ret_dict, diary
 
 
 def able_inline(op, down_graph):
@@ -801,7 +804,7 @@ def able_inline(op, down_graph):
     return is_compute and (not has_reduce) and (not is_output)
 
 
-def graph_schedule_cpu_general_dx(dim, s, ops, model_path, random=False):
+def graph_schedule_cpu_general_dx(dim, s, ops, model_path, random=False, sampling=True):
     if not isinstance(ops, (list, tuple)):
         ops = [ops]
     bfs_order, down_graph = graph_analysis(ops)
@@ -809,15 +812,14 @@ def graph_schedule_cpu_general_dx(dim, s, ops, model_path, random=False):
     for op in bfs_order:
         if not isinstance(op, tvm.tensor.ComputeOp):
             continue
-        # if able_inline(op, down_graph):
-            # s[op].compute_inline()
+        if able_inline(op, down_graph):
+            s[op].compute_inline()
         else:
             group_points.append(op)
-    device = torch.device("cpu:0")
-    model = OpScheduleCPU(dim, 3, 128)
+    model = OpScheduleCPUd5(3, 128)
     model.load_state_dict(torch.load(model_path))
     model.eval()
-    _, diary = op_schedule_cpu_general_dx(dim, s, group_points[0], model, device, random)
+    _, diary = op_schedule_cpu_general_dx(dim, s, group_points[0], model, random, sampling)
     for ele in diary:
         print(ele)
     # for op in group_points:
@@ -1194,169 +1196,3 @@ def graph_schedule_gpu_specific_any(ops, target, model):
                         diary.append("{} bind {} {}".format(op.name, op_sch.threads_binds[i][0].var.name, "threadIdx.{}".format(["x", "y", "z"][i])))
     s.schedule_diary = diary
     return sch, s, total_improve
-
-
-def test_feature_extract():
-    from auto_schedule.training_examples import FUNC_TABLE
-    for name, compute in FUNC_TABLE.items():
-        print("#################################")
-        print(name)
-        func = compute.func
-        args = compute.args
-        ops, bufs = func(*args)
-        target = Target("llvm")
-        s = Schedule(ops, target)
-        for op, sch in s.op_schedule_dict.items():
-            print(op)
-            print("shape=", sch.shape)
-            print("is_compute=", sch.is_compute)
-            print("has_reduce=", sch.has_reduce)
-            print("able_inline=", sch.able_inline)
-            print("is_output=", sch.is_output)
-            print("next_num=", sch.next_num)
-            print("num_outputs=", sch.num_outputs)
-            print("output_tensors=", sch.output_tensors)
-            print("num_inputs=", sch.num_inputs)
-            print("input_tensors=", sch.input_tensors)
-            print("spatial_iter_var=", sch.org_spatial_iter_var_names)
-            print("reduce_iter_var=", sch.org_reduce_iter_var_names)
-            print("iter_var_feature=")
-            for var_name, fea in sch.iter_var_feature_dict.items():
-                print("    ", var_name, fea)
-            print("visited_by=")
-            for vop, vfea in sch.visit_feature.items():
-                print("    ", vop)
-                for (d, v) in vfea:
-                    print("    ", v)
-                    for name, l in d.items():
-                        print("    ", name, l)
-            print()
-
-
-def test_op_schedule():
-    from auto_schedule.training_examples import FUNC_TABLE
-    for name, compute in FUNC_TABLE.items():
-        if name in ["conv3d", "conv3d_batch", "conv3d_channel", "conv3d_channel_batch"]:
-            continue
-        print("#################################")
-        print(name)
-        func = compute.func
-        args = compute.args
-        print(args)
-        op, bufs = func(*args)
-        dim = 5
-        model = OpScheduleCPU(dim, 3, 128)
-        s = tvm.create_schedule(op)
-        # if torch.cuda.is_available():
-        #     device= torch.device("cuda:0")
-        #     model.cuda(device)
-        # else:
-        #     device = torch.device("cpu:0")
-
-        def count_parameters(model):
-            return sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(count_parameters(model))
-        device = torch.device("cpu:0")
-        lst, diary = op_schedule_cpu_general_dx(dim, s, op, model, device)
-        print(tvm.lower(s, bufs, simple_mode=True))
-        f = tvm.build(s, bufs, "llvm")
-        cost = evaluate(s, bufs, "llvm", np.random.randint(0, 8))
-        msg = "{}({}) is {}ms, pass!\n".format(name, args, cost)
-        print(msg)
-        for ele in diary:
-            print(ele)
-
-
-def robust_test(round=100):
-    from auto_schedule.training_examples import FUNC_TABLE
-    for i in range(round):
-        for name, compute in FUNC_TABLE.items():
-            if name in ["conv3d", "conv3d_batch", "conv3d_channel", "conv3d_channel_batch"]:
-                continue
-            func = compute.func
-            args = compute.args
-            op, bufs = func(*args)
-            dim = 5
-            model = OpScheduleCPU(dim, 3, 32)
-            s = tvm.create_schedule(op)
-            device = torch.device("cpu:0")
-            lst, diary = op_schedule_cpu_general_dx(dim, s, op, model, device, random=True)
-            try:
-                stmt = tvm.lower(s, bufs, simple_mode=True)
-                f = tvm.build(s, bufs, "llvm")
-                cost = evaluate(s, bufs, "llvm", np.random.randint(0, 8), timeout=0.003)
-                msg = "{}({}) is {}ms, pass!\n".format(name, args, cost)
-            except Exception as e:
-                msg = "{}({}) error!\n{}\n{}\n".format(name, args, str(e), diary)
-            with open("test_log.log", "a") as f:
-                f.write(msg)
-
-
-def test_graph_schedule_cpu_general_dx():
-    from auto_schedule.training_examples import FUNC_TABLE
-    print("#################################")
-    name = "conv2d_channel_batch"
-    func = FUNC_TABLE[name].func
-    args = (64, 7, 7, 128, 3, 3, 128, 1, 1)
-    print(args)
-    ops, bufs = func(*args)
-    dim = 5
-    s = tvm.create_schedule(ops)
-    graph_schedule_cpu_general_dx(dim, s, ops, "models/test.pkl", random=False)
-    # print(tvm.lower(s, bufs, simple_mode=True))
-    f = tvm.build(s, bufs, "llvm")
-    cost = evaluate(s, bufs, "llvm", np.random.randint(0, 8), timeout=60)
-    msg = "{}({}) is {}ms, pass!\n".format(name, args, cost)
-    print(msg)
-
-
-def test_graph_schedule_gpu_specific_any(number, type="cuda"):
-    import logging
-    from auto_schedule.training_examples import FUNC_TABLE
-    pass_logger = logging.getLogger("pass")
-    wrong_logger = logging.getLogger("wrong")
-    pass_logger.setLevel(logging.INFO)
-    wrong_logger.setLevel(logging.INFO)
-    pass_fh = logging.FileHandler("passed_test.log")
-    wrong_fh = logging.FileHandler("wrong_test.log")
-    pass_logger.addHandler(pass_fh)
-    wrong_logger.addHandler(wrong_fh)
-
-    matmul = FUNC_TABLE["matmul_batch"].func
-    matmul_args = (10, 100, 100, 100)
-    conv2d = FUNC_TABLE["conv2d_channel_batch"].func
-    conv_args = (256, 14, 14, 3, 1, 1, 3, 1, 0)
-    func_lst = [matmul, conv2d]
-    args_lst = [matmul_args, conv_args]
-    for j in range(number):
-        for i in range(2):
-            func = func_lst[i]
-            args = args_lst[i]
-            ops, bufs = func(*args)
-            model = ScheduleModel(2, 2, random=True)
-            if type == "cuda":
-                target = Target("cuda", bx=4, by=4, bz=4, tx=128, ty=32, tz=32)
-                target.turn_on('support_bind')
-            elif type == "llvm":
-                target = Target("llvm")
-            else:
-                raise ValueError("not support type: {}".format(type))
-            sch, s, improve = graph_schedule_gpu_specific_any(ops, target, model)
-            try:
-                time_cost = evaluate(sch, bufs, type, 1)
-                pass_logger.info("{}{} passed with time cost={}ms".format(func.__name__, args, time_cost))
-            except Exception as e:
-                stmt = tvm.lower(sch, bufs, simple_mode=True)
-                func = tvm.build(sch, bufs, "cuda")
-                msg = str(e)
-                schedule_diary = s.schedule_diary
-                wrong_logger.info("#################################")
-                wrong_logger.info(str(stmt))
-                wrong_logger.info(str(func.imported_modules[0].get_source()))
-                wrong_logger.info(msg)
-                for line in schedule_diary:
-                    wrong_logger.info("{}\n".format(line))
-
-
-if __name__ == "__main__":
-    test_graph_schedule_cpu_general_dx()

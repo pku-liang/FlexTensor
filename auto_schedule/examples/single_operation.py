@@ -50,7 +50,7 @@ def conv2d(N, M, K, L, stride=1, padding=0, dtype="float32"):
     N_out = max(0, (N + padding * 2 - K) // stride) + 1
     M_out = max(0, (M + padding * 2 - L) // stride) + 1
     Apad = tvm.compute((N + 2 * padding, M + 2 * padding),
-                       lambda i, j: tvm.select(tvm.all(i >= padding, j >= padding, i < N + padding, j < M + padding),
+                       lambda i, j: tvm.if_then_else(tvm.all(i >= padding, j >= padding, i < N + padding, j < M + padding),
                                                A[i - padding, j - padding], 0.0), name="Apad")
     rx, ry = tvm.reduce_axis((0, K), name="rx"), tvm.reduce_axis((0, L), name="ry")
     Output = tvm.compute((N_out, M_out),
@@ -66,7 +66,7 @@ def conv2d_batch(B, N, M, K, L, stride=1, padding=0, dtype="float32"):
     N_out = max(0, (N + padding * 2 - K) // stride) + 1
     M_out = max(0, (M + padding * 2 - L) // stride) + 1
     Apad = tvm.compute((B, N + 2 * padding, M + 2 * padding),
-                       lambda b, i, j: tvm.select(tvm.all(i >= padding, j >= padding, i < N + padding, j < M + padding),
+                       lambda b, i, j: tvm.if_then_else(tvm.all(i >= padding, j >= padding, i < N + padding, j < M + padding),
                                                   A[b, i - padding, j - padding], 0.0), name="Apad")
     rx, ry = tvm.reduce_axis((0, K), name="rx"), tvm.reduce_axis((0, L), name="ry")
     Output = tvm.compute((B, N_out, M_out),
@@ -82,7 +82,7 @@ def conv2d_channel(N, M, C, K, L, O, stride=1, padding=0, dtype="float32"):
     N_out = max(0, (N + padding * 2 - K) // stride) + 1
     M_out = max(0, (M + padding * 2 - L) // stride) + 1
     Apad = tvm.compute((N + 2 * padding, M + 2 * padding, C),
-                       lambda i, j, k: tvm.select(tvm.all(i >= padding, j >= padding, i < N + padding, j < M + padding),
+                       lambda i, j, k: tvm.if_then_else(tvm.all(i >= padding, j >= padding, i < N + padding, j < M + padding),
                                                A[i - padding, j - padding, k], 0.0), name="Apad")
     rx, ry = tvm.reduce_axis((0, K), name="rx"), tvm.reduce_axis((0, L), name="ry")
     rc = tvm.reduce_axis((0, C), name="rc")
@@ -95,20 +95,20 @@ def conv2d_channel(N, M, C, K, L, O, stride=1, padding=0, dtype="float32"):
 
 @register(args=(16, 32, 32, 3, 5, 5, 10, 1, 2))
 def conv2d_channel_batch(B, N, M, C, K, L, O, stride=1, padding=0, dtype="float32"):
-    A = tvm.placeholder((B, N, M, C), dtype=dtype, name="A")
+    Apad = tvm.placeholder((B, N + 2 * padding, M + 2 * padding, C), dtype=dtype, name="Apad")
     W = tvm.placeholder((K, L, C, O), dtype=dtype, name="W")
     N_out = max(0, (N + padding * 2 - K) // stride) + 1
     M_out = max(0, (M + padding * 2 - L) // stride) + 1
-    Apad = tvm.compute((B, N + 2 * padding, M + 2 * padding, C),
-                       lambda b, i, j, k: tvm.select(tvm.all(i >= padding, j >= padding, i < N + padding, j < M + padding),
-                                                  A[b, i - padding, j - padding, k], 0.0), name="Apad")
+    # Apad = tvm.compute((B, N + 2 * padding, M + 2 * padding, C),
+    #                    lambda b, i, j, k: tvm.if_then_else(tvm.all(i >= padding, j >= padding, i < N + padding, j < M + padding),
+    #                                               A[b, i - padding, j - padding, k], 0.0), name="Apad")
     rx, ry = tvm.reduce_axis((0, K), name="rx"), tvm.reduce_axis((0, L), name="ry")
     rc = tvm.reduce_axis((0, C), name="rc")
     Output = tvm.compute((B, N_out, M_out, O),
                          lambda b, i, j, k: tvm.sum(Apad[b, i * stride + rx, j * stride + ry, rc] * W[rx, ry, rc, k],
                                                     axis=[rx, ry, rc]),
                          name="Output")
-    return Output.op, [A, W, Output]
+    return Output.op, [Apad, W, Output]
 
 
 @register(args=(32, 32, 32, 5, 5, 5, 1, 2))
@@ -119,7 +119,7 @@ def conv3d(N, M, P, K, L, Q, stride=1, padding=0, dtype="float32"):
     M_out = max(0, (M + padding * 2 - L) // stride) + 1
     P_out = max(0, (P + padding * 2 - Q) // stride) + 1
     Apad = tvm.compute((N + 2 * padding, M + 2 * padding, P + 2 * padding),
-                       lambda i, j, k: tvm.select(
+                       lambda i, j, k: tvm.if_then_else(
                            tvm.all(i >= padding, j >= padding, k >= padding, i < N + padding, j < M + padding,
                                    k < P + padding),
                            A[i - padding, j - padding, k - padding], 0.0), name="Apad")
@@ -141,7 +141,7 @@ def conv3d_batch(B, N, M, P, K, L, Q, stride=1, padding=0, dtype="float32"):
     M_out = max(0, (M + padding * 2 - L) // stride) + 1
     P_out = max(0, (P + padding * 2 - Q) // stride) + 1
     Apad = tvm.compute((B, N + 2 * padding, M + 2 * padding, P + 2 * padding),
-                       lambda b, i, j, k: tvm.select(
+                       lambda b, i, j, k: tvm.if_then_else(
                            tvm.all(i >= padding, j >= padding, k >= padding, i < N + padding, j < M + padding,
                                    k < P + padding),
                            A[b, i - padding, j - padding, k - padding], 0.0), name="Apad")
@@ -163,7 +163,7 @@ def conv3d_channel(N, M, P, C, K, L, Q, O, stride=1, padding=0, dtype="float32")
     M_out = max(0, (M + padding * 2 - L) // stride) + 1
     P_out = max(0, (P + padding * 2 - Q) // stride) + 1
     Apad = tvm.compute((N + 2 * padding, M + 2 * padding, P + 2 * padding, C),
-                       lambda i, j, k, c: tvm.select(
+                       lambda i, j, k, c: tvm.if_then_else(
                            tvm.all(i >= padding, j >= padding, k >= padding, i < N + padding, j < M + padding,
                                    k < P + padding),
                            A[i - padding, j - padding, k - padding, c], 0.0), name="Apad")
@@ -185,7 +185,7 @@ def conv3d_channel_batch(B, N, M, P, C, K, L, Q, O, stride=1, padding=0, dtype="
     M_out = max(0, (M + padding * 2 - L) // stride) + 1
     P_out = max(0, (P + padding * 2 - Q) // stride) + 1
     Apad = tvm.compute((B, N + 2 * padding, M + 2 * padding, P + 2 * padding, C),
-                       lambda b, i, j, k, c: tvm.select(
+                       lambda b, i, j, k, c: tvm.if_then_else(
                            tvm.all(i >= padding, j >= padding, k >= padding, i < N + padding, j < M + padding,
                                    k < P + padding),
                            A[b, i - padding, j - padding, k - padding, c], 0.0), name="Apad")
@@ -203,8 +203,8 @@ def conv3d_channel_batch(B, N, M, P, C, K, L, Q, O, stride=1, padding=0, dtype="
 def gaussian_blur3x3(M, N, dtype="float32"):
     A = tvm.placeholder((M, N), dtype=dtype, name="A")
     pad = (3 - 1) // 2
-    Apad = tvm.compute((M + 2 * pad, N), lambda i, j: tvm.select(tvm.all(i >= pad, i < M + pad), A[i - pad, j], 0.0), name="Apad")
+    Apad = tvm.compute((M + 2 * pad, N), lambda i, j: tvm.if_then_else(tvm.all(i >= pad, i < M + pad), A[i - pad, j], 0.0), name="Apad")
     B = tvm.compute((M, N), lambda i, j: (Apad[i, j] + Apad[i + 1, j] + Apad[i + 2, j]) / 3, name="B")
-    Bpad = tvm.compute((M, N + 2 * pad), lambda i, j: tvm.select(tvm.all(j >= pad, j < N + pad), B[i, j - pad], 0.0), name="Bpad")
+    Bpad = tvm.compute((M, N + 2 * pad), lambda i, j: tvm.if_then_else(tvm.all(j >= pad, j < N + pad), B[i, j - pad], 0.0), name="Bpad")
     C = tvm.compute((M, N), lambda i, j: (Bpad[i, j] + Bpad[i, j + 1] + Bpad[i, j + 2]) / 3, name="C")
     return C.op, [A, C]

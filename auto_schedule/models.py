@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from auto_schedule.utils import gumbel_softmax, get_factor_lst
+from torch.distributions.normal import Normal
+from auto_schedule.utils import parted_linear, get_factor_lst, fact, comb, dev, gumbel_softmax
 from scipy.cluster.vq import kmeans
 
 
@@ -39,24 +40,151 @@ class LSTM(nn.Module):
         return hidden
 
 
-class MLP(nn.Module):
+class Embed(nn.Module):
+    def __init__(self, dim, k):
+        super(Embed, self).__init__()
+        assert isinstance(k, int) and k > 1
+        self.dim = dim
+        self.k = k
+
+    def forward(self, factor_lst):
+        ret = []
+        for factor in factor_lst:
+            tmp = []
+            assert isinstance(factor, int) and factor >= 1
+            while factor > 0:
+                r = factor % self.k
+                factor = factor // self.k
+                tmp.append(r)
+            cha = max(0, self.dim - len(tmp))
+            tmp = tmp[:self.dim]
+            tmp = tmp + [0] * cha
+            ret.append(tmp)
+        return torch.FloatTensor(ret)
+
+
+class SASD(nn.Module):  # Static Axis Split Decision
+    def __init__(self, dim, length, hidden, embedding):
+        super(SASD, self).__init__()
+        self.dim = dim
+        self.length = length
+        self.hidden = hidden
+        self.axis_filters = nn.Linear(dim + length, hidden)
+        self.factor_filters = nn.Linear(embedding, hidden)
+        self.embedding = Embed(embedding, 10)
+
+    def forward(self, lst, shape_dict, extent, sampling):
+        batch = []
+        for (op_name, contents) in lst:
+            shape = shape_dict[op_name]
+            assert len(shape) == self.dim and len(contents) == self.length
+            batch.append(shape + contents)
+        if batch:
+            batch_vec = torch.FloatTensor(batch)
+            filtered = torch.tanh(self.axis_filters(batch_vec))     # regard results of matmul as filter processed values
+        else:
+            filtered = torch.zeros([1, self.hidden])
+        factors = get_factor_lst(extent)
+        embedded = self.embedding(factors)
+        factor_feature = torch.tanh(self.factor_filters(embedded))  # use filters to extract features of factors
+        value = torch.softmax(torch.sum(filtered.matmul(factor_feature.transpose(0, 1)), dim=0), dim=-1)
+        if sampling:
+            value = gumbel_softmax(torch.log(value + 1e-20))
+        choice = factors[torch.argmax(value)]
+        return value, choice
+
+
+class RASD(nn.Module):  # Random Axis Split Decision
+    def __init__(self):
+        super(RASD, self).__init__()
+
+    def forward(self, extent):
+        factors = get_factor_lst(extent)
+        return torch.zeros(len(factors)), factors[np.random.randint(0, len(factors))]
+
+
+class SARD(nn.Module):  # Static Axis Reorder Decision
+    def __init__(self, dim, num, length, hidden, k, l, outputs):
+        super(SARD, self).__init__()
+        self.dim = dim
+        self.num = num
+        self.length = length
+        self.hidden = hidden
+        self.axis_filters = nn.Linear(self.dim + self.length, self.hidden)
+        self.row_filter = nn.Linear(self.hidden, k)
+        self.col_filter = nn.Linear(self.num, l)
+        self.flatten = lambda x: x.view(-1)
+        self.fc = nn.Linear(k * l, outputs)
+
+    def forward(self, lst, shape_dict, sampling):
+        assert len(lst) == self.num
+        pack = []
+        for sub_lst in lst:
+            batch = []
+            for (op_name, contents) in sub_lst:
+                shape = shape_dict[op_name]
+                assert len(contents) == self.length
+                batch.append(shape + contents)
+            if batch:
+                axis_feature = torch.sum(torch.relu(self.axis_filters(torch.FloatTensor(batch))), dim=0)
+            else:
+                axis_feature = torch.zeros(self.hidden)
+            pack.append(axis_feature)
+        pack_vec = torch.stack(pack)
+        row_filtered = torch.tanh(self.row_filter(pack_vec))
+        col_filtered = torch.tanh(self.col_filter(row_filtered.transpose(0, 1)))    # (k x l)
+        flatten = self.flatten(col_filtered)
+        logits = torch.softmax(self.fc(flatten), dim=-1)
+        if sampling:
+            logits = gumbel_softmax(torch.log(logits + 1e-20))
+        choice = torch.argmax(logits)
+        return logits, choice
+
+
+class RARD(nn.Module):  # Random Axis Reorder Decision
+    def __init__(self, outputs):
+        super(RARD, self).__init__()
+        assert isinstance(outputs, int)
+        self.outputs = outputs
+
+    def forward(self):
+        return torch.zeros(self.outputs), np.random.randint(0, self.outputs)
+
+
+class MLP_L2(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
-        super(MLP, self).__init__()
+        super(MLP_L2, self).__init__()
         self.linear1 = nn.Linear(input_dim, hidden_dim)
-        self.linear2 = nn.Linear(hidden_dim, hidden_dim)
-        self.linear3 = nn.Linear(hidden_dim, output_dim)
+        self.linear2 = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, inputs, activate=torch.relu):
-        return activate(self.linear3(activate(self.linear2(activate(self.linear1(inputs))))))
+        return activate(self.linear2(activate(self.linear1(inputs))))
+
+
+class MLP_L8(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super(MLP_L8, self).__init__()
+        self.linear1 = nn.Linear(input_dim, hidden_dim)
+        self.linear2 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear3 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear4 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear5 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear6 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear7 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear8 = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, inputs, activate=torch.relu):
+        result = activate(self.linear4(activate(self.linear3(activate(self.linear2(activate(self.linear1(inputs))))))))
+        result = activate(self.linear8(activate(self.linear7(activate(self.linear6(activate(self.linear5(result))))))))
+        return result
 
 
 class Attention(nn.Module):
     def __init__(self, dim):
         super(Attention, self).__init__()
-        self.linear = nn.Linear(dim, dim)
 
     def forward(self, vec):
-        return (torch.sigmoid(self.linear(vec)) * vec).sum(dim=0)
+        return torch.max(vec, dim=0)[0]
 
 
 class ScheduleModel(nn.Module):
@@ -70,16 +198,16 @@ class ScheduleModel(nn.Module):
         else:
             self.cluster_num = 8
             self.hidden_dim = hidden_dim
-            self.other_module = MLP(other_dim, 512, hidden_dim)
+            self.other_module = MLP_L2(other_dim, 512, hidden_dim)
             self.shape_module = RNNCell(1, hidden_dim)
-            self.spatial_module = MLP(var_dim, 512, hidden_dim)
-            self.reduce_module = MLP(var_dim, 512, hidden_dim)
+            self.spatial_module = MLP_L2(var_dim, 512, hidden_dim)
+            self.reduce_module = MLP_L2(var_dim, 512, hidden_dim)
             self.var_module = RNNCell(hidden_dim, hidden_dim)
             self.visit_module_a = RNNCell(hidden_dim, hidden_dim)
             self.visit_module_b = RNNCell(4 * hidden_dim, hidden_dim)
-            self.inline_module = MLP(4 * hidden_dim, 512, hidden_dim)
-            self.cache_module = MLP(4 * hidden_dim, 512, hidden_dim)
-            self.factor_module = MLP(4 * hidden_dim, 512, hidden_dim)
+            self.inline_module = MLP_L2(4 * hidden_dim, 512, hidden_dim)
+            self.cache_module = MLP_L2(4 * hidden_dim, 512, hidden_dim)
+            self.factor_module = MLP_L2(4 * hidden_dim, 512, hidden_dim)
             self.number_module = nn.Linear(self.cluster_num, hidden_dim)
             self.judge_module_a = nn.Linear(hidden_dim, 1)
             self.judge_module_b = nn.Linear(hidden_dim, 2)
@@ -281,179 +409,108 @@ class ScheduleModel(nn.Module):
             raise ValueError("not support type:{}".format(type))
 
 
-class OpScheduleCPU(nn.Module):
-    def __init__(self, dim0, dim1, hidden_dim):
+class OpScheduleCPUd5(nn.Module):
+    def __init__(self, length, hidden_dim):
         # dim0: align dimension; dim1: axis_feature_dim
-        super(OpScheduleCPU, self).__init__()
-        self.dim = dim0
+        super(OpScheduleCPUd5, self).__init__()
+        self.dim = 5
         self.hidden = hidden_dim
-        self.M1 = MLP(dim0 + dim1, hidden_dim, hidden_dim)  # shape + axis_feature
-        self.M2 = MLP(1, hidden_dim, hidden_dim)    # factor
-        self.M3 = MLP(hidden_dim * 2, hidden_dim, 1)    # spatial improve value
-        self.M4 = MLP(hidden_dim, hidden_dim, 1)  # parallel improve value
-        self.M5 = MLP(hidden_dim * 2, hidden_dim, 1)    # reduce improve value
-        self.M6 = MLP(hidden_dim, hidden_dim, 1)    # reorder part one
-        self.M7 = MLP(hidden_dim, hidden_dim, 1)    # reorder part two
-        self.M8 = MLP(hidden_dim, hidden_dim, 1)    # reorder part three
-        self.A1 = Attention(hidden_dim)     # axis
-        self.A2 = Attention(hidden_dim)     # parallel
-        self.A3 = Attention(hidden_dim)     # reorder
-        self.L1 = LSTM(hidden_dim, hidden_dim)      # reorder
+        self.sasd1 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd2 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd3 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd4 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd5 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd_lst = [self.sasd1, self.sasd2, self.sasd3, self.sasd4, self.sasd5]
 
-    def _split(self, M, A, F, J, candidates, extents, feature, shape, device):
-        pack_vec = []
-        pack_index = []
-        cur = 0
-        for name in candidates:
-            lst = feature[name]
-            for (op_name, contents) in lst:
-                sh = shape[op_name]
-                pack_vec.append(sh + contents)
-                cur += 1
-            pack_index.append(cur)
-        if pack_vec:
-            result = M(torch.FloatTensor(pack_vec).to(device))
-        else:
-            result = torch.FloatTensor([]).to(device)
-        pack_vec.clear()
-        cur = 0
-        for i, end in enumerate(pack_index):
-            if cur < end:
-                f = A(result[cur:end])
-                pack_vec.append(f)
-            else:
-                pack_vec.append(torch.zeros(self.hidden).to(device))
-            cur = end
-        if len(pack_vec) != self.dim:
-            raise RuntimeError()
-        fpack_vec = []
-        pack_index.clear()
-        cur = 0
-        tmp_lst = []
-        factor_lst = []
-        for i in range(self.dim):
-            lst = get_factor_lst(extents[i])
-            factor_lst.append(lst)
-            cur += len(lst)
-            pack_index.append(cur)
-            tmp_lst.extend(lst)
-        vec = torch.FloatTensor(tmp_lst).view(-1, 1).to(device)
-        factor_vec = F(vec)
-        cur = 0
-        for i in range(self.dim):
-            # TODO Need batch concat
-            for j in range(cur, pack_index[i]):
-                fpack_vec.append(torch.cat([pack_vec[i], factor_vec[j]]))
-            cur = pack_index[i]
-        result = J(torch.stack(fpack_vec), torch.relu)
-        improve_lst = []
+        self.rasd1 = RASD()
+        self.rasd2 = RASD()
+        self.rasd3 = RASD()
+        self.rasd4 = RASD()
+        self.rasd5 = RASD()
+        self.rasd_lst = [self.rasd1, self.rasd2, self.rasd3, self.rasd4, self.rasd5]
+
+        self.sard1 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim))
+        self.sard2 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim))
+        self.sard3 = SARD(self.dim, self.dim*2, length, hidden_dim, 128, 128, comb(self.dim + self.dim, self.dim))
+
+        self.rard1 = RARD(fact(self.dim))
+        self.rard2 = RARD(fact(self.dim))
+        self.rard3 = RARD(comb(self.dim + self.dim, self.dim))
+
+        self.sapd = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, (self.dim + 1) * self.dim // 2)
+
+        self.rapd = RARD((self.dim + 1) * self.dim // 2)
+
+        self.sard_lst = [self.sard1, self.sard2, self.sard3, self.sapd]
+        self.rard_lst = [self.rard1, self.rard2, self.rard3, self.rapd]
+
+    def _split(self, candidates, extents, feature, shape, random, sampling):
+        assert len(candidates) == self.dim
         choice_lst = []
-        cur = 0
+        value_lst = []
         for i in range(self.dim):
-            tmp = result[cur:pack_index[i]].view(-1).unsqueeze(0)
-            gs = gumbel_softmax(tmp, device, self.training)
-            choice_lst.append(factor_lst[i][torch.argmax(gs)])
-            improve_lst.append(torch.sum(tmp * gs))
-            cur = pack_index[i]
-        improve = sum(improve_lst)
-        return choice_lst, improve
-
-    def _reorder(self, M, A, L, J, candidates, extents, feature, shape, device, mode=0):
-        # candidates: list; extents: dict; feature: dict; shape: dict
-        names = []
-        pack_vec = []
-        pack_index = []
-        cur = 0
-        for name, value in extents.items():
+            name = candidates[i]
+            extent = extents[i]
             lst = feature[name]
-            names.append(name)
-            for (op_name, contents) in lst:
-                sh = shape[op_name]
-                tmp = contents.copy()
-                if mode == 0:
-                    tmp[1] *= (tmp[0] // value)
-                    tmp[2] *= (tmp[0] // value)
-                    tmp[0] = value
-                elif mode == 1:
-                    tmp[0] = value
-                else:
-                    raise ValueError("mode should in {0, 1}")
-                pack_vec.append(sh + tmp)
-                cur += 1
-            pack_index.append(cur)
-        if pack_vec:
-            result = M(torch.FloatTensor(pack_vec).to(device))
-        else:
-            result = torch.FloatTensor([]).to(device)
-        pack_vec.clear()
-        cur = 0
-        for i, end in enumerate(pack_index):
-            if cur < end:
-                f = A(result[cur:end])
-                pack_vec.append(f)
+            if random:
+                value, choice = self.rasd_lst[i](extent)
             else:
-                pack_vec.append(torch.zeros(self.hidden).to(device))
-            cur = end
-        vec_dict = dict(zip(names, pack_vec))
-        vec_dict["none"] = torch.zeros(self.hidden).to(device)
-        candidate_vec = []
-        for candidate in candidates:
-            tmp = []
-            for ele in candidate:
-                tmp.append(vec_dict[ele])
-            candidate_vec.append(torch.stack(tmp))
-        candidate_vec = torch.stack(candidate_vec)
-        result = L(candidate_vec)
-        result = J(result, torch.relu).view(-1).unsqueeze(0)
-        gs = gumbel_softmax(result, device, self.training)
-        choice = candidates[torch.argmax(gs)]
-        improve = (gs * result).sum()
-        return choice, improve
+                value, choice = self.sasd_lst[i](lst, shape, extent, sampling)
+            choice_lst.append(choice)
+            value_lst.append(value)
+        return choice_lst, value_lst
 
-    def forward(self, type_key, candidates, extents, feature, shape, device, random=False):
+    def _reorder_or_parallel(self, id, candidates, extents, feature, shape, random, sampling, mode=0):
+        # candidates: list; extents: dict; feature: dict; shape: dict
+        # update feature
+        if random:
+            logits, choice = self.rard_lst[id]()
+        else:
+            name_feature_dict = dict()
+            for name, value in extents.items():
+                lst = feature[name]
+                name_feature_dict[name] = []
+                for (op_name, contents) in lst:
+                    tmp = contents.copy()
+                    if mode == 0:
+                        tmp[1] *= (tmp[0] / value)
+                        tmp[2] *= (tmp[0] / value)
+                        tmp[0] = value
+                    elif mode == 1:
+                        tmp[0] = value
+                    else:
+                        raise ValueError("mode should in {0, 1}")
+                    name_feature_dict[name].append((op_name, tmp))
+            lst = []
+            for name in candidates:
+                lst.append(name_feature_dict[name])
+            logits, choice = self.sard_lst[id](lst, shape, sampling)
+        return choice, logits
+
+    def forward(self, type_key, candidates, extents, feature, shape, random=False, sampling=True):
         if type_key == "spatial":
             # candidates: list; extents: list; feature: dict; shape: dict
-            if random:
-                final_lst = []
-                for i in range(self.dim):
-                    f_lst = get_factor_lst(extents[i])
-                    final_lst.append(f_lst[np.random.randint(0, len(f_lst))])
-                return final_lst, 0
-            return self._split(self.M1, self.A1, self.M2, self.M3, candidates, extents, feature, shape, device)
+            return self._split(candidates, extents, feature, shape, random, sampling)
 
         elif type_key == "parallel":
             # candidates: list; extents: dict; feature: dict; shape: dict
-            if random:
-                return candidates[np.random.randint(len(candidates))], 0
-            return self._reorder(self.M1, self.A2, self.L1, self.M4, candidates, extents, feature, shape, device, mode=0)
+            return self._reorder_or_parallel(3, candidates, extents, feature, shape, random, sampling, mode=0)
 
         elif type_key == "reduce":
             # candidates: list; extents: list; feature: dict; shape: dict
-            if random:
-                final_lst = []
-                for i in range(self.dim):
-                    f_lst = get_factor_lst(extents[i])
-                    final_lst.append(f_lst[np.random.randint(0, len(f_lst))])
-                return final_lst, 0
-            return self._split(self.M1, self.A1, self.M2, self.M5, candidates, extents, feature, shape, device)
+            return self._split(candidates, extents, feature, shape, random, sampling)
 
         elif type_key == "reorder_one":
             # candidates: list; extents: dict; feature: dict; shape: dict
-            if random:
-                return candidates[np.random.randint(len(candidates))], 0
-            return self._reorder(self.M1, self.A3, self.L1, self.M6, candidates, extents, feature, shape, device, mode=0)
+            return self._reorder_or_parallel(0, candidates, extents, feature, shape, random, sampling, mode=0)
 
         elif type_key == "reorder_two":
             # candidates: list; extents: dict; feature: dict; shape: dict
-            if random:
-                return candidates[np.random.randint(len(candidates))], 0
-            return self._reorder(self.M1, self.A3, self.L1, self.M7, candidates, extents, feature, shape, device, mode=0)
+            return self._reorder_or_parallel(1, candidates, extents, feature, shape, random, sampling, mode=0)
 
         elif type_key == "reorder_three":
             # candidates: list; extents: dict; feature: dict; shape: dict
-            if random:
-                return candidates[np.random.randint(len(candidates))], 0
-            return self._reorder(self.M1, self.A3, self.L1, self.M8, candidates, extents, feature, shape, device, mode=1)
+            return self._reorder_or_parallel(2, candidates, extents, feature, shape, random, sampling, mode=1)
 
         else:
             raise ValueError("Not support type: {}".format(type_key))

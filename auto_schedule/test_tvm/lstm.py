@@ -150,8 +150,6 @@ def lstm():
         flstm = tvm.build(s, [Xi2h, Wh2h, scan_h, scan_c],
                           target)
         stmt = tvm.lower(s, [Xi2h, Wh2h, scan_h, scan_c], simple_mode=True)
-        from auto_schedule.print_tree import visit
-        visit(stmt, 0)
         print(stmt)
         print(flstm.imported_modules[0].get_source())
         ctx = tvm.gpu(0) if target == "cuda" else tvm.cl(0)
@@ -181,6 +179,7 @@ def lstm():
             auto_unroll_max_step=128,
             unroll_explicit=False):
         check_device("cuda")
+
 
 if __name__ == "__main__":
     lstm()

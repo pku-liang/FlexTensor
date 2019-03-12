@@ -406,7 +406,7 @@ def visit_let(node, ret):
 
 
 if __name__ == "__main__":
-    from auto_schedule.training_examples import FUNC_TABLE
+    from auto_schedule.examples import FUNC_TABLE
     func = FUNC_TABLE["conv3d_channel_batch"].func
     args = FUNC_TABLE["conv3d_channel_batch"].args
     op, bufs = func(*args)

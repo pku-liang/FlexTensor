@@ -2,7 +2,7 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-# from auto_schedule.training_examples import FUNC_TABLE
+# from auto_schedule.examples import FUNC_TABLE
 
 
 class Point(object):

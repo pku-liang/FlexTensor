@@ -86,14 +86,9 @@ def two_factor_split(value):
     return ret
 
 
-def mean(lst):
-    return sum(lst) / len(lst)
-
-
-def dev(lst):
-    m = mean(lst)
-    a = [(x - m)**2 for x in lst]
-    return math.sqrt(sum(a) / len(lst))
+def dev(input):
+    m = torch.mean(input, dim=-1)
+    return torch.pow(torch.sum(torch.pow(input - m, 2)), 0.5)
 
 
 def _dfs_interleave(cur, la, lb, pa, pb, enda, endb, res):
@@ -147,20 +142,24 @@ def permute(lst):
     return res
 
 
-def gumbel_softmax(logits, device, training=True):
+def gumbel_softmax(logits):
     epsilon = 1e-20
-    shape = logits.shape
-    if training:
-        G = torch.rand(shape).to(device)
-        y = logits + -Variable(torch.log(-torch.log(G + epsilon) + epsilon))
-    else:
-        y = logits
+    G = torch.rand_like(logits)
+    y = logits + -Variable(torch.log(-torch.log(G + epsilon) + epsilon))
     soft_y = torch.softmax(y, dim=-1)
     _, index = soft_y.max(dim=-1)
     hard_y = torch.zeros_like(soft_y).view(-1, soft_y.shape[-1])
     hard_y.scatter_(1, index.view(-1, 1), 1)
     hard_y = hard_y.view(*soft_y.shape)
-    return (hard_y - soft_y).detach() + soft_y
+    return soft_y + (hard_y - soft_y).detach()
+
+
+def parted_linear(x, left, right):
+    if left > right:
+        tmp = left
+        left = right
+        right = tmp
+    return torch.relu(right - torch.relu(right - x) - left) + left
 
 
 def _dfs_gen_enum(cur, cur_len, elements, length, res):
@@ -200,6 +199,17 @@ def gen_group(elements, padding=None):
         cur = [elements[p]]
         _dfs_gen_group(cur, p + 1, elements, length, res, padding)
     return res
+
+
+def fact(n):
+    if n <= 0:
+        return 1
+    return n * fact(n - 1)
+
+
+def comb(m, n):
+    assert m >= n
+    return fact(m) // (fact(n) * fact(m - n))
 
 
 def test_three_factor_split():
