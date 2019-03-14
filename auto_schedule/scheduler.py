@@ -370,7 +370,7 @@ def get_axis_feature(op_lst):
     return op_result_dict
 
 
-def evaluate(s, bufs, target, dev_id, number=10, timeout=10.0):
+def parallel_evaluate(s, bufs, target, dev_id, number=10, timeout=10.0):
     proc = []
     q = multi.Queue()
     for i in range(number):
@@ -398,6 +398,10 @@ def evaluate(s, bufs, target, dev_id, number=10, timeout=10.0):
     return sum / count
 
 
+def serial_evaluate(s, bufs, target, dev_id, number=1, timeout=10.0):
+    pass
+
+
 def _evaluate(s, bufs, target, dev_id, number=1, q=None):
     func = tvm.build(s, bufs, target)
     ctx = tvm.context(target, dev_id)
@@ -414,120 +418,6 @@ def _evaluate(s, bufs, target, dev_id, number=1, q=None):
     return time_cost
 
 
-class Target(object):
-    def __init__(self, type_key, bx=1, by=1, bz=1, tx=1, ty=1, tz=1, vtx=FINF, vty=FINF, vtz=FINF):
-        self.type = type_key
-        self.bx, self.by, self.bz = bx, by, bz
-        self.tx, self.ty, self.tz = tx, ty, tz
-        self.vtx, self.vty, self.vtz = vtx, vty, vtz
-        self.support_compute_inline = True
-        self.support_split = True
-        self.support_reorder = True
-        self.support_compute_at = True
-        self.support_cache_read = False
-        self.support_cache_write = False
-        self.support_parallel = False
-        self.support_unroll = True
-        self.support_vectorize = True
-        self.support_bind = False
-        self.support_rfactor = False
-        self.support_double_buffer = True
-
-    def turn_on(self, name):
-        setattr(self, name, True)
-
-    def turn_down(self, name):
-        setattr(self, name, False)
-
-    def to_json(self):
-        return {
-            "type": self.type,
-            "feature": self.feature
-        }
-
-
-class Schedule(object):
-    def __init__(self, ops, target):
-        if not isinstance(ops, (list, tuple)):
-            ops = [ops]
-        self.ops = ops
-        self.target = target
-        self.block_factors = [target.bx, target.by, target.bz]
-        self.thread_factors = [target.tx, target.ty, target.tz]
-        self.vthread_factors = [target.vtx, target.vty, target.vtz]
-        self.reduce_factors = []
-
-        bfs_order, down_graph = graph_analysis(ops)
-        self.bfs_order = bfs_order
-        self.down_graph = down_graph
-        self.need_bind = target.support_bind
-
-        class OpSchedule(object):
-            def __init__(self, op):
-                self.op = op
-                self.shape = to_tuple(op.output(0).shape)
-                self.compute_inline = False
-                self.is_compute = isinstance(op, tvm.tensor.ComputeOp)
-                self.has_reduce = self.is_compute and bool(op.reduce_axis)
-                self.able_inline = self.is_compute and not self.has_reduce      # can't inline reduction
-                self.next_num = [0 for i in range(op.num_outputs)]
-                self.is_output = True
-                for i in range(op.num_outputs):
-                    if i > 0:
-                        self.able_inline = False       # can only inline compute op with 1 output
-                    if op.output(i) not in down_graph:
-                        self.able_inline = False       # should has consumer
-                    else:
-                        self.is_output = False
-                        self.next_num[i] = len(down_graph[op.output(i)])
-                self.num_outputs = op.num_outputs
-                self.output_tensors = [op.output(i) for i in range(op.num_outputs)]
-                if self.is_compute:
-                    self.input_tensors = op.input_tensors
-                else:
-                    self.input_tensors = []
-                self.num_inputs = len(self.input_tensors)
-                self.need_cache_read = self.is_compute and self.num_inputs > 0
-                self.need_cache_write = self.is_compute and self.num_outputs > 0 and self.is_output
-                self.use_write_share_cache = [False for i in range(self.num_outputs)]
-                self.use_write_local_cache = [False for i in range(self.num_outputs)]
-                self.use_read_share_cache = [False for i in range(self.num_inputs)]
-                self.use_read_local_cache = [False for i in range(self.num_inputs)]
-                self.write_share_cache = [None for i in range(self.num_outputs)]
-                self.write_local_cache = [None for i in range(self.num_outputs)]
-                self.read_share_cache = [None for i in range(self.num_inputs)]
-                self.read_local_cache = [None for i in range(self.num_inputs)]
-                self.org_spatial_iter_var_names = []
-                self.org_reduce_iter_var_names = []
-                self.iter_var_dict = dict()
-                if self.is_compute:
-                    for v in op.axis:
-                        self.org_spatial_iter_var_names.append(v.var.name)
-                        self.iter_var_dict[v.var.name] = v
-                    for v in op.reduce_axis:
-                        self.org_reduce_iter_var_names.append(v.var.name)
-                        self.iter_var_dict[v.var.name] = v
-                self.zyx_numbers = [[], [], [], []]
-                self.block_binds = [[], [], []]
-                self.threads_binds = [[], [], []]
-                self.vthread_binds = [[], [], []]
-                self.none_binds_order = []
-                self.reduce_numbers = [[], []]
-                self.iter_var_feature_dict = dict()
-                self.visit_feature = []
-
-        self.op_schedule_dict = dict()
-        for op in bfs_order:
-            self.op_schedule_dict[op] = OpSchedule(op)
-
-        op_feature_dict = get_axis_feature(self.bfs_order)
-        for op, feature in op_feature_dict.items():
-            self.op_schedule_dict[op].iter_var_feature_dict = feature.iter_var_feature
-            self.op_schedule_dict[op].visit_feature = dict(feature.visit_feature)
-
-        self.schedule_diary = None
-
-
 def op_schedule_cpu_general_dx(dim, s, op, model, random=False, sampling=True):
     ret_dict = dict()
     record = Record()
@@ -542,6 +432,7 @@ def op_schedule_cpu_general_dx(dim, s, op, model, random=False, sampling=True):
         for iter_var in op.reduce_axis:
             iter_var_dom_dict[iter_var.var.name] = iter_var.dom.extent.value
     # iter_var_name -> feature: (op_name, lst)
+    visit_trace_dict = dict()
     iter_var_feature = dict()
     iter_var_feature["none"] = []
     for visit_op, res in record.visit_result.items():
@@ -558,7 +449,10 @@ def op_schedule_cpu_general_dx(dim, s, op, model, random=False, sampling=True):
             for vm in lst:
                 if vm.name not in tmp_dict:
                     tmp_dict[vm.name] = []
+                if vm.name not in visit_trace_dict:
+                    visit_trace_dict[vm.name] = []
                 tmp_dict[vm.name].append((visit_op.name, [iter_var_dom_dict[vm.name], factors[i], vm.factor]))
+                visit_trace_dict[vm.name].append((visit_op.name, i))
             for name, value in tmp_dict.items():
                 if name not in iter_var_feature:
                     iter_var_feature[name] = []
@@ -790,6 +684,379 @@ def op_schedule_cpu_general_dx(dim, s, op, model, random=False, sampling=True):
         p -= 1
     if p >= 0:
         s[LocalCache].unroll(real_order[p])
+    return ret_dict, diary
+
+
+def op_schedule_gpu_general_dx(dim, s, op, model, random=False, sampling=True):
+    ret_dict = dict()
+    record = Record()
+    if len(op.body) != 1:
+        raise ValueError("only support one output operation")
+    visit(op.body[0], record)
+    # iter_var_name -> extent
+    iter_var_dom_dict = dict()
+    if hasattr(op, 'axis'):
+        for iter_var in op.axis:
+            iter_var_dom_dict[iter_var.var.name] = iter_var.dom.extent.value
+        for iter_var in op.reduce_axis:
+            iter_var_dom_dict[iter_var.var.name] = iter_var.dom.extent.value
+    print(iter_var_dom_dict)
+    # iter_var_name -> feature: (op_name, lst)
+    visit_trace_dict = dict()
+    iter_var_feature = dict()
+    iter_var_feature["none"] = []
+    for visit_op, res in record.visit_result.items():
+        # prepare factors from shape
+        factors = []
+        cur = 1
+        for v in reversed(to_tuple(visit_op.output(0).shape)):
+            factors.append(cur)
+            cur *= v
+        factors = list(reversed(factors))
+        # every dimension
+        for i, (lst, vlst) in enumerate(res):
+            tmp_dict = dict()
+            for vm in lst:
+                if vm.name not in tmp_dict:
+                    tmp_dict[vm.name] = []
+                if vm.name not in visit_trace_dict:
+                    visit_trace_dict[vm.name] = []
+                tmp_dict[vm.name].append((visit_op.name, [iter_var_dom_dict[vm.name], factors[i], vm.factor]))
+                visit_trace_dict[vm.name].append((visit_op.name, i))
+            for name, value in tmp_dict.items():
+                if name not in iter_var_feature:
+                    iter_var_feature[name] = []
+                iter_var_feature[name].extend(value)
+    # shape of inputs
+    input_shapes = dict()
+    for t in op.input_tensors:
+        tmp = list(to_tuple(t.shape))
+        cha = dim - len(tmp)
+        if cha < 0:
+            raise ValueError("Dimension of Operation should <= {}".format(dim))
+        input_shapes[t.op.name] = [1] * cha + [x for x in tmp]
+    # align
+    # spatial
+    cha = dim - len(op.axis)
+    if cha < 0:
+        raise ValueError("Dimension of Operation should <= {}".format(dim))
+    spatial_axis_names = ["none"] * cha
+    spatial_iter_vars = [None] * cha
+    spatial_axis_extents = [1] * cha
+    spatial_iter_var_dict = dict()
+    for i, iter_var in enumerate(op.axis):
+        spatial_axis_names.append(iter_var.var.name)
+        spatial_iter_vars.append(iter_var)
+        spatial_axis_extents.append(iter_var.dom.extent.value)
+        spatial_iter_var_dict[iter_var.var.name] = i + cha
+    # reduce
+    cha = dim - len(op.reduce_axis)
+    if cha < 0:
+        raise ValueError("Reduce dimension should <= {}".format(dim))
+    reduce_axis_names = ["none"] * cha
+    reduce_iter_vars = [None] * cha
+    reduce_axis_extents = [1] * cha
+    reduce_iter_var_dict = dict()
+    for i, iter_var in enumerate(op.reduce_axis):
+        reduce_axis_names.append(iter_var.var.name)
+        reduce_iter_vars.append(iter_var)
+        reduce_axis_extents.append(iter_var.dom.extent.value)
+        reduce_iter_var_dict[iter_var.var.name] = i + cha
+    # spatial split
+    # part one
+    split_candidates = spatial_axis_names
+    print("spatial_axis_extents", spatial_axis_extents)
+    split_decision, value_lst = model("spatial_one", split_candidates, spatial_axis_extents, iter_var_feature, input_shapes, random, sampling)
+    ret_dict["spatial_one"] = value_lst
+    spatial_split_one_factors = [f for f in split_decision]
+    spatial_outer_extents = [math.ceil(spatial_axis_extents[i] / spatial_split_one_factors[i]) for i in range(dim)]
+    # part two
+    spatial_middle_extents = [2 if spatial_split_one_factors[i] % 2 == 0 else 1 for i in range(dim)]
+    spatial_split_two_factors = [math.ceil(spatial_split_one_factors[i] / spatial_middle_extents[i]) for i in range(dim)]
+    # part three
+    print("spatial_split_two_factors", spatial_split_two_factors)
+    split_candidates = ["none" if spatial_split_two_factors[i] == 1 else spatial_axis_names[i] for i in range(dim)]
+    split_decision, value_lst = model("spatial_three", split_candidates, spatial_split_two_factors, iter_var_feature, input_shapes, random, sampling)
+    ret_dict["spatial_three"] = value_lst
+    spatial_split_three_factors = [f for f in split_decision]
+    spatial_inner_extents = [math.ceil(spatial_split_two_factors[i] / spatial_split_three_factors[i]) for i in range(dim)]
+    # reduce
+    print("reduce_axis_entents", reduce_axis_extents)
+    reduce_candidates = reduce_axis_names
+    split_decision, value_lst = model("reduce", reduce_candidates, reduce_axis_extents, iter_var_feature, input_shapes, random, sampling)
+    ret_dict["reduce"] = value_lst
+    reduce_split_factors = [f for f in split_decision]
+    reduce_outer_extents = [math.ceil(reduce_axis_extents[i] / reduce_split_factors[i]) for i in range(dim)]
+    # reorder
+    # part one
+    part_one_iter_var_names = spatial_axis_names
+    part_one_extents = dict()
+    for i in range(dim):
+        part_one_extents[part_one_iter_var_names[i]] = spatial_outer_extents[i]
+    reorder_candidates = permute(part_one_iter_var_names)
+    reorder_choice, logits = model("reorder_one", part_one_iter_var_names, part_one_extents, iter_var_feature, input_shapes, random, sampling)
+    ret_dict["reorder_one"] = logits
+    reorder_decision = reorder_candidates[reorder_choice]
+    part_one_order = reorder_decision
+    # part two
+    part_two_iter_var_names = reduce_axis_names
+    part_two_extents = dict()
+    for i in range(dim):
+        part_two_extents[part_two_iter_var_names[i]] = reduce_outer_extents[i]
+    reorder_candidates = permute(part_two_iter_var_names)
+    reorder_choice, logits = model("reorder_two", part_two_iter_var_names, part_two_extents, iter_var_feature, input_shapes, random, sampling)
+    reorder_decision = reorder_candidates[reorder_choice]
+    ret_dict["reorder_two"] = logits
+    part_two_order = reorder_decision
+    # part three
+    part_three_names_a = spatial_axis_names
+    part_three_names_b = reduce_axis_names
+    reorder_candidates = interleave(part_three_names_a, part_three_names_b)
+    part_three_extents = dict()
+    for i in range(dim):
+        part_three_extents[part_three_names_a[i]] = spatial_split_three_factors[i]
+        part_three_extents[part_three_names_b[i]] = reduce_split_factors[i]
+    reorder_choice, logits = model("reorder_three", part_three_names_a + part_three_names_b, part_three_extents, iter_var_feature, input_shapes, random, sampling)
+    reorder_decision = reorder_candidates[reorder_choice]
+    ret_dict["reorder_three"] = logits
+    part_three_order = reorder_decision
+
+    # record the diary
+    diary = []
+    diary.append(spatial_outer_extents)
+    diary.append(spatial_middle_extents)
+    diary.append(spatial_inner_extents)
+    diary.append(spatial_split_three_factors)
+    diary.append(part_one_order)
+    diary.append(reduce_outer_extents)
+    diary.append(reduce_split_factors)
+    diary.append(part_two_order)
+    diary.append(part_three_order)
+
+    for ele in diary:
+        print(ele)
+
+    # real schedule
+    # cache read
+    # input_pos_dict = dict()
+    # read_cache_share_lst = []
+    # for i, t in enumerate(op.input_tensors):
+    #     input_pos_dict[t.op.name] = i
+    #     cache = s.cache_read(t, "shared", [op])
+    #     read_cache_share_lst.append(cache)
+    # read_cache_local_lst = []
+    # for t in read_cache_share_lst:
+    #     cache = s.cache_read(t, "local", [op])
+    #     read_cache_local_lst.append(cache)
+    # read_cache_spatial_iter_vars_lst = []
+    # for cache in read_cache_share_lst:
+    #     cha = dim - len(s[cache].op.axis)
+    #     if cha < 0:
+    #         raise ValueError("Dimension of Operation should <= {}".format(dim))
+    #     read_cache_spatial_iter_vars = [None] * cha
+    #     for i, iter_var in enumerate(s[cache].op.axis):
+    #         read_cache_spatial_iter_vars.append(iter_var)
+    #     read_cache_spatial_iter_vars_lst.append(read_cache_spatial_iter_vars)
+
+    # cache write
+    LocalCache = s.cache_write(op.output(0), "local")
+    cha = dim - len(op.axis)
+    if cha < 0:
+        raise ValueError("Dimension of Operation should <= {}".format(dim))
+    cache_spatial_iter_vars = [None] * cha
+    for i, iter_var in enumerate(s[LocalCache].op.axis):
+        cache_spatial_iter_vars.append(iter_var)
+    cha = dim - len(op.reduce_axis)
+    if cha < 0:
+        raise ValueError("Reduce dimension should <= {}".format(dim))
+    cache_reduce_iter_vars = [None] * cha
+    for i, iter_var in enumerate(s[LocalCache].op.reduce_axis):
+        cache_reduce_iter_vars.append(iter_var)
+    # spatial split
+    # part one
+    spatial_outer, spatial_left = [None] * dim, [None] * dim
+    for i in range(dim):
+        if spatial_iter_vars[i] is not None:
+            outer, inner = s[op].split(spatial_iter_vars[i], factor=spatial_split_one_factors[i])
+            spatial_outer[i] = outer
+            spatial_left[i] = inner
+    # part two
+    spatial_middle, spatial_remain = [None] * dim, [None] * dim
+    for i in range(dim):
+        if spatial_left[i] is not None:
+            outer, inner = s[op].split(spatial_left[i], factor=spatial_split_two_factors[i])
+            spatial_middle[i] = outer
+            spatial_remain[i] = inner
+    # part three
+    spatial_inner, spatial_last = [None] * dim, [None] * dim
+    for i in range(dim):
+        if spatial_remain[i] is not None:
+            outer, inner = s[op].split(spatial_remain[i], factor=spatial_split_three_factors[i])
+            spatial_inner[i] = outer
+            spatial_last[i] = inner
+    order = []
+    for iter_var in spatial_outer + spatial_middle + spatial_inner + spatial_last:
+        if iter_var is not None:
+            order.append(iter_var)
+    if order:
+        s[op].reorder(*order)
+    # spatial reorder
+    outer_reorder = []
+    middle_reorder = []
+    inner_reorder = []
+    for name in part_one_order:
+        if name != "none":
+            index = spatial_iter_var_dict[name]
+            iter_var = spatial_outer[index]
+            if iter_var is None:
+                raise ValueError("unexpected NoneType")
+            outer_reorder.append(iter_var)
+            # the following iter_var may be NoneType
+            iter_var = spatial_middle[index]
+            if iter_var is not None:
+                middle_reorder.append(iter_var)
+            iter_var = spatial_inner[index]
+            if iter_var is not None:
+                inner_reorder.append(iter_var)
+    if outer_reorder:
+        s[op].reorder(*outer_reorder)
+    if middle_reorder:
+        s[op].reorder(*middle_reorder)
+    if inner_reorder:
+        s[op].reorder(*inner_reorder)
+    # bind
+    block_x = tvm.thread_axis("blockIdx.x")
+    block_y = tvm.thread_axis("blockIdx.y")
+    block_z = tvm.thread_axis("blockIdx.z")
+    vthread_x = tvm.thread_axis("vthread", name="vx")
+    vthread_y = tvm.thread_axis("vthread", name="vy")
+    thread_x = tvm.thread_axis("threadIdx.x")
+    thread_y = tvm.thread_axis("threadIdx.y")
+    block_extents = [1, 1, 1]
+    thread_extents = [1, 1]
+    pos = dim - 1
+    # blockIdx.x, vthreadx, threadIdx.x
+    while pos >= 0:
+        iter_var_name = part_one_order[pos]
+        if iter_var_name != "none":
+            index = spatial_iter_var_dict[iter_var_name]
+            print("check", iter_var_name, index, spatial_outer[index], spatial_outer_extents[index])
+            if spatial_outer[index] is not None:
+                block_extents[2] = spatial_outer_extents[index]
+                s[op].bind(spatial_outer[index], block_x)
+                print("check", spatial_middle[index], spatial_middle_extents[index])
+                if spatial_middle[index] is not None:
+                    s[op].bind(spatial_middle[index], vthread_x)
+                print("check", spatial_inner[index], spatial_inner_extents[index])
+                if spatial_inner[index] is not None:
+                    thread_extents[1] = spatial_inner_extents[index]
+                    s[op].bind(spatial_inner[index], thread_x)
+                pos -= 1
+                break
+        pos -= 1
+    # blockIdx.y, vthready, threadIdx.y
+    while pos >= 0:
+        iter_var_name = part_one_order[pos]
+        if iter_var_name != "none":
+            index = spatial_iter_var_dict[iter_var_name]
+            print("check", iter_var_name, index, spatial_outer[index], spatial_outer_extents[index])
+            if spatial_outer[index] is not None:
+                block_extents[1] = spatial_outer_extents[pos]
+                s[op].bind(spatial_outer[index], block_y)
+                print("check", spatial_middle[index], spatial_middle_extents[index])
+                if spatial_middle[index] is not None:
+                    s[op].bind(spatial_middle[index], vthread_y)
+                print("check", spatial_inner[index], spatial_inner_extents[index])
+                if spatial_inner[index] is not None:
+                    thread_extents[0] = spatial_inner_extents[index]
+                    s[op].bind(spatial_inner[index], thread_y)
+                pos -= 1
+                break
+        pos -= 1
+    # blockIdx.z, fuse
+    fuse_lst = []
+    while pos >= 0:
+        iter_var_name = part_one_order[pos]
+        if iter_var_name != "none":
+            index = spatial_iter_var_dict[iter_var_name]
+            if spatial_outer[index] is not None:
+                fuse_lst.append(spatial_outer[index])
+                block_extents[0] *= spatial_outer_extents[index]
+        pos -= 1
+    if fuse_lst:
+        fused = s[op].fuse(*list(reversed(fuse_lst)))
+        s[op].bind(fused, block_z)
+    # local write cache compute_at
+    cache_write_axis = None
+    candidates = [spatial_outer, spatial_middle, spatial_inner]
+
+    candidate_pos = 2
+    while cache_write_axis is None and candidate_pos >= 0:
+        pos = dim - 1
+        while pos >= 0:
+            name = part_one_order[pos]
+            print(name)
+            if name != "none":
+                index = spatial_iter_var_dict[name]
+                print(candidates[candidate_pos][index])
+                if candidates[candidate_pos][index] is not None:
+                    cache_write_axis = candidates[candidate_pos][index]
+                    break
+            pos -= 1
+        candidate_pos -= 1
+
+    if cache_write_axis is None:
+        raise RuntimeError("unexpected NoneType")
+    print("compute_at", cache_write_axis)
+    s[LocalCache].compute_at(s[op], cache_write_axis)
+    # reduce split
+    reduce_outer = [None] * dim
+    reduce_inner = [None] * dim
+    for i in range(dim):
+        if reduce_axis_names[i] != "none":
+            outer, inner = s[LocalCache].split(cache_reduce_iter_vars[i], factor=reduce_split_factors[i])
+            reduce_outer[i] = outer
+            reduce_inner[i] = inner
+    # reduce reorder
+    real_order = []
+    is_reduce = []
+    for name in part_two_order:
+        if name != "none":
+            index = reduce_iter_var_dict[name]
+            iter_var = reduce_outer[index]
+            if iter_var is None:
+                raise ValueError("unexpected NoneType")
+            real_order.append(iter_var)
+            is_reduce.append(True)
+    # inner reorder
+    for name in part_three_order:
+        if name != "none":
+            if name in spatial_iter_var_dict:
+                index = spatial_iter_var_dict[name]
+                iter_var = cache_spatial_iter_vars[index]
+                if iter_var is None:
+                    raise ValueError("unexpected NoneType")
+                real_order.append(iter_var)
+                is_reduce.append(False)
+            elif name in reduce_iter_var_dict:
+                index = reduce_iter_var_dict[name]
+                iter_var = reduce_inner[index]
+                if iter_var is None:
+                    raise ValueError("unexpected NoneType")
+                real_order.append(iter_var)
+                is_reduce.append(True)
+    if real_order:
+        s[LocalCache].reorder(*real_order)
+    # unroll and  vectorize
+    # p = len(real_order) - 1
+    # while p >= 0:
+    #     if not is_reduce[p]:
+    #         s[LocalCache].vectorize(real_order[p])
+    #         p -= 1
+    #         break
+    #     p -= 1
+    # if p >= 0:
+    #     s[LocalCache].unroll(real_order[p])
     return ret_dict, diary
 
 

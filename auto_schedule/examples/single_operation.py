@@ -75,7 +75,7 @@ def conv2d_batch(B, N, M, K, L, stride=1, padding=0, dtype="float32"):
     return Output.op, [A, W, Output]
 
 
-@register(args=(32, 32, 3, 5, 5, 1, 2))
+@register(args=(32, 32, 3, 5, 5, 10, 1, 2))
 def conv2d_channel(N, M, C, K, L, O, stride=1, padding=0, dtype="float32"):
     A = tvm.placeholder((N, M, C), dtype=dtype, name="A")
     W = tvm.placeholder((K, L, C, O), dtype=dtype, name="W")
@@ -95,20 +95,20 @@ def conv2d_channel(N, M, C, K, L, O, stride=1, padding=0, dtype="float32"):
 
 @register(args=(16, 32, 32, 3, 5, 5, 10, 1, 2))
 def conv2d_channel_batch(B, N, M, C, K, L, O, stride=1, padding=0, dtype="float32"):
-    Apad = tvm.placeholder((B, N + 2 * padding, M + 2 * padding, C), dtype=dtype, name="Apad")
+    A = tvm.placeholder((B, N, M, C), dtype=dtype, name="A")
     W = tvm.placeholder((K, L, C, O), dtype=dtype, name="W")
     N_out = max(0, (N + padding * 2 - K) // stride) + 1
     M_out = max(0, (M + padding * 2 - L) // stride) + 1
-    # Apad = tvm.compute((B, N + 2 * padding, M + 2 * padding, C),
-    #                    lambda b, i, j, k: tvm.if_then_else(tvm.all(i >= padding, j >= padding, i < N + padding, j < M + padding),
-    #                                               A[b, i - padding, j - padding, k], 0.0), name="Apad")
+    Apad = tvm.compute((B, N + 2 * padding, M + 2 * padding, C),
+                       lambda b, i, j, k: tvm.if_then_else(tvm.all(i >= padding, j >= padding, i < N + padding, j < M + padding),
+                                                  A[b, i - padding, j - padding, k], 0.0), name="Apad")
     rx, ry = tvm.reduce_axis((0, K), name="rx"), tvm.reduce_axis((0, L), name="ry")
     rc = tvm.reduce_axis((0, C), name="rc")
     Output = tvm.compute((B, N_out, M_out, O),
                          lambda b, i, j, k: tvm.sum(Apad[b, i * stride + rx, j * stride + ry, rc] * W[rx, ry, rc, k],
                                                     axis=[rx, ry, rc]),
                          name="Output")
-    return Output.op, [Apad, W, Output]
+    return Output.op, [A, W, Output]
 
 
 @register(args=(32, 32, 32, 5, 5, 5, 1, 2))

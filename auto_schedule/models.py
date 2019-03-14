@@ -420,7 +420,14 @@ class OpScheduleCPUd5(nn.Module):
         self.sasd3 = SASD(self.dim, length, hidden_dim, self.dim)
         self.sasd4 = SASD(self.dim, length, hidden_dim, self.dim)
         self.sasd5 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd_lst = [self.sasd1, self.sasd2, self.sasd3, self.sasd4, self.sasd5]
+        self.sasd_spatial_lst = [self.sasd1, self.sasd2, self.sasd3, self.sasd4, self.sasd5]
+
+        self.sasd6 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd7 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd8 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd9 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd10 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd_reduce_lst = [self.sasd6, self.sasd7, self.sasd8, self.sasd9, self.sasd10]
 
         self.rasd1 = RASD()
         self.rasd2 = RASD()
@@ -444,7 +451,7 @@ class OpScheduleCPUd5(nn.Module):
         self.sard_lst = [self.sard1, self.sard2, self.sard3, self.sapd]
         self.rard_lst = [self.rard1, self.rard2, self.rard3, self.rapd]
 
-    def _split(self, candidates, extents, feature, shape, random, sampling):
+    def _split(self, M_lst, R_lst, candidates, extents, feature, shape, random, sampling):
         assert len(candidates) == self.dim
         choice_lst = []
         value_lst = []
@@ -453,9 +460,9 @@ class OpScheduleCPUd5(nn.Module):
             extent = extents[i]
             lst = feature[name]
             if random:
-                value, choice = self.rasd_lst[i](extent)
+                value, choice = R_lst[i](extent)
             else:
-                value, choice = self.sasd_lst[i](lst, shape, extent, sampling)
+                value, choice = M_lst[i](lst, shape, extent, sampling)
             choice_lst.append(choice)
             value_lst.append(value)
         return choice_lst, value_lst
@@ -490,7 +497,7 @@ class OpScheduleCPUd5(nn.Module):
     def forward(self, type_key, candidates, extents, feature, shape, random=False, sampling=True):
         if type_key == "spatial":
             # candidates: list; extents: list; feature: dict; shape: dict
-            return self._split(candidates, extents, feature, shape, random, sampling)
+            return self._split(self.sasd_spatial_lst, self.rard_lst, candidates, extents, feature, shape, random, sampling)
 
         elif type_key == "parallel":
             # candidates: list; extents: dict; feature: dict; shape: dict
@@ -498,7 +505,7 @@ class OpScheduleCPUd5(nn.Module):
 
         elif type_key == "reduce":
             # candidates: list; extents: list; feature: dict; shape: dict
-            return self._split(candidates, extents, feature, shape, random, sampling)
+            return self._split(self.sasd_reduce_lst, self.rard_lst, candidates, extents, feature, shape, random, sampling)
 
         elif type_key == "reorder_one":
             # candidates: list; extents: dict; feature: dict; shape: dict
@@ -511,6 +518,123 @@ class OpScheduleCPUd5(nn.Module):
         elif type_key == "reorder_three":
             # candidates: list; extents: dict; feature: dict; shape: dict
             return self._reorder_or_parallel(2, candidates, extents, feature, shape, random, sampling, mode=1)
+
+        else:
+            raise ValueError("Not support type: {}".format(type_key))
+
+
+class OpScheduleGPUd5(nn.Module):
+    def __init__(self, length, hidden_dim):
+        # dim0: align dimension; dim1: axis_feature_dim
+        super(OpScheduleGPUd5, self).__init__()
+        self.dim = 5
+        self.hidden = hidden_dim
+        self.sasd1 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd2 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd3 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd4 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd5 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd_spatial_out_lst = [self.sasd1, self.sasd2, self.sasd3, self.sasd4, self.sasd5]
+
+        self.sasd6 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd7 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd8 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd9 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd10 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd_spatial_in_lst = [self.sasd6, self.sasd7, self.sasd8, self.sasd9, self.sasd10]
+
+        self.sasd11 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd12 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd13 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd14 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd15 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd_reduce_lst = [self.sasd11, self.sasd12, self.sasd13, self.sasd14, self.sasd15]
+
+        self.rasd1 = RASD()
+        self.rasd2 = RASD()
+        self.rasd3 = RASD()
+        self.rasd4 = RASD()
+        self.rasd5 = RASD()
+        self.rasd_lst = [self.rasd1, self.rasd2, self.rasd3, self.rasd4, self.rasd5]
+
+        self.sard1 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim))
+        self.sard2 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim))
+        self.sard3 = SARD(self.dim, self.dim*2, length, hidden_dim, 128, 128, comb(self.dim + self.dim, self.dim))
+
+        self.rard1 = RARD(fact(self.dim))
+        self.rard2 = RARD(fact(self.dim))
+        self.rard3 = RARD(comb(self.dim + self.dim, self.dim))
+
+        self.sard_lst = [self.sard1, self.sard2, self.sard3]
+        self.rard_lst = [self.rard1, self.rard2, self.rard3]
+
+    def _split(self, M_lst, R_lst, candidates, extents, feature, shape, random, sampling):
+        assert len(candidates) == self.dim
+        choice_lst = []
+        value_lst = []
+        for i in range(self.dim):
+            name = candidates[i]
+            extent = extents[i]
+            lst = feature[name]
+            if random:
+                value, choice = R_lst[i](extent)
+            else:
+                value, choice = M_lst[i](lst, shape, extent, sampling)
+            choice_lst.append(choice)
+            value_lst.append(value)
+        return choice_lst, value_lst
+
+    def _reorder(self, id, candidates, extents, feature, shape, random, sampling, mode=0):
+        # candidates: list; extents: dict; feature: dict; shape: dict
+        # update feature
+        if random:
+            logits, choice = self.rard_lst[id]()
+        else:
+            name_feature_dict = dict()
+            for name, value in extents.items():
+                lst = feature[name]
+                name_feature_dict[name] = []
+                for (op_name, contents) in lst:
+                    tmp = contents.copy()
+                    if mode == 0:
+                        tmp[1] *= (tmp[0] / value)
+                        tmp[2] *= (tmp[0] / value)
+                        tmp[0] = value
+                    elif mode == 1:
+                        tmp[0] = value
+                    else:
+                        raise ValueError("mode should in {0, 1}")
+                    name_feature_dict[name].append((op_name, tmp))
+            lst = []
+            for name in candidates:
+                lst.append(name_feature_dict[name])
+            logits, choice = self.sard_lst[id](lst, shape, sampling)
+        return choice, logits
+
+    def forward(self, type_key, candidates, extents, feature, shape, random=False, sampling=True):
+        if type_key == "spatial_one":
+            # candidates: list; extents: list; feature: dict; shape: dict
+            return self._split(self.sasd_spatial_out_lst, self.rasd_lst, candidates, extents, feature, shape, random, sampling)
+
+        if type_key == "spatial_three":
+            # candidates: list; extents: list; feature: dict; shape: dict
+            return self._split(self.sasd_spatial_in_lst, self.rasd_lst, candidates, extents, feature, shape, random, sampling)
+
+        elif type_key == "reduce":
+            # candidates: list; extents: list; feature: dict; shape: dict
+            return self._split(self.sasd_reduce_lst, self.rasd_lst, candidates, extents, feature, shape, random, sampling)
+
+        elif type_key == "reorder_one":
+            # candidates: list; extents: dict; feature: dict; shape: dict
+            return self._reorder(0, candidates, extents, feature, shape, random, sampling, mode=0)
+
+        elif type_key == "reorder_two":
+            # candidates: list; extents: dict; feature: dict; shape: dict
+            return self._reorder(1, candidates, extents, feature, shape, random, sampling, mode=0)
+
+        elif type_key == "reorder_three":
+            # candidates: list; extents: dict; feature: dict; shape: dict
+            return self._reorder(2, candidates, extents, feature, shape, random, sampling, mode=1)
 
         else:
             raise ValueError("Not support type: {}".format(type_key))

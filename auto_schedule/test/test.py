@@ -3,12 +3,16 @@ import torch
 import numpy as np
 import os
 import logging
-from auto_schedule.models import OpScheduleCPUd5
+import time
+import multiprocessing as multi
+from auto_schedule.models import OpScheduleCPUd5, OpScheduleGPUd5
 from auto_schedule.examples import FUNC_TABLE
-from auto_schedule.scheduler import op_schedule_cpu_general_dx, evaluate, graph_schedule_cpu_general_dx
+from auto_schedule.scheduler import op_schedule_cpu_general_dx, parallel_evaluate, \
+    graph_schedule_cpu_general_dx, op_schedule_gpu_general_dx, _evaluate
 
 
 CPU_NUM = os.cpu_count()
+GPU_NUM = 1
 
 
 def test_feature_extract():
@@ -47,7 +51,7 @@ def test_feature_extract():
             print()
 
 
-def test_op_schedule():
+def test_op_schedule_cpu():
     for name, compute in FUNC_TABLE.items():
         if name in ["conv3d", "conv3d_batch", "conv3d_channel", "conv3d_channel_batch"]:
             continue
@@ -70,14 +74,81 @@ def test_op_schedule():
             return sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(count_parameters(model))
         device = torch.device("cpu:0")
-        lst, diary = op_schedule_cpu_general_dx(dim, s, op, model, device)
+        lst, diary = op_schedule_cpu_general_dx(dim, s, op, model)
         print(tvm.lower(s, bufs, simple_mode=True))
         f = tvm.build(s, bufs, "llvm")
-        cost = evaluate(s, bufs, "llvm", np.random.randint(0, CPU_NUM))
+        cost = parallel_evaluate(s, bufs, "llvm", np.random.randint(0, CPU_NUM))
         msg = "{}({}) is {}ms, pass!\n".format(name, args, cost)
         print(msg)
         for ele in diary:
             print(ele)
+
+
+def test_op_schedule_gpu(timeout=10.0):
+    proc = []
+    q = multi.Queue()
+    for i in range(10):
+        p = multi.Process(target=_test_op_schedule_gpu, args=(q,))
+        p.start()
+        proc.append(p)
+    beg = time.time()
+    while time.time() - beg < timeout:
+        if any(p.is_alive() for p in proc):
+            time.sleep(.1)
+        else:
+            break
+    else:
+        for p in proc:
+            p.terminate()
+            p.join()
+    cost_lst = []
+    count = 0
+    while not q.empty():
+        cost_lst.append(q.get())
+        count += 1
+    while count < 10:
+        cost_lst.append(timeout * 1e3)
+        count += 1
+    print(cost_lst)
+    print(np.mean(np.array(cost_lst)))
+
+
+def _test_op_schedule_gpu(q=None):
+    for name, compute in FUNC_TABLE.items():
+        if name in ["conv3d", "conv3d_batch", "conv3d_channel", "conv3d_channel_batch", "gaussian_blur3x3"]:
+            continue
+        print("#################################")
+        print(name)
+        func = compute.func
+        args = compute.args
+        print(args)
+        op, bufs = func(*args)
+        dim = 5
+        model = OpScheduleGPUd5(3, 128)
+        s = tvm.create_schedule(op)
+        if "conv" in name:
+            print("check", name)
+            A = op.input_tensors[0]
+            s[A].compute_inline()
+        # if torch.cuda.is_available():
+        #     device= torch.device("cuda:0")
+        #     model.cuda(device)
+        # else:
+        #     device = torch.device("cpu:0")
+        def count_parameters(model):
+            return sum(p.numel() for p in model.parameters() if p.requires_grad)
+        # print(count_parameters(model))
+        lst, diary = op_schedule_gpu_general_dx(dim, s, op, model, random=True)
+        # print(tvm.lower(s, bufs, simple_mode=True))
+        f = tvm.build(s, bufs, "cuda")
+        cost = _evaluate(s, bufs, "cuda", np.random.randint(0, GPU_NUM), number=1)
+        msg = "{}({}) is {}ms, pass!\n".format(name, args, cost)
+        # print(msg)
+        # for ele in diary:
+        #     print(ele)
+        if q:
+            q.put(cost)
+        return cost
 
 
 def robust_test(round=100):
@@ -95,7 +166,7 @@ def robust_test(round=100):
             try:
                 stmt = tvm.lower(s, bufs, simple_mode=True)
                 f = tvm.build(s, bufs, "llvm")
-                cost = evaluate(s, bufs, "llvm", np.random.randint(0, CPU_NUM), timeout=0.003)
+                cost = parallel_evaluate(s, bufs, "llvm", np.random.randint(0, CPU_NUM), timeout=0.003)
                 msg = "{}({}) is {}ms, pass!\n".format(name, args, cost)
             except Exception as e:
                 msg = "{}({}) error!\n{}\n{}\n".format(name, args, str(e), diary)
@@ -110,8 +181,12 @@ def test_graph_schedule_cpu_general_dx(func, args, model_path, random=False, sam
     s = tvm.create_schedule(ops)
     graph_schedule_cpu_general_dx(dim, s, ops, model_path, random=random, sampling=sampling)
     f = tvm.build(s, bufs, "llvm")
-    cost = evaluate(s, bufs, "llvm", np.random.randint(0, CPU_NUM), number=10, timeout=timeout)
-    msg = "Optimial time cost is {}ms, pass!\n".format(cost)
+    total = 0.0
+    for i in range(10):
+        cost = parallel_evaluate(s, bufs, "llvm", np.random.randint(0, CPU_NUM), number=1, timeout=timeout)
+        total += cost
+        print(cost, "ms")
+    msg = "Optimial time cost is {}ms, pass!\n".format(total / 10)
     print(msg)
 
 
@@ -146,7 +221,7 @@ def test_graph_schedule_gpu_specific_any(number, type="cuda"):
                 raise ValueError("not support type: {}".format(type))
             sch, s, improve = graph_schedule_gpu_specific_any(ops, target, model)
             try:
-                time_cost = evaluate(sch, bufs, type, 1)
+                time_cost = parallel_evaluate(sch, bufs, type, 1)
                 pass_logger.info("{}{} passed with time cost={}ms".format(func.__name__, args, time_cost))
             except Exception as e:
                 stmt = tvm.lower(sch, bufs, simple_mode=True)
@@ -159,6 +234,10 @@ def test_graph_schedule_gpu_specific_any(number, type="cuda"):
                 wrong_logger.info(msg)
                 for line in schedule_diary:
                     wrong_logger.info("{}\n".format(line))
+
+
+if __name__ == "__main__":
+    test_op_schedule_gpu()
 
 
 
