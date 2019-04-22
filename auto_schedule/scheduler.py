@@ -1,11 +1,8 @@
 import tvm
-import numpy as np
 import torch
 import math
-import time
-import multiprocessing as multi
-from auto_schedule.utils import to_tuple, permute, interleave, gen_group
-from auto_schedule.models import OpScheduleCPUd5, ScheduleModel
+from auto_schedule.utils import to_tuple, permute, interleave, gen_group, nearest_power_of_two
+from auto_schedule.models import OpScheduleCPUd5, OpScheduleGPUd5
 from collections import deque
 
 
@@ -370,54 +367,6 @@ def get_axis_feature(op_lst):
     return op_result_dict
 
 
-def parallel_evaluate(s, bufs, target, dev_id, number=10, timeout=10.0):
-    proc = []
-    q = multi.Queue()
-    for i in range(number):
-        p = multi.Process(target=_evaluate, args=(s, bufs, target, dev_id, 1, q))
-        p.start()
-        proc.append(p)
-    beg = time.time()
-    while time.time() - beg < timeout:
-        if any(p.is_alive() for p in proc):
-            time.sleep(.1)
-        else:
-            break
-    else:
-        for p in proc:
-            p.terminate()
-            p.join()
-    count = 0
-    sum = 0
-    while not q.empty():
-        sum += q.get()
-        count += 1
-    while count < number:
-        sum += timeout * 1000.0
-        count += 1
-    return sum / count
-
-
-def serial_evaluate(s, bufs, target, dev_id, number=1, timeout=10.0):
-    pass
-
-
-def _evaluate(s, bufs, target, dev_id, number=1, q=None):
-    func = tvm.build(s, bufs, target)
-    ctx = tvm.context(target, dev_id)
-    tvm_arys = []
-    for arg in bufs:
-        shape = to_tuple(arg.shape)
-        tmp = np.random.uniform(-10, 10, size=shape).astype(arg.dtype)
-        tmp = tvm.nd.array(tmp, ctx)
-        tvm_arys.append(tmp)
-    evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
-    time_cost = evaluator(*tvm_arys).mean * 1e3
-    if q:
-        q.put(time_cost)
-    return time_cost
-
-
 def op_schedule_cpu_general_dx(dim, s, op, model, random=False, sampling=True):
     ret_dict = dict()
     record = Record()
@@ -546,15 +495,15 @@ def op_schedule_cpu_general_dx(dim, s, op, model, random=False, sampling=True):
     part_three_order = reorder_decision
 
     # record the diary
-    diary = []
-    diary.append(spatial_outer_extents)
-    diary.append(spatial_split_factors)
-    diary.append(part_one_order)
-    diary.append(parallel_decision)
-    diary.append(reduce_outer_extents)
-    diary.append(reduce_split_factors)
-    diary.append(part_two_order)
-    diary.append(part_three_order)
+    diary = dict()
+    diary["spatial"] = spatial_outer_extents
+    diary["spatial_factors"] = spatial_split_factors
+    diary["reorder_one"] = part_one_order
+    diary["parallel"] = parallel_decision
+    diary["reduce"] = reduce_outer_extents
+    diary["reduce_factors"] = reduce_split_factors
+    diary["reorder_two"] = part_two_order
+    diary["reorder_three"] = part_three_order
 
     # real schedule
     # cache write
@@ -700,7 +649,6 @@ def op_schedule_gpu_general_dx(dim, s, op, model, random=False, sampling=True):
             iter_var_dom_dict[iter_var.var.name] = iter_var.dom.extent.value
         for iter_var in op.reduce_axis:
             iter_var_dom_dict[iter_var.var.name] = iter_var.dom.extent.value
-    print(iter_var_dom_dict)
     # iter_var_name -> feature: (op_name, lst)
     visit_trace_dict = dict()
     iter_var_feature = dict()
@@ -765,28 +713,27 @@ def op_schedule_gpu_general_dx(dim, s, op, model, random=False, sampling=True):
     # spatial split
     # part one
     split_candidates = spatial_axis_names
-    print("spatial_axis_extents", spatial_axis_extents)
-    split_decision, value_lst = model("spatial_one", split_candidates, spatial_axis_extents, iter_var_feature, input_shapes, random, sampling)
+    spatial_split_decision, value_lst = model("spatial_one", split_candidates, spatial_axis_extents, iter_var_feature, input_shapes, random, sampling)
     ret_dict["spatial_one"] = value_lst
-    spatial_split_one_factors = [f for f in split_decision]
-    spatial_outer_extents = [math.ceil(spatial_axis_extents[i] / spatial_split_one_factors[i]) for i in range(dim)]
+    spatial_outer_extents = [spatial_axis_extents[i] // spatial_split_decision[i] for i in range(dim)]
     # part two
-    spatial_middle_extents = [2 if spatial_split_one_factors[i] % 2 == 0 else 1 for i in range(dim)]
-    spatial_split_two_factors = [math.ceil(spatial_split_one_factors[i] / spatial_middle_extents[i]) for i in range(dim)]
+    spatial_middle_extents = [2 if spatial_split_decision[i] % 2 == 0 else 1 for i in range(dim)]
+    spatial_left_extents = [spatial_axis_extents[i] // (spatial_outer_extents[i] * spatial_middle_extents[i]) for i in range(dim)]
     # part three
-    print("spatial_split_two_factors", spatial_split_two_factors)
-    split_candidates = ["none" if spatial_split_two_factors[i] == 1 else spatial_axis_names[i] for i in range(dim)]
-    split_decision, value_lst = model("spatial_three", split_candidates, spatial_split_two_factors, iter_var_feature, input_shapes, random, sampling)
+    split_candidates = spatial_axis_names
+    spatial_split_decision, value_lst = model("spatial_three", split_candidates, spatial_left_extents, iter_var_feature, input_shapes, random, sampling)
     ret_dict["spatial_three"] = value_lst
-    spatial_split_three_factors = [f for f in split_decision]
-    spatial_inner_extents = [math.ceil(spatial_split_two_factors[i] / spatial_split_three_factors[i]) for i in range(dim)]
+    spatial_inner_extents = [spatial_left_extents[i] // spatial_split_decision[i] for i in range(dim)]
+    # left extents
+    spatial_left_extents = [spatial_split_decision[i] for i in range(dim)]
     # reduce
-    print("reduce_axis_entents", reduce_axis_extents)
     reduce_candidates = reduce_axis_names
-    split_decision, value_lst = model("reduce", reduce_candidates, reduce_axis_extents, iter_var_feature, input_shapes, random, sampling)
+    reduce_split_decision, value_lst = model("reduce", reduce_candidates, reduce_axis_extents, iter_var_feature, input_shapes, random, sampling)
     ret_dict["reduce"] = value_lst
-    reduce_split_factors = [f for f in split_decision]
-    reduce_outer_extents = [math.ceil(reduce_axis_extents[i] / reduce_split_factors[i]) for i in range(dim)]
+    # outer extents
+    reduce_outer_extents = [reduce_axis_extents[i] // reduce_split_decision[i] for i in range(dim)]
+    # left extents
+    reduce_left_extents = [reduce_split_decision[i] for i in range(dim)]
     # reorder
     # part one
     part_one_iter_var_names = spatial_axis_names
@@ -814,49 +761,59 @@ def op_schedule_gpu_general_dx(dim, s, op, model, random=False, sampling=True):
     reorder_candidates = interleave(part_three_names_a, part_three_names_b)
     part_three_extents = dict()
     for i in range(dim):
-        part_three_extents[part_three_names_a[i]] = spatial_split_three_factors[i]
-        part_three_extents[part_three_names_b[i]] = reduce_split_factors[i]
+        part_three_extents[part_three_names_a[i]] = spatial_left_extents[i]
+        part_three_extents[part_three_names_b[i]] = reduce_left_extents[i]
     reorder_choice, logits = model("reorder_three", part_three_names_a + part_three_names_b, part_three_extents, iter_var_feature, input_shapes, random, sampling)
     reorder_decision = reorder_candidates[reorder_choice]
     ret_dict["reorder_three"] = logits
     part_three_order = reorder_decision
 
+    # hack here
+    # spatial_outer_extents = [1, 1, 128, 1, 1]
+    # spatial_middle_extents = [1, 1, 1, 1, 1]
+    # spatial_inner_extents = [1, 1, 4, 7, 7]
+    # spatial_left_extents = [1, 1, 2, 1, 1]
+    # part_one_order = ["none", "b", "k", "i", "j"]
+    # reduce_outer_extents = [1, 1, 128, 1, 1]
+    # reduce_left_extents = [1, 1, 8, 3, 3]
+    # part_two_order = ["none", "none", "rc", "ry", "rx"]
+    # part_three_order = ["none", "none", "rc", "ry", "rx", "none", "b", "k", "i", "j"]
     # record the diary
-    diary = []
-    diary.append(spatial_outer_extents)
-    diary.append(spatial_middle_extents)
-    diary.append(spatial_inner_extents)
-    diary.append(spatial_split_three_factors)
-    diary.append(part_one_order)
-    diary.append(reduce_outer_extents)
-    diary.append(reduce_split_factors)
-    diary.append(part_two_order)
-    diary.append(part_three_order)
-
-    for ele in diary:
-        print(ele)
+    part_one_order = spatial_axis_names
+    part_two_order = reduce_axis_names
+    part_three_order = reduce_axis_names + spatial_axis_names
+    diary = dict()
+    diary["spatial_one"] = spatial_outer_extents
+    diary["spatial_two"] = spatial_middle_extents
+    diary["spatial_three"] = spatial_inner_extents
+    diary["spatial_four"] = spatial_left_extents
+    diary["reorder_one"] = part_one_order
+    diary["reduce"] = reduce_outer_extents
+    diary["reduce_inner"] = reduce_left_extents
+    diary["reorder_two"] = part_two_order
+    diary["reorder_three"] = part_three_order
 
     # real schedule
     # cache read
-    # input_pos_dict = dict()
-    # read_cache_share_lst = []
-    # for i, t in enumerate(op.input_tensors):
-    #     input_pos_dict[t.op.name] = i
-    #     cache = s.cache_read(t, "shared", [op])
-    #     read_cache_share_lst.append(cache)
-    # read_cache_local_lst = []
-    # for t in read_cache_share_lst:
-    #     cache = s.cache_read(t, "local", [op])
-    #     read_cache_local_lst.append(cache)
-    # read_cache_spatial_iter_vars_lst = []
-    # for cache in read_cache_share_lst:
-    #     cha = dim - len(s[cache].op.axis)
-    #     if cha < 0:
-    #         raise ValueError("Dimension of Operation should <= {}".format(dim))
-    #     read_cache_spatial_iter_vars = [None] * cha
-    #     for i, iter_var in enumerate(s[cache].op.axis):
-    #         read_cache_spatial_iter_vars.append(iter_var)
-    #     read_cache_spatial_iter_vars_lst.append(read_cache_spatial_iter_vars)
+    input_pos_dict = dict()
+    read_cache_share_lst = []
+    for i, t in enumerate(op.input_tensors):
+        input_pos_dict[t.op.name] = i
+        cache = s.cache_read(t, "shared", [op])
+        read_cache_share_lst.append(cache)
+    read_cache_local_lst = []
+    for t in read_cache_share_lst:
+        cache = s.cache_read(t, "local", [op])
+        read_cache_local_lst.append(cache)
+    read_cache_spatial_iter_vars_lst = []
+    for cache in read_cache_share_lst:
+        cha = dim - len(s[cache].op.axis)
+        if cha < 0:
+            raise ValueError("Dimension of Operation should <= {}".format(dim))
+        read_cache_spatial_iter_vars = [None] * cha
+        for i, iter_var in enumerate(s[cache].op.axis):
+            read_cache_spatial_iter_vars.append(iter_var)
+        read_cache_spatial_iter_vars_lst.append(read_cache_spatial_iter_vars)
 
     # cache write
     LocalCache = s.cache_write(op.output(0), "local")
@@ -877,21 +834,24 @@ def op_schedule_gpu_general_dx(dim, s, op, model, random=False, sampling=True):
     spatial_outer, spatial_left = [None] * dim, [None] * dim
     for i in range(dim):
         if spatial_iter_vars[i] is not None:
-            outer, inner = s[op].split(spatial_iter_vars[i], factor=spatial_split_one_factors[i])
+            # # print("check split 1", i, spatial_iter_vars[i], spatial_outer_extents[i])
+            outer, inner = s[op].split(spatial_iter_vars[i], nparts=spatial_outer_extents[i])
             spatial_outer[i] = outer
             spatial_left[i] = inner
     # part two
     spatial_middle, spatial_remain = [None] * dim, [None] * dim
     for i in range(dim):
         if spatial_left[i] is not None:
-            outer, inner = s[op].split(spatial_left[i], factor=spatial_split_two_factors[i])
+            # # print("check split 2", i, spatial_left[i], spatial_middle_extents[i])
+            outer, inner = s[op].split(spatial_left[i], nparts=spatial_middle_extents[i])
             spatial_middle[i] = outer
             spatial_remain[i] = inner
     # part three
     spatial_inner, spatial_last = [None] * dim, [None] * dim
     for i in range(dim):
         if spatial_remain[i] is not None:
-            outer, inner = s[op].split(spatial_remain[i], factor=spatial_split_three_factors[i])
+            # # print("check split 3", i, spatial_remain[i], spatial_inner_extents[i])
+            outer, inner = s[op].split(spatial_remain[i], nparts=spatial_inner_extents[i])
             spatial_inner[i] = outer
             spatial_last[i] = inner
     order = []
@@ -899,6 +859,7 @@ def op_schedule_gpu_general_dx(dim, s, op, model, random=False, sampling=True):
         if iter_var is not None:
             order.append(iter_var)
     if order:
+        # # print("check order", order)
         s[op].reorder(*order)
     # spatial reorder
     outer_reorder = []
@@ -919,10 +880,13 @@ def op_schedule_gpu_general_dx(dim, s, op, model, random=False, sampling=True):
             if iter_var is not None:
                 inner_reorder.append(iter_var)
     if outer_reorder:
+        # print("check order one", outer_reorder)
         s[op].reorder(*outer_reorder)
     if middle_reorder:
+        # print("check order two", middle_reorder)
         s[op].reorder(*middle_reorder)
     if inner_reorder:
+        # print("check order three", inner_reorder)
         s[op].reorder(*inner_reorder)
     # bind
     block_x = tvm.thread_axis("blockIdx.x")
@@ -930,26 +894,28 @@ def op_schedule_gpu_general_dx(dim, s, op, model, random=False, sampling=True):
     block_z = tvm.thread_axis("blockIdx.z")
     vthread_x = tvm.thread_axis("vthread", name="vx")
     vthread_y = tvm.thread_axis("vthread", name="vy")
+    vthread_z = tvm.thread_axis("vthread", name="vz")
     thread_x = tvm.thread_axis("threadIdx.x")
     thread_y = tvm.thread_axis("threadIdx.y")
+    thread_z = tvm.thread_axis("threadIdx.z")
     block_extents = [1, 1, 1]
-    thread_extents = [1, 1]
+    thread_extents = [1, 1, 1]
     pos = dim - 1
     # blockIdx.x, vthreadx, threadIdx.x
     while pos >= 0:
         iter_var_name = part_one_order[pos]
         if iter_var_name != "none":
             index = spatial_iter_var_dict[iter_var_name]
-            print("check", iter_var_name, index, spatial_outer[index], spatial_outer_extents[index])
             if spatial_outer[index] is not None:
+                # print("check bind bx", pos, iter_var_name, spatial_outer[index])
                 block_extents[2] = spatial_outer_extents[index]
                 s[op].bind(spatial_outer[index], block_x)
-                print("check", spatial_middle[index], spatial_middle_extents[index])
                 if spatial_middle[index] is not None:
+                    # print("check bind vx", pos, iter_var_name, spatial_middle[index])
                     s[op].bind(spatial_middle[index], vthread_x)
-                print("check", spatial_inner[index], spatial_inner_extents[index])
                 if spatial_inner[index] is not None:
-                    thread_extents[1] = spatial_inner_extents[index]
+                    # print("check bind tx", pos, iter_var_name, spatial_inner[index])
+                    thread_extents[2] = spatial_inner_extents[index]
                     s[op].bind(spatial_inner[index], thread_x)
                 pos -= 1
                 break
@@ -959,33 +925,52 @@ def op_schedule_gpu_general_dx(dim, s, op, model, random=False, sampling=True):
         iter_var_name = part_one_order[pos]
         if iter_var_name != "none":
             index = spatial_iter_var_dict[iter_var_name]
-            print("check", iter_var_name, index, spatial_outer[index], spatial_outer_extents[index])
             if spatial_outer[index] is not None:
+                # print("check bind by", pos, iter_var_name, spatial_outer[index])
                 block_extents[1] = spatial_outer_extents[pos]
                 s[op].bind(spatial_outer[index], block_y)
-                print("check", spatial_middle[index], spatial_middle_extents[index])
                 if spatial_middle[index] is not None:
+                    # print("check bind vy", pos, iter_var_name, spatial_middle[index])
                     s[op].bind(spatial_middle[index], vthread_y)
-                print("check", spatial_inner[index], spatial_inner_extents[index])
                 if spatial_inner[index] is not None:
-                    thread_extents[0] = spatial_inner_extents[index]
+                    # print("check bind ty", pos, iter_var_name, spatial_inner[index])
+                    thread_extents[1] = spatial_inner_extents[index]
                     s[op].bind(spatial_inner[index], thread_y)
                 pos -= 1
                 break
         pos -= 1
     # blockIdx.z, fuse
-    fuse_lst = []
+    fuse_lst_bz = []
+    fuse_lst_vz = []
+    fuse_lst_tz = []
     while pos >= 0:
         iter_var_name = part_one_order[pos]
         if iter_var_name != "none":
             index = spatial_iter_var_dict[iter_var_name]
             if spatial_outer[index] is not None:
-                fuse_lst.append(spatial_outer[index])
+                fuse_lst_bz.append(spatial_outer[index])
                 block_extents[0] *= spatial_outer_extents[index]
+                if spatial_middle[index] is not None:
+                    fuse_lst_vz.append(spatial_middle[index])
+                if spatial_inner[index] is not None:
+                    fuse_lst_tz.append(spatial_inner[index])
+                    thread_extents[0] *= spatial_inner_extents[index]
         pos -= 1
-    if fuse_lst:
-        fused = s[op].fuse(*list(reversed(fuse_lst)))
+    if fuse_lst_bz:
+        # print("check fuse bz", fuse_lst_bz)
+        fused = s[op].fuse(*list(reversed(fuse_lst_bz)))
         s[op].bind(fused, block_z)
+    if fuse_lst_vz:
+        # print("check fuse vz", fuse_lst_vz)
+        fused = s[op].fuse(*list(reversed(fuse_lst_vz)))
+        s[op].bind(fused, vthread_z)
+    if fuse_lst_tz:
+        # print("check fuse tz", fuse_lst_tz)
+        fused = s[op].fuse(*list(reversed(fuse_lst_tz)))
+        s[op].bind(fused, thread_z)
+
+    # print("check extents")
+
     # local write cache compute_at
     cache_write_axis = None
     candidates = [spatial_outer, spatial_middle, spatial_inner]
@@ -995,11 +980,10 @@ def op_schedule_gpu_general_dx(dim, s, op, model, random=False, sampling=True):
         pos = dim - 1
         while pos >= 0:
             name = part_one_order[pos]
-            print(name)
             if name != "none":
                 index = spatial_iter_var_dict[name]
-                print(candidates[candidate_pos][index])
                 if candidates[candidate_pos][index] is not None:
+                    # print("check compute at", name, candidate_pos, pos, index, candidates[candidate_pos][index])
                     cache_write_axis = candidates[candidate_pos][index]
                     break
             pos -= 1
@@ -1007,28 +991,31 @@ def op_schedule_gpu_general_dx(dim, s, op, model, random=False, sampling=True):
 
     if cache_write_axis is None:
         raise RuntimeError("unexpected NoneType")
-    print("compute_at", cache_write_axis)
     s[LocalCache].compute_at(s[op], cache_write_axis)
     # reduce split
     reduce_outer = [None] * dim
     reduce_inner = [None] * dim
     for i in range(dim):
         if reduce_axis_names[i] != "none":
-            outer, inner = s[LocalCache].split(cache_reduce_iter_vars[i], factor=reduce_split_factors[i])
+            outer, inner = s[LocalCache].split(cache_reduce_iter_vars[i], nparts=reduce_outer_extents[i])
             reduce_outer[i] = outer
             reduce_inner[i] = inner
     # reduce reorder
-    real_order = []
-    is_reduce = []
+    real_order_part_two = []
+    is_reduce_part_two = []
     for name in part_two_order:
         if name != "none":
             index = reduce_iter_var_dict[name]
             iter_var = reduce_outer[index]
             if iter_var is None:
                 raise ValueError("unexpected NoneType")
-            real_order.append(iter_var)
-            is_reduce.append(True)
+            real_order_part_two.append(iter_var)
+            is_reduce_part_two.append(True)
+    # print("check reorder two", real_order_part_two)
     # inner reorder
+    real_order_part_three = []
+    is_reduce_part_three = []
+    real_order_part_three_extents = []
     for name in part_three_order:
         if name != "none":
             if name in spatial_iter_var_dict:
@@ -1036,27 +1023,130 @@ def op_schedule_gpu_general_dx(dim, s, op, model, random=False, sampling=True):
                 iter_var = cache_spatial_iter_vars[index]
                 if iter_var is None:
                     raise ValueError("unexpected NoneType")
-                real_order.append(iter_var)
-                is_reduce.append(False)
+                real_order_part_three.append(iter_var)
+                is_reduce_part_three.append(False)
             elif name in reduce_iter_var_dict:
                 index = reduce_iter_var_dict[name]
                 iter_var = reduce_inner[index]
                 if iter_var is None:
                     raise ValueError("unexpected NoneType")
-                real_order.append(iter_var)
-                is_reduce.append(True)
+                real_order_part_three.append(iter_var)
+                is_reduce_part_three.append(True)
+            real_order_part_three_extents.append(part_three_extents[name])
+    # print("check reorder three", real_order_part_three)
+    real_order = real_order_part_two + real_order_part_three
     if real_order:
         s[LocalCache].reorder(*real_order)
+
+    # read cache compute at
+    for i in range(len(op.input_tensors)):
+        scache = read_cache_share_lst[i]
+        lcache = read_cache_local_lst[i]
+        if len(real_order_part_two) < 1:
+            s[scache].compute_at(s[LocalCache], inner_reorder[-1])
+        else:
+            s[scache].compute_at(s[LocalCache], real_order_part_two[-1])
+        s[lcache].compute_at(s[LocalCache], real_order_part_three[0])
+        for cache in [scache, lcache]:
+            fuse_lst = []
+            extent = 1
+            for axis in s[cache].op.axis:
+                fuse_lst.append(axis)
+                extent *= axis.dom.extent.value
+            # print("check extent", extent, fuse_lst)
+            fused = s[cache].fuse(*fuse_lst)
+            if extent > thread_extents[0]:
+                # print("check cache split 1", thread_extents[0])
+                outer, fused = s[cache].split(fused, nparts=thread_extents[0])
+                s[cache].bind(outer, thread_z)
+                extent = extent // thread_extents[0]
+            if extent > thread_extents[1]:
+                # print("check cache split 2", thread_extents[1])
+                outer, fused = s[cache].split(fused, nparts=thread_extents[1])
+                s[cache].bind(outer, thread_y)
+                extent = extent // thread_extents[1]
+            if extent > thread_extents[2]:
+                # print("check cache split 3", thread_extents[2])
+                outer, fused = s[cache].split(fused, nparts=thread_extents[2])
+                s[cache].bind(outer, thread_x)
+                extent = extent // thread_extents[2]
+            # outer, inner = s[cache].split(fused, factor=min(extent, 4))
+            # s[cache].vectorize(inner)
+
+    # alive = []
+    # alive_extents = []
+    # for lst in read_cache_spatial_iter_vars_lst:
+    #     tmp = [False] * len(lst)
+    #     tmp_ext = [0] * len(lst)
+    #     alive.append(tmp)
+    #     alive_extents.append(tmp_ext)
+    # for name in part_three_order[1:]:
+    #     if name == "none":
+    #         continue
+    #     trace = visit_trace_dict[name]
+    #     for (op_name, pos) in trace:
+    #         index = input_pos_dict[op_name]
+    #         lst = alive[index]
+    #         lst[pos] = True
+    #         lst = alive_extents[index]
+    #         lst[pos] = max(lst[pos], part_three_extents[name])
+    # if len(real_order_part_three) > 0:
+    #     for i in range(len(op.input_tensors)):
+    #         scache = read_cache_share_lst[i]
+    #         lcache = read_cache_local_lst[i]
+    #         s[scache].compute_at(s[LocalCache], real_order_part_three[0])
+    #         if len(real_order_part_three) == 1:
+    #             s[lcache].compute_inline()
+    #         else:
+    #             s[lcache].compute_at(s[LocalCache], real_order_part_three[1])
+    #         alive_lst = alive[i]
+    #         alive_extents_lst = alive_extents[i]
+    #         point = dim - 1
+    #         while point >= 0:
+    #             if alive_lst[point]:
+    #                 parts = thread_extents[1]
+    #                 if parts == 0:
+    #                     parts = 32
+    #                 if alive_extents_lst[point] >= parts > 1:
+    #                     outer, inner = s[scache].split(s[scache].op.axis[point], nparts=parts)
+    #                     s[scache].bind(outer, thread_x)
+    #                     _, inner = s[scache].split(inner, factor=min(nearest_power_of_two(alive_extents_lst[point] // parts), 4))
+    #                     s[scache].vectorize(inner)
+    #                 point -= 1
+    #                 break
+    #             point -= 1
+    #         while point >= 0:
+    #             if alive_lst[point]:
+    #                 parts = thread_extents[0]
+    #                 if parts == 0:
+    #                     parts = 16
+    #                 outer, inner = s[scache].split(s[scache].op.axis[point], nparts=parts)
+    #                 s[scache].bind(outer, thread_y)
+    #                 point -= 1
+    #                 break
+    #             point -= 1
+    # else:
+    #     for i in range(len(op.input_tensors)):
+    #         scache = read_cache_share_lst[i]
+    #         lcache = read_cache_local_lst[i]
+    #         s[scache].compute_inline()
+    #         s[lcache].compute_inline()
+
     # unroll and  vectorize
-    # p = len(real_order) - 1
-    # while p >= 0:
-    #     if not is_reduce[p]:
-    #         s[LocalCache].vectorize(real_order[p])
-    #         p -= 1
-    #         break
-    #     p -= 1
-    # if p >= 0:
-    #     s[LocalCache].unroll(real_order[p])
+    if len(real_order_part_three) > 1:
+        p = len(real_order_part_three) - 1
+        # while p >= 2:
+        #     if not is_reduce_part_three[p]:
+        #         # print("check vec", p)
+        #         _, inner = s[LocalCache].split(real_order_part_three[p], factor=min(nearest_power_of_two(real_order_part_three_extents[p]), 4))
+        #         s[LocalCache].vectorize(inner)
+        #         p -= 1
+        #         break
+        #     p -= 1
+        if p >= 1:
+            # print("check unroll", p)
+            # _, inner = s[LocalCache].split(real_order_part_three[p], factor=min(real_order_part_three_extents[p], 128))
+            s[LocalCache].unroll(real_order_part_three[p])
     return ret_dict, diary
 
 
@@ -1093,373 +1183,23 @@ def graph_schedule_cpu_general_dx(dim, s, ops, model_path, random=False, samplin
     #     op_schedule_cpu_general_dx(dim, s, op, model, device, random)
 
 
-def graph_schedule_gpu_specific_any(ops, target, model):
-    s = Schedule(ops, target)
-    op_feature_dict = dict()
-
-    class OpFeature(object):
-        def __init__(self):
-            self.shape_feature = None
-            self.op_feature = None
-            self.iter_var_feature = None
-            self.visit_feature = None
-            self.other_feature = None
-            self.whole_feature = None
-
-    # prepare other feature
-    pack_other = []
-    # pass zero
-    for op, op_sch in s.op_schedule_dict.items():
-        tmp = []
-        tmp += [float(op_sch.is_compute), float(op_sch.has_reduce), float(op_sch.is_output)]
-        tmp += [float(op_sch.num_outputs), float(op_sch.num_inputs)]
-        pack_other.append(tmp)
-    pack_other_vec = torch.FloatTensor(pack_other)
-    pack_other_feature = model("other", pack_other_vec)     # use one batch to compute for all ops
-    # pass one
-    for i, (op, op_sch) in enumerate(s.op_schedule_dict.items()):
-        op_feature_dict[op] = OpFeature()
-        op_feature_dict[op].other_feature = pack_other_feature[i]
-
-    # total improve
-    total_improve = 1
-
-    # pass two
-    for op, op_sch in s.op_schedule_dict.items():
-        # prepare shape feature
-        shape_vec = torch.FloatTensor(op_sch.shape).unsqueeze(1)
-        shape_feature = model("shape", shape_vec)
-        op_feature_dict[op].shape_feature = shape_feature
-
-        # prepare iter_var feature
-        tmp = []
-        index = []
-        cur = 0
-        for iter_var_name in op_sch.org_spatial_iter_var_names:
-            fea = op_sch.iter_var_feature_dict[iter_var_name]
-            for v in fea:
-                tmp.append(v)
-                tmp[-1][0] /= BASE
-                tmp[-1][1] /= BASE
-            cur = cur + len(fea)
-            index.append(cur)
-        siter_var_feature, sorder, simprove = model("spatial", torch.FloatTensor(tmp), index)
-        # the decision of reorder
-        for i, part in enumerate(sorder):
-            op_sch.zyx_numbers[i] = part
-        total_improve = total_improve * (1 + simprove)
-
-
-        tmp = []
-        index = []
-        cur = 0
-        for iter_var_name in op_sch.org_reduce_iter_var_names:
-            fea = op_sch.iter_var_feature_dict[iter_var_name]
-            for v in fea:
-                tmp.append(v)
-                tmp[-1][0] /= BASE
-                tmp[-1][1] /= BASE
-            cur = cur + len(fea)
-            index.append(cur)
-        riter_var_feature, rorder, rimprove = model("reduce", torch.FloatTensor(tmp), index, target)
-        # the decision of reorder, record number, not axis
-        for i, part in enumerate(rorder):
-            op_sch.reduce_numbers[i] = part
-        total_improve = total_improve * (1 + rimprove)
-
-        op_feature_dict[op].iter_var_feature = torch.cat([siter_var_feature, riter_var_feature])
-
-        # prepare op_feature
-        op_feature_dict[op].op_feature = torch.cat(
-            [op_feature_dict[op].shape_feature, op_feature_dict[op].iter_var_feature,
-             op_feature_dict[op].other_feature])
-
-    num_feature = []
-    num_msg = []
-    # pass three
-    for op, op_sch in s.op_schedule_dict.items():
-        # prepare visit_feature
-        op_feature_dict[op].visit_feature = model("visit", op_sch, op_feature_dict)
-
-        # prepare whole_feature
-        op_feature_dict[op].whole_feature = torch.cat([op_feature_dict[op].op_feature, op_feature_dict[op].visit_feature])
-
-        # make schedule decisions
-        if op_sch.able_inline:
-            # compute_inline decision
-            ret = model("inline", op_feature_dict[op].whole_feature)
-            improve = torch.max(ret)
-            total_improve = total_improve * (1 + improve)
-            choice = torch.argmax(ret)
-            if choice == 0:     # inline
-                op_sch.compute_inline = True
-
-        if op_sch.need_cache_read:
-            # cache_read decision
-            ret = model("cache", op_feature_dict[op].whole_feature)
-            improve = torch.max(ret)
-            total_improve = total_improve * (1 + improve)
-            choice = torch.argmax(ret)
-            if choice == 0:  # use read cache: local + share
-                for i in range(op_sch.num_inputs):
-                    op_sch.use_read_local_cache[i] = True
-                    op_sch.use_read_share_cache[i] = True
-            elif choice == 1:   # use read cache: share
-                for i in range(op_sch.num_inputs):
-                    op_sch.use_read_share_cache[i] = True
-
-        if op_sch.need_cache_write:
-            # cache_write decision
-            for i in range(op_sch.num_outputs):
-                op_sch.use_write_local_cache[i] = True      # fix decision
-            num_feature.append(op_feature_dict[op].whole_feature)
-            for name, axis in op_sch.iter_var_dict.items():
-                num_msg.append(axis.dom.extent.value / BASE)
-
-    # prepare factors
-    bx, by, bz, tx, ty, tz, vtx, vty, vtz, rf, improve = model("factor", num_feature, num_msg)
-    total_improve = total_improve * (1 + improve)
-    s.block_factors[0] = min(bx, s.block_factors[0])
-    s.block_factors[1] = min(by, s.block_factors[1])
-    s.block_factors[2] = min(bz, s.block_factors[2])
-    s.thread_factors[0] = min(tx, s.thread_factors[0])
-    s.thread_factors[1] = min(ty, s.thread_factors[1])
-    s.thread_factors[2] = min(tz, s.thread_factors[2])
-    s.vthread_factors[0] = min(vtx, s.vthread_factors[0])
-    s.vthread_factors[1] = min(vty, s.vthread_factors[1])
-    s.vthread_factors[2] = min(vtz, s.vthread_factors[2])
-
-    # real schedule
-    sch = tvm.create_schedule(ops)
-    diary = []
-    if s.need_bind:
-        # bind
-        tbx = tvm.thread_axis("blockIdx.x")
-        tby = tvm.thread_axis("blockIdx.y")
-        tbz = tvm.thread_axis("blockIdx.z")
-        ttx = tvm.thread_axis("threadIdx.x")
-        tty = tvm.thread_axis("threadIdx.y")
-        ttz = tvm.thread_axis("threadIdx.z")
-        tvx = tvm.thread_axis("vthread", name="vx")
-        tvy = tvm.thread_axis("vthread", name="vy")
-        tvz = tvm.thread_axis("vthread", name="vz")
-
-        tb_lst = [tbx, tby, tbz]
-        tt_lst = [ttx, tty, ttz]
-        tv_lst = [tvx, tvy, tvz]
-    for op, op_sch in s.op_schedule_dict.items():
-        if op_sch.compute_inline:
-            # compute_inline
-            sch[op].compute_inline()
-            diary.append("{} compute_inline".format(op.name))
-
-        for i in range(op_sch.num_inputs):
-            # cache_read
-            if op_sch.use_read_share_cache[i]:
-                op_sch.read_share_cache[i] = sch.cache_read(op_sch.input_tensors[i], "shared", [op])
-            if op_sch.use_read_local_cache[i]:
-                if op_sch.read_share_cache[i] is not None:
-                    op_sch.read_local_cache[i] = sch.cache_read(op_sch.read_share_cache[i], "local", [op])
-                else:
-                    op_sch.read_local_cache[i] = sch.cache_read(op_sch.input_tensors[i], "local", [op])
-
-        for i in range(op_sch.num_outputs):
-            # cache_write
-            if op_sch.use_write_local_cache[i]:
-                op_sch.write_local_cache[i] = sch.cache_write(op_sch.output_tensors[i], "local")
-            if op_sch.use_write_share_cache[i]:
-                if op_sch.write_local_cache[i] is not None:
-                    op_sch.write_share_cache[i] = sch.cache_write(op_sch.write_local_cache[i], "shared")
-                else:
-                    op_sch.write_share_cache[i] = sch.cache_write(op_sch.output_tensors[i], "shared")
-
-        if op_sch.is_compute and not op_sch.compute_inline:
-            # split, reorder
-            x_box, y_box, z_box, r_box = [], [], [], []
-            extent = []
-            boxes = [z_box, y_box, x_box, r_box]
-            for i, part in enumerate(op_sch.zyx_numbers):
-                tmp = 1
-                for number in part:
-                    axis = sch[op].op.axis[number]
-                    boxes[i].append(axis)
-                    tmp *= axis.dom.extent.value
-                extent.append(tmp)
-            fused = []
-            use_fuse = [False, False, False]
-            pre_order = []
-            thread_use = [[False, False, False], [False, False, False], [False, False, False]]
-            for i in range(3):
-                part = boxes[i]
-                if len(part) > 1:
-                    fused.append(sch[op].fuse(*part))
-                    diary.append("{} fuse [{}]".format(op.name, [v.var.name for v in part]))
-                    use_fuse[i] = True
-                elif len(part) == 1:
-                    fused.append(part[0])
-                else:
-                    fused.append(None)
-            for i in range(3):
-                if extent[i] > 1:
-                    outer, inner = sch[op].split(fused[i], nparts=s.block_factors[i])
-                    diary.append("{} split {} nparts={}".format(op.name, fused[i].var.name, s.block_factors[i]))
-                    op_sch.block_binds[i].append(outer)
-                    thread_use[0][i] = True
-                    pre_order.append(outer)
-                    if use_fuse[i]:
-                        extent[i] = 1       # refuse to further schedule fused axis
-                        fused[i] = None
-                    else:
-                        extent[i] = math.ceil(extent[i] / s.block_factors[i])
-                        fused[i] = inner
-            for i in range(3):
-                if extent[i] > 1:
-                    outer, inner = sch[op].split(fused[i], nparts=s.vthread_factors[i])
-                    diary.append("{} split {} nparts={}".format(op.name, fused[i].var.name, s.vthread_factors[i]))
-                    op_sch.vthread_binds[i].append(outer)
-                    thread_use[1][i] = True
-                    extent[i] = math.ceil(extent[i] / s.vthread_factors[i])
-                    pre_order.append(outer)
-                    fused[i] = inner
-            for i in range(3):
-                if extent[i] > 1:
-                    outer, inner = sch[op].split(fused[i], nparts=s.thread_factors[i])
-                    diary.append("{} split {} nparts={}".format(op.name, fused[i].var.name, s.thread_factors[i]))
-                    op_sch.threads_binds[i].append(outer)
-                    thread_use[2][i] = True
-                    extent[i] = math.ceil(extent[i] / s.thread_factors[i])
-                    pre_order.append(outer)
-                    fused[i] = inner
-            remain = []
-            for i in range(3):
-                if extent[i] > 1:
-                    remain.append(fused[i])
-            reorder = r_box + pre_order + remain        # fixed order decision
-            sch[op].reorder(*reorder)
-            diary.append("{} reorder [{}]".format(op.name, [v.var.name for v in reorder]))
-
-            a_box, b_box = [], []
-            boxes = [a_box, b_box]
-            split_op = op
-            use_cache_write = False
-            count_cache = 0
-            cache_buf = []
-            for cache in op_sch.write_local_cache:
-                if cache is not None:
-                    count_cache += 1
-                    cache_buf.append(cache)
-            if count_cache == 1:        # only do so when single write cache
-                cache = cache_buf[0]
-                split_op = cache.op
-                use_cache_write = True
-                sch[cache].compute_at(sch[op], pre_order[-1])   # pre_order should not be empty
-                diary.append("{} compute_at {} {}".format(cache.name, op.name, pre_order[-1].var.name))
-                for i, part in enumerate(op_sch.reduce_numbers):
-                    for number in part:
-                        axis = sch[cache].op.reduce_axis[number]
-                        boxes[i].append(axis)
-                remain.clear()
-                for i in range(3):
-                    if extent[i] > 1:
-                        part = op_sch.zyx_numbers[i]
-                        if len(part) == 1:      # no consider for fused axis
-                            remain.append(sch[cache].op.axis[part[0]])
-            if not use_cache_write:
-                for i, part in enumerate(op_sch.reduce_numbers):
-                    for number in part:
-                        axis = sch[op].op.reduce_axis[number]
-                        boxes[i].append(axis)
-
-            aouter, ainner = [], []
-            for axis in a_box:
-                if axis.dom.extent.value >= rf:
-                    outer, inner = sch[split_op].split(axis, factor=rf)
-                    diary.append("{} split {} factor={}".format(split_op.name, axis.var.name, rf))
-                    aouter.append(outer)
-                    ainner.append(inner)
-                else:
-                    aouter.append(axis)
-            post_order = aouter + b_box + ainner + remain
-            if post_order:      # post_order may be empty
-                sch[split_op].reorder(*post_order)
-                diary.append("{} reorder [{}]".format(split_op.name, [v.var.name for v in post_order]))
-                diary.append("{} reorder [{}]".format(split_op.name, [v.var.name for v in post_order]))
-
-            # fixed compute_at
-            for i, cache in enumerate(op_sch.read_share_cache):
-                if cache is not None:
-                    if b_box:
-                        pos = b_box[-1]
-                    elif aouter:
-                        pos = aouter[-1]
-                    else:
-                        pos = None
-                    if pos is not None:
-                        # schedule load share memory
-                        sch[cache].compute_at(sch[split_op], pos)
-                        diary.append("{} compute_at {} {}".format(cache.name, split_op.name, pos.var.name))
-                        active_axis_name = [[], [], []]
-                        for j in range(3):
-                            if extent[j] > 1:
-                                for number in op_sch.zyx_numbers[j]:
-                                    active_axis_name[j].append(op.axis[number])
-                        visit_by = s.op_schedule_dict[op_sch.input_tensors[i].op].visit_feature[op]
-                        active_dim = []
-                        for dim, (d, v) in enumerate(visit_by):
-                            flag = -1
-                            for i in range(3):
-                                for name in active_axis_name[i]:
-                                    if name in d:
-                                        flag = i
-                                        break
-                            if flag >= 0:
-                                active_dim.append((dim, flag))
-                        active_dim_dict = dict(active_dim)
-                        split_candidates = []
-                        non_split = []
-                        split_results = []
-                        for i, axis in enumerate(sch[cache].op.axis):
-                            if i in active_dim_dict:
-                                outer, inner = sch[cache].split(axis, nparts=s.thread_factors[active_dim_dict[i]])
-                                diary.append("{} split {} nparts={}".format(cache.name, axis.var.name, s.thread_factors[active_dim_dict[i]]))
-                                split_candidates.append(outer)
-                                if s.need_bind:
-                                    sch[cache].bind(outer, tt_lst[active_dim_dict[i]])
-                                    diary.append("{} bind {} {}".format(cache.name, outer.var.name, "threadIdx.{}".format(["x", "y", "z"][active_dim_dict[i]])))
-                                split_results.append(inner)
-                            else:
-                                non_split.append(axis)
-                        reorder = split_candidates + non_split + split_results
-                        sch[cache].reorder(*reorder)
-                        diary.append("{} reorder [{}]".format(cache.name, [v.var.name for v in reorder]))
-                    else:
-                        sch[cache].compute_inline()
-                        diary.append("{} compute_inline".format(cache.name))
-            for cache in op_sch.read_local_cache:
-                if cache is not None:
-                    if ainner:
-                        pos = ainner[-1]
-                    elif remain:
-                        pos = remain[0]
-                    else:
-                        pos = None
-                    if pos is not None:
-                        sch[cache].compute_at(sch[split_op], pos)
-                        diary.append("{} compute_at {} {}".format(cache.name, split_op.name, pos.var.name))
-                    else:
-                        sch[cache].compute_inline()
-                        diary.append("{} compute_inline".format(cache.name))
-            if s.need_bind:
-                # bind
-                for i in range(3):
-                    if thread_use[0][i]:
-                        sch[op].bind(op_sch.block_binds[i][0], tb_lst[i])
-                        diary.append("{} bind {} {}".format(op.name, op_sch.block_binds[i][0].var.name, "blockIdx.{}".format(["x", "y", "z"][i])))
-                    if thread_use[1][i]:
-                        sch[op].bind(op_sch.vthread_binds[i][0], tv_lst[i])
-                        diary.append("{} bind {} {}".format(op.name, op_sch.vthread_binds[i][0].var.name, "vthreadIdx.{}".format(["x", "y", "z"][i])))
-                    if thread_use[2][i]:
-                        sch[op].bind(op_sch.threads_binds[i][0], tt_lst[i])
-                        diary.append("{} bind {} {}".format(op.name, op_sch.threads_binds[i][0].var.name, "threadIdx.{}".format(["x", "y", "z"][i])))
-    s.schedule_diary = diary
-    return sch, s, total_improve
+def graph_schedule_gpu_general_dx(dim, s, ops, model_path, random=False, sampling=True):
+    if not isinstance(ops, (list, tuple)):
+        ops = [ops]
+    bfs_order, down_graph = graph_analysis(ops)
+    group_points = []
+    for op in bfs_order:
+        if not isinstance(op, tvm.tensor.ComputeOp):
+            continue
+        if able_inline(op, down_graph):
+            s[op].compute_inline()
+        else:
+            group_points.append(op)
+    model = OpScheduleGPUd5(3, 128)
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
+    _, diary = op_schedule_gpu_general_dx(dim, s, group_points[0], model, random, sampling)
+    for name, ele in diary.items():
+        print(name, ele)
+    # for op in group_points:
+    #     op_schedule_cpu_general_dx(dim, s, op, model, device, random)

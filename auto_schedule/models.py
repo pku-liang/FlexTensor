@@ -1,9 +1,6 @@
 import torch
 import torch.nn as nn
-import numpy as np
-from torch.distributions.normal import Normal
-from auto_schedule.utils import parted_linear, get_factor_lst, fact, comb, dev, gumbel_softmax
-from scipy.cluster.vq import kmeans
+from auto_schedule.utils import get_factor_lst, fact, comb, gumbel_softmax
 
 
 class RNNCell(nn.Module):
@@ -41,11 +38,12 @@ class LSTM(nn.Module):
 
 
 class Embed(nn.Module):
-    def __init__(self, dim, k):
+    def __init__(self, dim, k, device=torch.device("cpu:0")):
         super(Embed, self).__init__()
         assert isinstance(k, int) and k > 1
         self.dim = dim
         self.k = k
+        self.device = device
 
     def forward(self, factor_lst):
         ret = []
@@ -60,18 +58,45 @@ class Embed(nn.Module):
             tmp = tmp[:self.dim]
             tmp = tmp + [0] * cha
             ret.append(tmp)
+        return torch.FloatTensor(ret).to(self.device)
+
+
+class Embedx(nn.Module):
+    def __init__(self, dim, k):
+        super(Embedx, self).__init__()
+        assert isinstance(k, int) and k > 1
+        self.dim = dim
+        self.k = k
+
+    def forward(self, candidates):
+        ret = []
+        for factor_lst in candidates:
+            embed_lst = []
+            for factor in factor_lst:
+                tmp = []
+                assert isinstance(factor, int) and factor >= 1
+                while factor > 0:
+                    r = factor % self.k
+                    factor = factor // self.k
+                    tmp.append(r)
+                cha = max(0, self.dim - len(tmp))
+                tmp = tmp[:self.dim]
+                tmp = tmp + [0] * cha
+                embed_lst.extend(tmp)
+            ret.append(tuple(embed_lst))
         return torch.FloatTensor(ret)
 
 
 class SASD(nn.Module):  # Static Axis Split Decision
-    def __init__(self, dim, length, hidden, embedding):
+    def __init__(self, dim, length, hidden, embedding, device=torch.device("cpu:0")):
         super(SASD, self).__init__()
         self.dim = dim
         self.length = length
         self.hidden = hidden
         self.axis_filters = nn.Linear(dim + length, hidden)
         self.factor_filters = nn.Linear(embedding, hidden)
-        self.embedding = Embed(embedding, 10)
+        self.embedding = Embed(embedding, 10, device)
+        self.device = device
 
     def forward(self, lst, shape_dict, extent, sampling):
         batch = []
@@ -80,10 +105,10 @@ class SASD(nn.Module):  # Static Axis Split Decision
             assert len(shape) == self.dim and len(contents) == self.length
             batch.append(shape + contents)
         if batch:
-            batch_vec = torch.FloatTensor(batch)
-            filtered = torch.tanh(self.axis_filters(batch_vec))     # regard results of matmul as filter processed values
+            batch_vec = torch.FloatTensor(batch).to(self.device)
+            filtered = torch.tanh(self.axis_filters(batch_vec))   # regard results of matmul as filter processed values
         else:
-            filtered = torch.zeros([1, self.hidden])
+            filtered = torch.zeros([1, self.hidden]).to(self.device)
         factors = get_factor_lst(extent)
         embedded = self.embedding(factors)
         factor_feature = torch.tanh(self.factor_filters(embedded))  # use filters to extract features of factors
@@ -94,17 +119,110 @@ class SASD(nn.Module):  # Static Axis Split Decision
         return value, choice
 
 
-class RASD(nn.Module):  # Random Axis Split Decision
-    def __init__(self):
+class SASDx(nn.Module):  # Static Axis Split Decision
+    def __init__(self, x, dim, length, hidden, embedding):
+        super(SASDx, self).__init__()
+        if not isinstance(x, int) or x < 1:
+            self.x = 1
+            raise RuntimeWarning("split number x should be int and x >= 1")
+        else:
+            self.x = x
+        self.dim = dim
+        self.length = length
+        self.hidden = hidden
+        self.axis_filters = nn.Linear(dim + length, hidden)
+        self.factor_filters = nn.Linear(embedding * self.x, hidden)
+        self.embedding = Embedx(embedding, 10)
+
+    def forward(self, lst, shape_dict, extent, sampling, fix_vthred=False):
+        batch = []
+        for (op_name, contents) in lst:
+            shape = shape_dict[op_name]
+            assert len(shape) == self.dim and len(contents) == self.length
+            batch.append(shape + contents)
+        if batch:
+            batch_vec = torch.FloatTensor(batch)
+            filtered = torch.tanh(self.axis_filters(batch_vec))   # regard results of matmul as filter processed values
+        else:
+            filtered = torch.zeros([1, self.hidden])
+
+        def split_tail(factor_lst, fix=False):
+            ret = []
+            for tp in factor_lst:
+                if len(tp) < 1:
+                    raise RuntimeWarning("factor lst is empty")
+                elif fix:
+                    tail = tp[-1]
+                    if tail % 2 == 0:
+                        ret.append((*tp[:-1], 2, tail//2))
+                    else:
+                        ret.append((*tp[:-1], 1, tail))
+                else:
+                    tail = tp[-1]
+                    sub_factor_lst = get_factor_lst(tail)
+                    for sub_factor in sub_factor_lst:
+                        ret.append((*tp[:-1], tail//sub_factor, sub_factor))
+            return ret
+
+        candidates = [(extent,)]
+        for i in range(1, self.x):
+            if i == 2 and fix_vthred:
+                candidates = split_tail(candidates, True)
+            else:
+                candidates = split_tail(candidates, False)
+
+        embedded = self.embedding(candidates)
+        factor_feature = torch.tanh(self.factor_filters(embedded))  # use filters to extract features of factors
+        value = torch.sum(filtered.matmul(factor_feature.transpose(0, 1)), dim=0)
+        logits = torch.softmax(value, dim=-1)
+        if sampling:
+            logits = gumbel_softmax(torch.log(logits + 1e-20))
+        choice = candidates[torch.argmax(logits)]
+        return logits, choice
+
+
+class RASDx(nn.Module):  # Random Axis Split Decision
+    def __init__(self, x):
+        super(RASDx, self).__init__()
+        if not isinstance(x, int) or x < 1:
+            self.x = 1
+            raise RuntimeWarning("split number x should be int and x >= 1")
+        else:
+            self.x = x
+
+    def forward(self, extent):
+        def split_tail(factor_lst):
+            ret = []
+            for tp in factor_lst:
+                if len(tp) < 1:
+                    raise RuntimeWarning("factor lst is empty")
+                else:
+                    tail = tp[-1]
+                    sub_factor_lst = get_factor_lst(tail)
+                    for sub_factor in sub_factor_lst:
+                        ret.append((*tp[:-1], tail//sub_factor, sub_factor))
+            return ret
+
+        candidates = [(extent,)]
+        for i in range(1, self.x):
+            candidates = split_tail(candidates)
+        vals = torch.rand(len(candidates))
+        return vals, candidates[torch.argmax(vals)]
+
+
+class RASD(nn.Module):
+    def __init__(self, device=torch.device("cpu:0")):
         super(RASD, self).__init__()
+        self.device = device
 
     def forward(self, extent):
         factors = get_factor_lst(extent)
-        return torch.zeros(len(factors)), factors[np.random.randint(0, len(factors))]
+        vals = torch.softmax(torch.rand(len(factors)).to(self.device), dim=-1)
+        return vals, factors[torch.argmax(vals)]
 
 
 class SARD(nn.Module):  # Static Axis Reorder Decision
-    def __init__(self, dim, num, length, hidden, k, l, outputs):
+    def __init__(self, dim, num, length, hidden, k, l, outputs, device=torch.device("cpu:0")):
         super(SARD, self).__init__()
         self.dim = dim
         self.num = num
@@ -115,6 +233,7 @@ class SARD(nn.Module):  # Static Axis Reorder Decision
         self.col_filter = nn.Linear(self.num, l)
         self.flatten = lambda x: x.view(-1)
         self.fc = nn.Linear(k * l, outputs)
+        self.device = device
 
     def forward(self, lst, shape_dict, sampling):
         assert len(lst) == self.num
@@ -126,9 +245,9 @@ class SARD(nn.Module):  # Static Axis Reorder Decision
                 assert len(contents) == self.length
                 batch.append(shape + contents)
             if batch:
-                axis_feature = torch.sum(torch.relu(self.axis_filters(torch.FloatTensor(batch))), dim=0)
+                axis_feature = torch.sum(torch.relu(self.axis_filters(torch.FloatTensor(batch).to(self.device))), dim=0)
             else:
-                axis_feature = torch.zeros(self.hidden)
+                axis_feature = torch.zeros(self.hidden).to(self.device)
             pack.append(axis_feature)
         pack_vec = torch.stack(pack)
         row_filtered = torch.tanh(self.row_filter(pack_vec))
@@ -142,13 +261,15 @@ class SARD(nn.Module):  # Static Axis Reorder Decision
 
 
 class RARD(nn.Module):  # Random Axis Reorder Decision
-    def __init__(self, outputs):
+    def __init__(self, outputs, device=torch.device("cpu:0")):
         super(RARD, self).__init__()
         assert isinstance(outputs, int)
         self.outputs = outputs
+        self.device = device
 
     def forward(self):
-        return torch.zeros(self.outputs), np.random.randint(0, self.outputs)
+        vals = torch.softmax(torch.rand(self.outputs).to(self.device), dim=-1)
+        return vals, torch.argmax(vals)
 
 
 class MLP_L2(nn.Module):
@@ -187,266 +308,44 @@ class Attention(nn.Module):
         return torch.max(vec, dim=0)[0]
 
 
-class ScheduleModel(nn.Module):
-    def __init__(self, block_choice_num, thread_choice_num, random=True, other_dim=None, var_dim=None, hidden_dim=None):
-        super(ScheduleModel, self).__init__()
-        self.block_choice_num = block_choice_num
-        self.thread_choice_num = thread_choice_num
-        self.random = random
-        if random:
-            self.hidden_dim = 1
-        else:
-            self.cluster_num = 8
-            self.hidden_dim = hidden_dim
-            self.other_module = MLP_L2(other_dim, 512, hidden_dim)
-            self.shape_module = RNNCell(1, hidden_dim)
-            self.spatial_module = MLP_L2(var_dim, 512, hidden_dim)
-            self.reduce_module = MLP_L2(var_dim, 512, hidden_dim)
-            self.var_module = RNNCell(hidden_dim, hidden_dim)
-            self.visit_module_a = RNNCell(hidden_dim, hidden_dim)
-            self.visit_module_b = RNNCell(4 * hidden_dim, hidden_dim)
-            self.inline_module = MLP_L2(4 * hidden_dim, 512, hidden_dim)
-            self.cache_module = MLP_L2(4 * hidden_dim, 512, hidden_dim)
-            self.factor_module = MLP_L2(4 * hidden_dim, 512, hidden_dim)
-            self.number_module = nn.Linear(self.cluster_num, hidden_dim)
-            self.judge_module_a = nn.Linear(hidden_dim, 1)
-            self.judge_module_b = nn.Linear(hidden_dim, 2)
-            self.judge_module_c = nn.Linear(hidden_dim, 3)
-            self.judge_module_d = nn.Linear(hidden_dim * 2, block_choice_num * 3 + thread_choice_num * 7)
-
-    def forward(self, type, *args):
-        if type == "other":
-            packed = args[0]
-            if self.random:
-                return torch.zeros((packed.shape[0], 1))
-            return self.other_module(packed)
-        elif type == "shape":
-            if self.random:
-                return torch.zeros(self.hidden_dim)
-            shape_vec = args[0]
-            hidden_vec = torch.zeros(self.hidden_dim)
-            cell_vec = torch.zeros(self.hidden_dim)
-            for part in shape_vec:
-                hidden_vec, cell_vec = self.shape_module(part, hidden_vec, cell_vec)
-            return hidden_vec
-        elif type == "spatial":
-            packed = args[0]
-            index = args[1]
-            num_var = len(index)
-            if num_var == 0:
-                return torch.zeros(self.hidden_dim), [[], [], [], []], 0
-            if self.random:
-                result = list(range(num_var))
-                np.random.shuffle(result)
-                ret_lst = [[], [], [], []]
-                p = 0
-                for i in range(4):
-                    if p < num_var:
-                        ret_lst[i].append(result[p])
-                        p += 1
-                ret_lst[3].extend([x for x in result[4:]])
-                return torch.zeros(self.hidden_dim), ret_lst, 0
-            feature = self.spatial_module(packed)
-            beg = 0
-            buffer = []
-            for end in index:
-                tmp = feature[beg:end]
-                max_feature = torch.max(tmp, dim=0)[0]
-                buffer.append(max_feature)
-                beg = end
-            scores = torch.sigmoid(self.judge_module_a(torch.stack(buffer))).squeeze()
-            improve = 1
-            for value in scores:
-                improve = improve * (1 + value)
-            improve = improve - 1
-            scores = scores.tolist()
-            to_sort = [(i, scores[i]) for i in range(num_var)]
-            result = sorted(to_sort, key=lambda x: x[1], reverse=True)
-            hidden_vec = torch.zeros(self.hidden_dim)
-            cell_vec = torch.zeros(self.hidden_dim)
-            for vec in buffer:
-                hidden_vec, cell_vec = self.var_module(vec, hidden_vec, cell_vec)
-            ret_lst = [[], [], [], []]
-            p = 0
-            for i in range(4):
-                if p < num_var:
-                    ret_lst[i].append(result[p][0])
-                    p += 1
-            ret_lst[3].extend([x[0] for x in result[3:]])
-            return hidden_vec, ret_lst, improve
-        elif type == "reduce":
-            packed = args[0]
-            index = args[1]
-            num_var = len(index)
-            if num_var == 0:
-                return torch.zeros(self.hidden_dim), [[], []], 0
-            if self.random:
-                result = list(range(num_var))
-                np.random.shuffle(result)
-                end = np.random.randint(0, num_var)
-                return torch.zeros(self.hidden_dim), [result[:end], result[end:]], 0
-            feature = self.reduce_module(packed)
-            beg = 0
-            buffer = []
-            for end in index:
-                tmp = feature[beg:end]
-                max_feature = torch.max(tmp, dim=0)[0]
-                buffer.append(max_feature)
-                beg = end
-            scores = torch.sigmoid(self.judge_module_a(torch.stack(buffer))).squeeze()
-            improve = 1
-            for value in scores:
-                improve = improve * (1 + value)
-            improve = improve - 1
-            scores = scores.tolist()
-            to_sort = [(i, scores[i]) for i in range(num_var)]
-            result = sorted(to_sort, key=lambda x: x[1], reverse=True)
-            mean_val = sum(scores) / num_var
-            pos = 0
-            while pos < num_var and result[pos][0] > mean_val:
-                pos += 1
-            hidden_vec = torch.zeros(self.hidden_dim)
-            cell_vec = torch.zeros(self.hidden_dim)
-            for vec in buffer:
-                hidden_vec, cell_vec = self.var_module(vec, hidden_vec, cell_vec)
-            return hidden_vec, [[x[0] for x in result[:pos]], [x[0] for x in result[pos:]]], improve
-        elif type == "visit":
-            if self.random:
-                return torch.zeros(self.hidden_dim)
-            op_sch = args[0]
-            op_feature_dict = args[1]
-            visit_pack = []
-            for op, fea in op_sch.visit_feature.items():
-                op_feature = op_feature_dict[op].op_feature
-                pack_dim = []
-                for (d, v) in fea:
-                    pack = []
-                    for name, lst in d.items():
-                        pack.extend(lst)
-                    pack_vec = torch.FloatTensor(pack)
-                    max_feature = torch.max(self.spatial_module(pack_vec), dim=0)[0]
-                    pack_dim.append(max_feature)
-                hidden_vec = torch.zeros(self.hidden_dim)
-                cell_vec = torch.zeros(self.hidden_dim)
-                for vec in pack_dim:
-                    hidden_vec, cell_vec = self.visit_module_a(vec, hidden_vec, cell_vec)
-                visit_pack.append(self.visit_module_b(torch.cat([op_feature, hidden_vec])))
-            if visit_pack:
-                visit_pack_vec = torch.stack(visit_pack)
-                visit_feature = torch.max(visit_pack_vec, dim=0)[0]
-                return visit_feature
-            else:
-                return torch.zeros(self.hidden_dim)
-        elif type == "inline":
-            if self.random:
-                return torch.rand(2)
-            whole_feature = args[0]
-            return torch.sigmoid(self.judge_module_b(self.inline_module(whole_feature)))
-        elif type == "cache":
-            if self.random:
-                return torch.rand(3)
-            whole_feature = args[0]
-            return torch.sigmoid(self.judge_module_c(self.cache_module(whole_feature)))
-        elif type == "factor":
-            if self.random:
-                bx = np.random.randint(0, self.block_choice_num)
-                by = np.random.randint(0, self.block_choice_num)
-                bz = np.random.randint(0, self.block_choice_num)
-                vtx = np.random.randint(0, self.thread_choice_num)
-                vty = np.random.randint(0, self.thread_choice_num)
-                vtz = np.random.randint(0, self.thread_choice_num)
-                tx = np.random.randint(0, self.thread_choice_num)
-                ty = np.random.randint(0, self.thread_choice_num)
-                tz = np.random.randint(0, self.thread_choice_num)
-                rf = np.random.randint(0, self.thread_choice_num)
-                return 2**bx, 2**by, 2**bz, 2**vtx, 2**vty, 2**vtz, 2**tx, 2**ty, 2**tz, 2**rf, 0
-
-            num_feature = args[0]
-            num_msg = args[1]
-            num_msg = sorted(num_msg)
-            length = len(num_msg)
-            while length < self.cluster_num:
-                num_msg.append(num_msg[-1])
-                length += 1
-            num_msg = np.array(num_msg, dtype=np.float32).reshape((-1, 1))
-            num_msg_feature = kmeans(num_msg, self.cluster_num)[0]
-            num_feature_vec = torch.max(self.factor_module(num_feature), dim=0)[0]
-            num_msg_feature_vec = torch.relu(self.number_module(num_msg_feature))
-            total_feature = torch.cat([num_feature_vec, num_msg_feature_vec])
-            scores = torch.sigmoid(self.judge_module_d(total_feature))
-            base = self.block_choice_num * 3
-            bx_improve, bx_f = torch.max(scores[:self.block_choice_num]), torch.argmax(scores[:self.block_choice_num])
-            by_improve, by_f = torch.max(scores[self.block_choice_num:self.block_choice_num * 2]), torch.argmax(
-                scores[self.block_choice_num:self.block_choice_num * 2])
-            bz_improve, bz_f = torch.max(scores[self.block_choice_num * 2:base]), torch.argmax(
-                scores[self.block_choice_num * 2:base])
-            vtx_improve, vtx_f = torch.max(scores[base:base + self.thread_choice_num]), torch.argmax(
-                scores[base:base + self.thread_choice_num])
-            vty_improve, vty_f = torch.max(
-                scores[base + self.thread_choice_num:base + self.thread_choice_num * 2]), torch.argmax(
-                scores[base + self.thread_choice_num:base + self.thread_choice_num * 2])
-            vtz_improve, vtz_f = torch.max(
-                scores[base + self.thread_choice_num * 2:base + self.thread_choice_num * 3]), torch.argmax(
-                scores[base + self.thread_choice_num * 2:base + self.thread_choice_num * 3])
-            tx_improve, tx_f = torch.max(
-                scores[base + self.thread_choice_num * 3:base + self.thread_choice_num * 4]), torch.argmax(
-                scores[base + self.thread_choice_num * 3:base + self.thread_choice_num * 4])
-            ty_improve, ty_f = torch.max(
-                scores[base + self.thread_choice_num * 4:base + self.thread_choice_num * 5]), torch.argmax(
-                scores[base + self.thread_choice_num * 4:base + self.thread_choice_num * 5])
-            tz_improve, tz_f = torch.max(
-                scores[base + self.thread_choice_num * 5:base + self.thread_choice_num * 6]), torch.argmax(
-                scores[base + self.thread_choice_num * 5:base + self.thread_choice_num * 6])
-            rf_improve, r_f = torch.max(
-                scores[base + self.thread_choice_num * 6:base + self.thread_choice_num * 7]), torch.argmax(
-                scores[base + self.thread_choice_num * 6:base + self.thread_choice_num * 7])
-            f_lst = [bx_f, by_f, bz_f, vtx_f, vty_f, vtz_f, tx_f, ty_f, tz_f, r_f]
-            v_lst = [2**(x.tolist()) for x in f_lst]
-            improve = (1 + bx_improve) * (1 + by_improve) * (1 + bz_improve) * (1 + vtx_improve) * (1 + vtz_improve) * (
-                        1 + tx_improve) * (1 + ty_improve) * (1 + tz_improve) * (1 + rf_improve) - 1
-            return v_lst[0], v_lst[1], v_lst[2], v_lst[3], v_lst[4], v_lst[5], v_lst[6], v_lst[7], v_lst[8], v_lst[9], improve
-        else:
-            raise ValueError("not support type:{}".format(type))
-
-
 class OpScheduleCPUd5(nn.Module):
-    def __init__(self, length, hidden_dim):
+    def __init__(self, length, hidden_dim, device=torch.device("cpu:0")):
         # dim0: align dimension; dim1: axis_feature_dim
         super(OpScheduleCPUd5, self).__init__()
         self.dim = 5
         self.hidden = hidden_dim
-        self.sasd1 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd2 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd3 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd4 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd5 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd1 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd2 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd3 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd4 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd5 = SASD(self.dim, length, hidden_dim, self.dim, device)
         self.sasd_spatial_lst = [self.sasd1, self.sasd2, self.sasd3, self.sasd4, self.sasd5]
 
-        self.sasd6 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd7 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd8 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd9 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd10 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd6 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd7 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd8 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd9 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd10 = SASD(self.dim, length, hidden_dim, self.dim, device)
         self.sasd_reduce_lst = [self.sasd6, self.sasd7, self.sasd8, self.sasd9, self.sasd10]
 
-        self.rasd1 = RASD()
-        self.rasd2 = RASD()
-        self.rasd3 = RASD()
-        self.rasd4 = RASD()
-        self.rasd5 = RASD()
+        self.rasd1 = RASD(device)
+        self.rasd2 = RASD(device)
+        self.rasd3 = RASD(device)
+        self.rasd4 = RASD(device)
+        self.rasd5 = RASD(device)
         self.rasd_lst = [self.rasd1, self.rasd2, self.rasd3, self.rasd4, self.rasd5]
 
-        self.sard1 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim))
-        self.sard2 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim))
-        self.sard3 = SARD(self.dim, self.dim*2, length, hidden_dim, 128, 128, comb(self.dim + self.dim, self.dim))
+        self.sard1 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim), device)
+        self.sard2 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim), device)
+        self.sard3 = SARD(self.dim, self.dim*2, length, hidden_dim, 128, 128, comb(self.dim + self.dim, self.dim), device)
 
-        self.rard1 = RARD(fact(self.dim))
-        self.rard2 = RARD(fact(self.dim))
-        self.rard3 = RARD(comb(self.dim + self.dim, self.dim))
+        self.rard1 = RARD(fact(self.dim), device)
+        self.rard2 = RARD(fact(self.dim), device)
+        self.rard3 = RARD(comb(self.dim + self.dim, self.dim), device)
 
-        self.sapd = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, (self.dim + 1) * self.dim // 2)
+        self.sapd = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, (self.dim + 1) * self.dim // 2, device)
 
-        self.rapd = RARD((self.dim + 1) * self.dim // 2)
+        self.rapd = RARD((self.dim + 1) * self.dim // 2, device)
 
         self.sard_lst = [self.sard1, self.sard2, self.sard3, self.sapd]
         self.rard_lst = [self.rard1, self.rard2, self.rard3, self.rapd]
@@ -497,7 +396,7 @@ class OpScheduleCPUd5(nn.Module):
     def forward(self, type_key, candidates, extents, feature, shape, random=False, sampling=True):
         if type_key == "spatial":
             # candidates: list; extents: list; feature: dict; shape: dict
-            return self._split(self.sasd_spatial_lst, self.rard_lst, candidates, extents, feature, shape, random, sampling)
+            return self._split(self.sasd_spatial_lst, self.rasd_lst, candidates, extents, feature, shape, random, sampling)
 
         elif type_key == "parallel":
             # candidates: list; extents: dict; feature: dict; shape: dict
@@ -505,7 +404,7 @@ class OpScheduleCPUd5(nn.Module):
 
         elif type_key == "reduce":
             # candidates: list; extents: list; feature: dict; shape: dict
-            return self._split(self.sasd_reduce_lst, self.rard_lst, candidates, extents, feature, shape, random, sampling)
+            return self._split(self.sasd_reduce_lst, self.rasd_lst, candidates, extents, feature, shape, random, sampling)
 
         elif type_key == "reorder_one":
             # candidates: list; extents: dict; feature: dict; shape: dict
@@ -524,46 +423,47 @@ class OpScheduleCPUd5(nn.Module):
 
 
 class OpScheduleGPUd5(nn.Module):
-    def __init__(self, length, hidden_dim):
+    def __init__(self, length, hidden_dim, device=torch.device("cpu:0")):
         # dim0: align dimension; dim1: axis_feature_dim
         super(OpScheduleGPUd5, self).__init__()
         self.dim = 5
         self.hidden = hidden_dim
-        self.sasd1 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd2 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd3 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd4 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd5 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd1 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd2 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd3 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd4 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd5 = SASD(self.dim, length, hidden_dim, self.dim, device)
         self.sasd_spatial_out_lst = [self.sasd1, self.sasd2, self.sasd3, self.sasd4, self.sasd5]
 
-        self.sasd6 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd7 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd8 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd9 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd10 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd_spatial_in_lst = [self.sasd6, self.sasd7, self.sasd8, self.sasd9, self.sasd10]
+        # these parameters are not used currently
+        self.sasd6 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd7 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd8 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd9 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd10 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd_spatial_in_lst = [self.sasd1, self.sasd2, self.sasd3, self.sasd4, self.sasd5] # [self.sasd6, self.sasd7, self.sasd8, self.sasd9, self.sasd10]
 
-        self.sasd11 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd12 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd13 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd14 = SASD(self.dim, length, hidden_dim, self.dim)
-        self.sasd15 = SASD(self.dim, length, hidden_dim, self.dim)
+        self.sasd11 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd12 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd13 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd14 = SASD(self.dim, length, hidden_dim, self.dim, device)
+        self.sasd15 = SASD(self.dim, length, hidden_dim, self.dim, device)
         self.sasd_reduce_lst = [self.sasd11, self.sasd12, self.sasd13, self.sasd14, self.sasd15]
 
-        self.rasd1 = RASD()
-        self.rasd2 = RASD()
-        self.rasd3 = RASD()
-        self.rasd4 = RASD()
-        self.rasd5 = RASD()
+        self.rasd1 = RASD(device)
+        self.rasd2 = RASD(device)
+        self.rasd3 = RASD(device)
+        self.rasd4 = RASD(device)
+        self.rasd5 = RASD(device)
         self.rasd_lst = [self.rasd1, self.rasd2, self.rasd3, self.rasd4, self.rasd5]
 
-        self.sard1 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim))
-        self.sard2 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim))
-        self.sard3 = SARD(self.dim, self.dim*2, length, hidden_dim, 128, 128, comb(self.dim + self.dim, self.dim))
+        self.sard1 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim), device)
+        self.sard2 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim), device)
+        self.sard3 = SARD(self.dim, self.dim*2, length, hidden_dim, 128, 128, comb(self.dim + self.dim, self.dim), device)
 
-        self.rard1 = RARD(fact(self.dim))
-        self.rard2 = RARD(fact(self.dim))
-        self.rard3 = RARD(comb(self.dim + self.dim, self.dim))
+        self.rard1 = RARD(fact(self.dim), device)
+        self.rard2 = RARD(fact(self.dim), device)
+        self.rard3 = RARD(comb(self.dim + self.dim, self.dim), device)
 
         self.sard_lst = [self.sard1, self.sard2, self.sard3]
         self.rard_lst = [self.rard1, self.rard2, self.rard3]
@@ -638,6 +538,119 @@ class OpScheduleGPUd5(nn.Module):
 
         else:
             raise ValueError("Not support type: {}".format(type_key))
+
+
+# class OpScheduleGPUd5(nn.Module):
+#     def __init__(self, length, hidden_dim, dim=5, level=4):
+#         # dim0: align dimension; dim1: axis_feature_dim
+#         super(OpScheduleGPUd5, self).__init__()
+#         self.dim = dim
+#         self.hidden = hidden_dim
+#         self.sasd1 = SASDx(level, self.dim, length, hidden_dim, self.dim)
+#         self.sasd2 = SASDx(level, self.dim, length, hidden_dim, self.dim)
+#         self.sasd3 = SASDx(level, self.dim, length, hidden_dim, self.dim)
+#         self.sasd4 = SASDx(level, self.dim, length, hidden_dim, self.dim)
+#         self.sasd5 = SASDx(level, self.dim, length, hidden_dim, self.dim)
+#         self.sasd_spatial_lst = [self.sasd1, self.sasd2, self.sasd3, self.sasd4, self.sasd5]
+#
+#         self.sasd11 = SASDx(2, self.dim, length, hidden_dim, self.dim)
+#         self.sasd12 = SASDx(2, self.dim, length, hidden_dim, self.dim)
+#         self.sasd13 = SASDx(2, self.dim, length, hidden_dim, self.dim)
+#         self.sasd14 = SASDx(2, self.dim, length, hidden_dim, self.dim)
+#         self.sasd15 = SASDx(2, self.dim, length, hidden_dim, self.dim)
+#         self.sasd_reduce_lst = [self.sasd11, self.sasd12, self.sasd13, self.sasd14, self.sasd15]
+#
+#         self.rasd1 = RASDx(level)
+#         self.rasd2 = RASDx(level)
+#         self.rasd3 = RASDx(level)
+#         self.rasd4 = RASDx(level)
+#         self.rasd5 = RASDx(level)
+#         self.rasd_spatial_lst = [self.rasd1, self.rasd2, self.rasd3, self.rasd4, self.rasd5]
+#
+#         self.rasd6 = RASDx(2)
+#         self.rasd7 = RASDx(2)
+#         self.rasd8 = RASDx(2)
+#         self.rasd9 = RASDx(2)
+#         self.rasd10 = RASDx(2)
+#         self.rasd_reduce_lst = [self.rasd6, self.rasd7, self.rasd8, self.rasd9, self.rasd10]
+#
+#         self.sard1 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim))
+#         self.sard2 = SARD(self.dim, self.dim, length, hidden_dim, 128, 128, fact(self.dim))
+#         self.sard3 = SARD(self.dim, self.dim*2, length, hidden_dim, 128, 128, comb(self.dim + self.dim, self.dim))
+#
+#         self.rard1 = RARD(fact(self.dim))
+#         self.rard2 = RARD(fact(self.dim))
+#         self.rard3 = RARD(comb(self.dim + self.dim, self.dim))
+#
+#         self.sard_lst = [self.sard1, self.sard2, self.sard3]
+#         self.rard_lst = [self.rard1, self.rard2, self.rard3]
+#
+#     def _split(self, M_lst, R_lst, candidates, extents, feature, shape, random, sampling):
+#         assert len(candidates) == self.dim
+#         choice_lst = []
+#         value_lst = []
+#         for i in range(self.dim):
+#             name = candidates[i]
+#             extent = extents[i]
+#             lst = feature[name]
+#             if random:
+#                 value, choice = R_lst[i](extent)
+#             else:
+#                 value, choice = M_lst[i](lst, shape, extent, sampling)
+#             choice_lst.append(choice)
+#             value_lst.append(value)
+#         return choice_lst, value_lst
+#
+#     def _reorder(self, id, candidates, extents, feature, shape, random, sampling, mode=0):
+#         # candidates: list; extents: dict; feature: dict; shape: dict
+#         # update feature
+#         if random:
+#             logits, choice = self.rard_lst[id]()
+#         else:
+#             name_feature_dict = dict()
+#             for name, value in extents.items():
+#                 lst = feature[name]
+#                 name_feature_dict[name] = []
+#                 for (op_name, contents) in lst:
+#                     tmp = contents.copy()
+#                     if mode == 0:
+#                         tmp[1] *= (tmp[0] / value)
+#                         tmp[2] *= (tmp[0] / value)
+#                         tmp[0] = value
+#                     elif mode == 1:
+#                         tmp[0] = value
+#                     else:
+#                         raise ValueError("mode should in {0, 1}")
+#                     name_feature_dict[name].append((op_name, tmp))
+#             lst = []
+#             for name in candidates:
+#                 lst.append(name_feature_dict[name])
+#             logits, choice = self.sard_lst[id](lst, shape, sampling)
+#         return choice, logits
+#
+#     def forward(self, type_key, candidates, extents, feature, shape, random=False, sampling=True):
+#         if type_key == "spatial":
+#             # candidates: list; extents: list; feature: dict; shape: dict
+#             return self._split(self.sasd_spatial_lst, self.rasd_spatial_lst, candidates, extents, feature, shape, random, sampling)
+#
+#         elif type_key == "reduce":
+#             # candidates: list; extents: list; feature: dict; shape: dict
+#             return self._split(self.sasd_reduce_lst, self.rasd_reduce_lst, candidates, extents, feature, shape, random, sampling)
+#
+#         elif type_key == "reorder_one":
+#             # candidates: list; extents: dict; feature: dict; shape: dict
+#             return self._reorder(0, candidates, extents, feature, shape, random, sampling, mode=0)
+#
+#         elif type_key == "reorder_two":
+#             # candidates: list; extents: dict; feature: dict; shape: dict
+#             return self._reorder(1, candidates, extents, feature, shape, random, sampling, mode=0)
+#
+#         elif type_key == "reorder_three":
+#             # candidates: list; extents: dict; feature: dict; shape: dict
+#             return self._reorder(2, candidates, extents, feature, shape, random, sampling, mode=1)
+#
+#         else:
+#             raise ValueError("Not support type: {}".format(type_key))
 
 
 

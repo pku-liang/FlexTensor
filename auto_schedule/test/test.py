@@ -2,53 +2,18 @@ import tvm
 import torch
 import numpy as np
 import os
-import logging
 import time
-import multiprocessing as multi
+import torch.multiprocessing as _multi
+multi = _multi.get_context("spawn")
 from auto_schedule.models import OpScheduleCPUd5, OpScheduleGPUd5
 from auto_schedule.examples import FUNC_TABLE
-from auto_schedule.scheduler import op_schedule_cpu_general_dx, parallel_evaluate, \
-    graph_schedule_cpu_general_dx, op_schedule_gpu_general_dx, _evaluate
+from auto_schedule.scheduler import op_schedule_cpu_general_dx, graph_schedule_cpu_general_dx, \
+    op_schedule_gpu_general_dx, graph_schedule_gpu_general_dx
+from auto_schedule.measure import batch_evaluate, parallel_evaluate, _evaluate
 
 
 CPU_NUM = os.cpu_count()
-GPU_NUM = 1
-
-
-def test_feature_extract():
-    for name, compute in FUNC_TABLE.items():
-        print("#################################")
-        print(name)
-        func = compute.func
-        args = compute.args
-        ops, bufs = func(*args)
-        target = Target("llvm")
-        s = Schedule(ops, target)
-        for op, sch in s.op_schedule_dict.items():
-            print(op)
-            print("shape=", sch.shape)
-            print("is_compute=", sch.is_compute)
-            print("has_reduce=", sch.has_reduce)
-            print("able_inline=", sch.able_inline)
-            print("is_output=", sch.is_output)
-            print("next_num=", sch.next_num)
-            print("num_outputs=", sch.num_outputs)
-            print("output_tensors=", sch.output_tensors)
-            print("num_inputs=", sch.num_inputs)
-            print("input_tensors=", sch.input_tensors)
-            print("spatial_iter_var=", sch.org_spatial_iter_var_names)
-            print("reduce_iter_var=", sch.org_reduce_iter_var_names)
-            print("iter_var_feature=")
-            for var_name, fea in sch.iter_var_feature_dict.items():
-                print("    ", var_name, fea)
-            print("visited_by=")
-            for vop, vfea in sch.visit_feature.items():
-                print("    ", vop)
-                for (d, v) in vfea:
-                    print("    ", v)
-                    for name, l in d.items():
-                        print("    ", name, l)
-            print()
+GPU_NUM = 4
 
 
 def test_op_schedule_cpu():
@@ -84,11 +49,11 @@ def test_op_schedule_cpu():
             print(ele)
 
 
-def test_op_schedule_gpu(timeout=10.0):
+def _test_op_schedule_gpu(timeout=10.0):
     proc = []
     q = multi.Queue()
     for i in range(10):
-        p = multi.Process(target=_test_op_schedule_gpu, args=(q,))
+        p = multi.Process(target=test_op_schedule_gpu, args=(q,))
         p.start()
         proc.append(p)
     beg = time.time()
@@ -113,7 +78,7 @@ def test_op_schedule_gpu(timeout=10.0):
     print(np.mean(np.array(cost_lst)))
 
 
-def _test_op_schedule_gpu(q=None):
+def test_op_schedule_gpu(q=None):
     for name, compute in FUNC_TABLE.items():
         if name in ["conv3d", "conv3d_batch", "conv3d_channel", "conv3d_channel_batch", "gaussian_blur3x3"]:
             continue
@@ -139,16 +104,14 @@ def _test_op_schedule_gpu(q=None):
             return sum(p.numel() for p in model.parameters() if p.requires_grad)
         # print(count_parameters(model))
         lst, diary = op_schedule_gpu_general_dx(dim, s, op, model, random=True)
-        # print(tvm.lower(s, bufs, simple_mode=True))
-        f = tvm.build(s, bufs, "cuda")
-        cost = _evaluate(s, bufs, "cuda", np.random.randint(0, GPU_NUM), number=1)
+        print(tvm.lower(s, bufs, simple_mode=True))
+        cost = batch_evaluate(s, bufs, "cuda", np.random.randint(0, GPU_NUM), number=10)
         msg = "{}({}) is {}ms, pass!\n".format(name, args, cost)
-        # print(msg)
+        print(msg)
         # for ele in diary:
         #     print(ele)
         if q:
             q.put(cost)
-        return cost
 
 
 def robust_test(round=100):
@@ -174,70 +137,82 @@ def robust_test(round=100):
                 f.write(msg)
 
 
-def test_graph_schedule_cpu_general_dx(func, args, model_path, random=False, sampling=False, timeout=10.0):
+def test_graph_schedule_cpu_general_dx(func, args, model_path, random=False, sampling=False, number=10, timeout=10.0):
     print("#################################")
     ops, bufs = func(*args)
     dim = 5
     s = tvm.create_schedule(ops)
     graph_schedule_cpu_general_dx(dim, s, ops, model_path, random=random, sampling=sampling)
-    f = tvm.build(s, bufs, "llvm")
-    total = 0.0
-    for i in range(10):
-        cost = parallel_evaluate(s, bufs, "llvm", np.random.randint(0, CPU_NUM), number=1, timeout=timeout)
-        total += cost
-        print(cost, "ms")
-    msg = "Optimial time cost is {}ms, pass!\n".format(total / 10)
+    cost = batch_evaluate(s, bufs, "llvm", np.random.randint(0, CPU_NUM), number=number, timeout=timeout)
+    msg = "Optimial time cost is {}ms, pass!\n".format(cost)
     print(msg)
+    return cost
 
 
-def test_graph_schedule_gpu_specific_any(number, type="cuda"):
-    pass_logger = logging.getLogger("pass")
-    wrong_logger = logging.getLogger("wrong")
-    pass_logger.setLevel(logging.INFO)
-    wrong_logger.setLevel(logging.INFO)
-    pass_fh = logging.FileHandler("passed_test.log")
-    wrong_fh = logging.FileHandler("wrong_test.log")
-    pass_logger.addHandler(pass_fh)
-    wrong_logger.addHandler(wrong_fh)
+def test_graph_schedule_gpu_general_dx(entities, model_path, random=False, sampling=False, timeout=10.0, trial=30, number=10):
 
-    matmul = FUNC_TABLE["matmul_batch"].func
-    matmul_args = (10, 100, 100, 100)
-    conv2d = FUNC_TABLE["conv2d_channel_batch"].func
-    conv_args = (256, 14, 14, 3, 1, 1, 3, 1, 0)
-    func_lst = [matmul, conv2d]
-    args_lst = [matmul_args, conv_args]
-    for j in range(number):
-        for i in range(2):
-            func = func_lst[i]
-            args = args_lst[i]
-            ops, bufs = func(*args)
-            model = ScheduleModel(2, 2, random=True)
-            if type == "cuda":
-                target = Target("cuda", bx=4, by=4, bz=4, tx=128, ty=32, tz=32)
-                target.turn_on('support_bind')
-            elif type == "llvm":
-                target = Target("llvm")
-            else:
-                raise ValueError("not support type: {}".format(type))
-            sch, s, improve = graph_schedule_gpu_specific_any(ops, target, model)
-            try:
-                time_cost = parallel_evaluate(sch, bufs, type, 1)
-                pass_logger.info("{}{} passed with time cost={}ms".format(func.__name__, args, time_cost))
-            except Exception as e:
-                stmt = tvm.lower(sch, bufs, simple_mode=True)
-                func = tvm.build(sch, bufs, "cuda")
-                msg = str(e)
-                schedule_diary = s.schedule_diary
-                wrong_logger.info("#################################")
-                wrong_logger.info(str(stmt))
-                wrong_logger.info(str(func.imported_modules[0].get_source()))
-                wrong_logger.info(msg)
-                for line in schedule_diary:
-                    wrong_logger.info("{}\n".format(line))
+    def _inner(sampling=False):
+        queue = multi.Queue()
+        proc = multi.Process(target=_eval_gpu, args=(dim, entity, model_path, queue, random, sampling, 1, number))
+        proc.start()
+        proc.join(timeout=timeout * number)
+
+        if not queue.empty():
+            cost = queue.get(block=True)
+        else:
+            cost = timeout * 1e3
+
+        proc.terminate()
+        try:
+            proc.join()
+        except Exception as e:
+            pass
+        return cost
+    print("#################################")
+    dim = 5
+    cost_lst = []
+    for entity in entities:
+        best_cost = _inner(False)   # non-sampling case
+        if sampling:
+            for i in range(trial):
+                cost = _inner(True)
+                if cost < best_cost:
+                    best_cost = cost
+        cost_lst.append(best_cost)
+        msg = "Optimial time cost for {} is {}ms, pass!\n".format(entity.func_name, best_cost)
+        print(msg)
+    return cost_lst
+
+
+def _eval_gpu(dim, entity, model_path, queue, random, sampling, trial=10, number=10):
+    func_name = entity.func_name
+    func = FUNC_TABLE[func_name].func
+    args = entity.args
+    best_time = float("+inf")
+    model = OpScheduleGPUd5(3, 128)
+    if os.path.exists(model_path):
+        state_dict = torch.load(model_path)
+        model.load_state_dict(state_dict)
+    model.eval()
+    for i in range(trial):
+        ops, bufs = func(*args)
+        s = tvm.create_schedule(ops)
+        graph_schedule_gpu_general_dx(dim, s, ops, model_path, random=random, sampling=sampling)
+        # print(tvm.lower(s, bufs, simple_mode=True))
+        try:
+            time_cost = _evaluate(s, bufs, "cuda", dev_id=np.random.randint(0, GPU_NUM), number=number)
+            if time_cost < best_time:
+                best_time = time_cost
+        except Exception as e:
+            pass
+    if best_time != float("+inf"):
+        queue.put(best_time)
+    print(best_time)
 
 
 if __name__ == "__main__":
-    test_op_schedule_gpu()
+    for i in range(100):
+        test_op_schedule_gpu()
 
 
 

@@ -1,3 +1,6 @@
+import os
+import time
+import tvm
 import numpy as np
 import torch
 from torch.autograd import Variable
@@ -63,6 +66,22 @@ def str_to_tuple(s):
     for v in s:
         ret.append(int(v))
     return tuple(ret)
+
+
+def any_factor_split(value, number):
+    ret = []
+    assert_print(isinstance(number, int))
+    recursive_factor_split(value, [], number, ret)
+    return ret
+
+
+def recursive_factor_split(left, cur, number, ret):
+    if number == 1:
+        ret.append(cur + [left])
+        return
+    f_lst = get_factor_lst(left)
+    for f in f_lst:
+        recursive_factor_split(left // f, cur + [f], number - 1, ret)
 
 
 def three_factor_split(value):
@@ -180,7 +199,7 @@ def gen_enum(elements, length):
 
 
 def _dfs_gen_group(cur, p, elements, length, res, padding=None):
-    if padding:
+    if padding is not None:
         cha = length - p
         shao = length - (len(cur) + cha)
     else:
@@ -210,6 +229,45 @@ def fact(n):
 def comb(m, n):
     assert m >= n
     return fact(m) // (fact(n) * fact(m - n))
+
+
+def is_power_of_two(val):
+    assert isinstance(val, int) and val > 0
+    return math.fabs(math.pow(2, int(math.log2(val))) - val) < 1e-20
+
+
+def nearest_power_of_two(val):
+    assert isinstance(val, int) and val > 0
+    return int(math.pow(2, int(math.log2(val))))
+
+
+def test_allclose(value, target, rtol=1e-5, print_diff=False):
+    passed = 1
+    try:
+        tvm.testing.assert_allclose(value, target, rtol)
+    except AssertionError:
+        passed = 0
+        if print_diff:
+            print(target - value)
+    return passed
+
+
+def assert_print(bool_stmt, false_str=""):
+    if not bool_stmt:
+        raise AssertionError(false_str)
+
+
+def free_cuda():
+    ret = []
+    if torch.cuda.is_available():
+        filename = "auto_schedule_check_cuda_free_memory_{}".format(time.time())
+        os.system("nvidia-smi -q -d Memory | grep -A4 GPU | grep Free > {}".format(filename))
+        memory_gpu = list(filter(lambda x: x[0] > 0, [(int(x.split()[2]), i) for i, x in enumerate(open(filename, 'r').readlines())]))
+        memory_gpu = sorted(memory_gpu, key=lambda x: x[0], reverse=True)
+        os.remove(filename)
+        return [x[1] for x in memory_gpu]
+    return ret
+
 
 
 def test_three_factor_split():
@@ -246,10 +304,16 @@ def test_gen_enum():
 
 def test_gen_group():
     elements = ["b", "x", "y", "c"]
-    res = gen_group(elements, "none")
+    res = gen_group(elements)
     print("length={}".format(len(res)))
     for ele in res:
         print(ele)
+
+
+def test_any_factor_split():
+    ret = any_factor_split(4, 100)
+    print(ret)
+    print("length=", len(ret))
 
 
 if __name__ == "__main__":

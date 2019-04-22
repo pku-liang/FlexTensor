@@ -11,15 +11,15 @@ from tvm.autotvm.tuner import XGBTuner, GATuner, RandomTuner, GridSearchTuner
 import tvm.contrib.graph_runtime as runtime
 
 
-def get_operator(data_shape, out_channel, kernel_size, strides, padding, dtype="float32"):
+def get_operator(data_shape, weight_shape, dtype="float32"):
     data = relay.var("data", shape=data_shape, dtype=dtype)
-    body = layers.conv2d(data=data, channels=out_channel, kernel_size=kernel_size, strides=strides, padding=padding, name="conv2d")
+    weight = relay.var("weight", shape=weight_shape, dtype=dtype)
+    body = relay.nn.dense(data=data, weight=weight, name="dense")
     return relay.Function(relay.ir_pass.free_vars(body), body)
 
 
-def get_workload(batch_size, image_shape, out_channel, kernel_size=(3, 3), strides=(1, 1), padding=(1, 1), dtype="float32"):
-    data_shape = (batch_size, *image_shape)
-    op = get_operator(data_shape, out_channel, kernel_size, strides, padding, dtype=dtype)
+def get_workload(data_shape, weight_shape, dtype="float32"):
+    op = get_operator(data_shape, weight_shape, dtype=dtype)
     sym, params = create_workload(op)
     return sym, params, data_shape
 
@@ -70,7 +70,8 @@ def tune_kernels(tasks, measure_option, tuner="gridsearch", early_stopping=None,
 
 def tune_and_evaluate(tuning_opt, number, tune=True):
     op, params, data_shape = get_workload(batch_size, image_shape, out_channel, kernel_size, strides, padding)
-    tasks = autotvm.task.extract_from_program(op, target=target, params=params, ops=(relay.op.nn.conv2d,))
+    print(tvm.autotvm.task.task.TASK_TABLE)
+    tasks = autotvm.task.extract_from_program(op, target=target, params=params, ops=(relay.op.nn.dense,))
     log_file = tuning_opt["log_filename"]
     if tune:
         print("Tuning...")
@@ -139,7 +140,7 @@ if __name__ == "__main__":
         kernel_size = (arg_lst[i][4], arg_lst[i][5])
         strides = (arg_lst[i][7], arg_lst[i][7])
         padding = (arg_lst[i][8], arg_lst[i][8])
-        logfile = "tune_conv_" + names[i] + "_cpu.log"
+        logfile = "../logs/tune_conv_" + names[i] + "_cpu_test.log"
         tuning_option = {
             "log_filename": logfile,
             "tuner": "xgb",
@@ -151,5 +152,5 @@ if __name__ == "__main__":
             "mode": 0
         }
         cost = tune_and_evaluate(tuning_option, 10, True)
-        with open("logs_autotvm_conv_cpu.log", "a") as f:
+        with open("logs_autotvm_conv_cpu_test.log", "a") as f:
             f.write("{}{} cost {}\n".format(names[i], arg_lst[i], cost))
