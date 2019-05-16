@@ -1,5 +1,6 @@
 import time
 import os
+import timeit
 import torch
 import argparse
 from auto_schedule.examples import FUNC_TABLE
@@ -24,13 +25,25 @@ def run(batch_size, height, width, channel, kernel_size, output_channel, stride,
 
 
 def pytorch_baseliine(batch_size, height, width, channel, kernel_size, output_channel, stride, padding, number=100):
-    conv = torch.nn.Conv2d(channel, output_channel, (kernel_size, kernel_size), (stride, stride), (padding, padding), bias=False).cuda()
-    A = torch.rand([batch_size, channel, height, width]).cuda()
-    beg = time.time()
-    for i in range(number):
-        conv(A)
-    end = time.time()
-    print("pytorch use {}ms".format((end - beg) / number * 1e3))
+    # conv = torch.nn.Conv2d(channel, output_channel, (kernel_size, kernel_size), (stride, stride), (padding, padding), bias=False)
+    # conv = torch.nn.functional.conv2d
+    # A = torch.rand([batch_size, channel, height, width])
+    # W = torch.rand([output_channel, channel, kernel_size, kernel_size])
+    # # warm-up
+    # conv(A, W)
+    # beg = time.time()
+    # for i in range(number):
+    #     conv(A, W)
+    # end = time.time()
+
+    run_time = timeit.timeit(setup= 'import torch\n'
+                                    'conv = torch.nn.functional.conv2d\n'
+                                    'A = torch.rand([' + str(batch_size) + ', ' + str(channel) + ', ' + str(height) + ', ' + str(width) + '])\n'
+                                    'W = torch.rand([' + str(output_channel) + ', ' + str(channel) + ', ' + str(kernel_size) + ', ' + str(kernel_size) + '])\n'
+                                    'conv(A, W)\n',
+                               stmt='conv(A, W)',
+                               number=number)
+    print("pytorch use {}ms".format(run_time / number * 1e3))
 
 
 if __name__ == "__main__":

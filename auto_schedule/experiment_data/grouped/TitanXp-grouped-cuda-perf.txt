@@ -1,0 +1,44 @@
+full-search:
+conv2d_grouped_(1, 1024, 14, 14, 512, 1, 1, 0, 1, 4)_cuda(0) use 0.032914000000000006 ms
+
+conv2d_grouped_(1, 1024, 14, 14, 512, 1, 1, 0, 1, 8)_cuda(0) use 0.021592 ms
+
+conv2d_grouped_(1, 1024, 14, 14, 512, 1, 1, 0, 1, 16)_cuda(0) use 0.0096204 ms
+
+conv2d_grouped_(1, 1024, 14, 14, 512, 1, 1, 0, 1, 32)_cuda(0) use 0.006453199999999999 ms
+
+
+q-search:
+conv2d_grouped_(1, 1024, 14, 14, 512, 1, 1, 0, 1, 4)_cuda(0) use 0.031072499999999996 ms
+
+conv2d_grouped_(1, 1024, 14, 14, 512, 1, 1, 0, 1, 8)_cuda(0) use 0.0129918 ms
+
+conv2d_grouped_(1, 1024, 14, 14, 512, 1, 1, 0, 1, 16)_cuda(0) use 0.0088086 ms
+
+conv2d_grouped_(1, 1024, 14, 14, 512, 1, 1, 0, 1, 32)_cuda(0) use 0.0062883 ms
+
+
+pytorch:
+pytorch baselines grouped convolution for target cuda (0):
+layer 0
+Use 0.142163(ms)
+layer 1
+Use 0.225654(ms)
+layer 2
+Use 0.406675(ms)
+layer 3
+Use 0.774256(ms)
+Done!
+
+
+pytorch + cudnn:
+pytorch baselines grouped convolution for target cuda (0):
+layer 0
+Use 0.081923(ms)
+layer 1
+Use 0.092211(ms)
+layer 2
+Use 0.122790(ms)
+layer 3
+Use 0.203238(ms)
+Done!

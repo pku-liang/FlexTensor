@@ -317,4 +317,6 @@ def test_any_factor_split():
 
 
 if __name__ == "__main__":
-    test_gen_group()
+    lst = any_factor_split(1024, 4)
+    print(len(lst))
+    print(lst)

@@ -78,12 +78,13 @@ def tune_and_evaluate(tuning_opt, number, tune=True):
 
     if not os.path.exists(log_file):
         raise RuntimeError("the log file {} doesn't exists".format(log_file))
-    with autotvm.apply_history_best(log_file):
+    with autotvm.apply_history_best(log_file) as f:
+        print(f.best_by_targetkey)
         print("Compile...")
         with relay.build_config(opt_level=3):
             graph, lib, params = relay.build_module.build(op, target=target, params=params)
 
-        ctx = tvm.cpu(np.random.randint(0, 20))
+        ctx = tvm.cpu(np.random.randint(0, 8))
         data_tvm = tvm.nd.array((np.random.uniform(size=data_shape)).astype(dtype))
         module = runtime.create(graph, lib, ctx)
         module.set_input("data", data_tvm)
@@ -111,26 +112,26 @@ if __name__ == "__main__":
         # (8, 7, 7, 1024, 3, 3, 1024, 1, 1),
         # (64, 7, 7, 1024, 3, 3, 1024, 1, 1),
         # (256, 7, 7, 1024, 3, 3, 1024, 1, 1),
-        (1, 14, 14, 1024, 1, 1, 512, 1, 0),
-        (1, 28, 28, 256, 3, 3, 512, 1, 1),
-        (1, 28, 28, 512, 1, 1, 256, 1, 0),
-        (1, 56, 56, 128, 3, 3, 256, 1, 1),
-        (1, 56, 56, 192, 1, 1, 128, 1, 0),
-        (1, 112, 112, 64, 3, 3, 192, 1, 1),
-        (1, 448, 448, 3, 7, 7, 64, 2, 3)
+        # (1, 14, 14, 1024, 1, 1, 512, 1, 0),
+        # (1, 28, 28, 256, 3, 3, 512, 1, 1),
+        # (1, 28, 28, 512, 1, 1, 256, 1, 0),
+        # (1, 56, 56, 128, 3, 3, 256, 1, 1),
+        # (1, 56, 56, 192, 1, 1, 128, 1, 0),
+        # (1, 112, 112, 64, 3, 3, 192, 1, 1),
+        # (1, 448, 448, 3, 7, 7, 64, 2, 3)
     ]
     names = [
         "yolo24_b1",
         # "yolo24_b8",
         # "yolo24_b64",
         # "yolo24_b256",
-        "yolo19_b1",
-        "yolo10_b1",
-        "yolo7_b1",
-        "yolo4_b1",
-        "yolo3_b1",
-        "yolo2_b1",
-        "yolo1_b1"
+        # "yolo19_b1",
+        # "yolo10_b1",
+        # "yolo7_b1",
+        # "yolo4_b1",
+        # "yolo3_b1",
+        # "yolo2_b1",
+        # "yolo1_b1"
     ]
     for i in range(len(arg_lst)):
         batch_size = arg_lst[i][0]
@@ -151,5 +152,5 @@ if __name__ == "__main__":
             "mode": 0
         }
         cost = tune_and_evaluate(tuning_option, 10, True)
-        with open("logs_autotvm_conv_cpu.log", "a") as f:
-            f.write("{}{} cost {}\n".format(names[i], arg_lst[i], cost))
+        # with open("logs_autotvm_conv_cpu.log", "a") as f:
+        #     f.write("{}{} cost {}\n".format(names[i], arg_lst[i], cost))

@@ -1,473 +1,327 @@
 import os
-import pickle
-import tvm
+import argparse
+import copy
+import json
 import torch
-import torch.multiprocessing as _multi
-multi = _multi.get_context("spawn")
-from functools import partial
 import numpy as np
-import logging
-import heapq
-import time
-from auto_schedule.examples import FUNC_TABLE
-from auto_schedule.scheduler import graph_analysis, able_inline, op_schedule_cpu_general_dx
-from auto_schedule.testing import op_schedule_gpu_general_dx
-from auto_schedule.measure import serial_evaluate, batch_evaluate, _evaluate
-from auto_schedule.models import OpScheduleCPUd5, OpScheduleGPUd5
-from auto_schedule.test import test_graph_schedule_gpu_general_dx
-from auto_schedule.utils import to_tuple, free_cuda
+from auto_schedule.testing.model import WalkerGroup, PerformanceModel, rank_loss
+from auto_schedule.testing.task import TASK_TABLE, Task
+from auto_schedule.testing.scheduler import flatten_graph, Config
+from auto_schedule.testing.space import generate_space_intra_op, generate_space_inter_op
 
 
-MAX_CPU = os.cpu_count()
-MAX_GPU = 3
-C1 = 1
-C2 = 1
-LR = 0.002
-MT = 0.7
+def train_perf(name, space):
+    walker_group = WalkerGroup(name, space)
+    walker_group.prepare_performance_data()
+    walker_group.train_on_perf()
 
 
-class Entity(object):
-    def __init__(self, func_name, args):
-        self.func_name = func_name
-        self.args = args
+def train_q(name, space):
+    walker_group = WalkerGroup(name, space)
+    walker_group.load_walker_data()
+    walker_group.train_walkers()
 
 
-def train_op_schedule_cpu_general_dx(entities, epoch, batch_size, path, loop_num=100, loop_size=16,
-                                     stack_size=20, logfile="temp.log", device="cuda:0"):
-    dim = 5
-    timeout = 15.0
-    num_sample = len(entities)
-    device = torch.device(device)
-    model = OpScheduleCPUd5(3, 128, device)
-    # load or initialize parameter file
-    if os.path.exists(path) and os.path.isfile(path):
-        state_dict = torch.load(path)
-        model.load_state_dict(state_dict)
-    else:
-        torch.save(model.state_dict(), path)
-    model.to(device)
-    optimizer = torch.optim.Adadelta(model.parameters(), lr=LR)
-    model.train()
-    # maintain a dataset for each function
-    datasets = [[] for i in range(num_sample)]
+def train_for_schedule(task_key, q=False, perf=False):
+    """Schedule a task
 
-    train_beg_time = time.time()
-    with open(logfile, "a") as f:
-        f.write("New log\ntime: {}".format(train_beg_time))
-    perf_before = dict()
-    perf_before_dump = False
-    model.train()
-    print("Scheduling begins...parameters in path {}\n    logs to{}".format(path, logfile))
-    for i in range(epoch):
-        optimizer.zero_grad()
-        for batch in range(batch_size):
-            for p in range(num_sample):
-                func_name = entities[p].func_name
-                func = FUNC_TABLE[func_name].func
-                args = entities[p].args
-                ops, bufs = func(*args)
-                s = tvm.create_schedule(ops)
-                # get the performance before scheduling
-                # only run one time
-                entity_key = "{}:{}".format(func_name, args)
-                if entity_key not in perf_before:
-                    pre_cost = serial_evaluate(s, bufs, "llvm", np.random.randint(0, MAX_CPU), 10, timeout=timeout)
-                    perf_before[entity_key] = pre_cost
-                if not isinstance(ops, (list, tuple)):
-                    ops = [ops]
-                bfs_order, down_graph = graph_analysis(ops)
-                group_points = []
-                for op in bfs_order:
-                    if not isinstance(op, tvm.tensor.ComputeOp):
-                        continue
-                    if able_inline(op, down_graph):
-                        s[op].compute_inline()
-                    else:
-                        group_points.append(op)
-                if len(group_points) > 1:
-                    raise RuntimeError("Not support more than one compute")
-                for j, point in enumerate(group_points):
-                    y_dict, y_diary = op_schedule_cpu_general_dx(dim, s, point, model, random=np.random.random() < 0.2, sampling=True)
-                    post_cost = serial_evaluate(s, bufs, "llvm", np.random.randint(0, MAX_CPU), 10, timeout=timeout)
-                    data = dict()
-                    for name, value in y_dict.items():
-                        if isinstance(value, list):
-                            tmp = []
-                            for v in value:
-                                tmp.append(v.detach())
-                            data[name] = (tmp, y_diary[name])   # the data record schedule decisions
-                        else:
-                            data[name] = (value.detach(), y_diary[name])
-                        # record  (point No. , sch data, time cost)
-                        datasets[p].append((j, data, post_cost))
-        # record performance before scheduling
-        # only run one time
-        if not perf_before_dump:
-            with open(logfile, "a") as f:
-                logs = "performance before scheduling:\n"
-                f.write(logs)
-                for key, perf in perf_before.items():
-                    logs = "{}: {}\n".format(key, perf)
-                    f.write(logs)
-                f.write("\n")
-            perf_before_dump = True
-        # control the size of dataset and record best cases
-        cur_time = time.time()
-        with open(logfile, "a") as f:
-            for j in range(num_sample):
-                datasets[j] = heapq.nsmallest(stack_size, datasets[j], key=lambda x: x[-1])
-                entity_key = "{}:{}".format(entities[j].func_name, entities[j].args)
-                duration = cur_time - train_beg_time
-                logs = "epoch {}/{}| {} best perf {}| [{}s]\n".format(i+1, epoch, entity_key, datasets[j][0][-1], duration)
-                f.write(logs)
-                logs = "schedule {}\n".format(entity_key)
-                for name, val in datasets[j][0][1].items():    # find the diary, this is ugly now, change later
-                    logs = logs + "{}: {}\n".format(name, val[1])
-                logs = logs + "\n"
-                f.write(logs)
-        # train the parameters
-        for r in range(loop_num):
-            acc_loss = 0.0
-            for inner in range(loop_size):
-                for q in range(num_sample):
-                    func_name = entities[q].func_name
-                    func = FUNC_TABLE[func_name].func
-                    args = entities[q].args
-                    for (point_num, data, time_cost) in datasets[q][:1]:
-                        ops, bufs = func(*args)
-                        s = tvm.create_schedule(ops)
-                        if not isinstance(ops, (list, tuple)):
-                            ops = [ops]
-                        bfs_order, down_graph = graph_analysis(ops)
-                        group_points = []
-                        for op in bfs_order:
-                            if not isinstance(op, tvm.tensor.ComputeOp):
-                                continue
-                            if able_inline(op, down_graph):
-                                s[op].compute_inline()
-                            else:
-                                group_points.append(op)
-                        y_dict, _ = op_schedule_cpu_general_dx(dim, s, group_points[point_num], model, random=False, sampling=False)
-                        # spatial loss
-                        spatial_loss = 0.0
-                        for j in range(dim):
-                            spatial_loss = spatial_loss + torch.nn.functional\
-                                .binary_cross_entropy(y_dict["spatial"][j], data["spatial"][0][j])
-                        # reduce_loss
-                        reduce_loss = 0.0
-                        for j in range(dim):
-                            reduce_loss = reduce_loss + torch.nn.functional\
-                                .binary_cross_entropy(y_dict["reduce"][j], data["reduce"][0][j])
-                        # parallel_loss
-                        parallel_loss = torch.nn.functional\
-                            .binary_cross_entropy(y_dict["parallel"], data["parallel"][0])
-                        # reorder_one loss
-                        reorder_one_loss = torch.nn.functional\
-                            .binary_cross_entropy(y_dict["reorder_one"], data["reorder_one"][0])
-                        # reorder_two loss
-                        reorder_two_loss = torch.nn.functional\
-                            .binary_cross_entropy(y_dict["reorder_two"], data["reorder_two"][0])
-                        # reorder_three loss
-                        reorder_three_loss = torch.nn.functional\
-                            .binary_cross_entropy(y_dict["reorder_three"], data["reorder_three"][0])
-                        # accumulate loss
-                        acc_loss = acc_loss + spatial_loss + reduce_loss + parallel_loss + reorder_one_loss \
-                                   + reorder_two_loss + reorder_three_loss
-            acc_loss.backward()
-            if r % 10 == 0:
-                torch.save(model.state_dict(), path)
-                logs = "epoch={}, r={}, loss={}\n".format(i + 1, r, float(acc_loss.detach()))
-                with open(logfile, "a") as f:
-                    f.write(logs)
-            optimizer.step()
-        with open(logfile, "a") as f:
-            f.write("\n")
-    print("All done.")
-
-
-def detach_data(data):
-    if isinstance(data, torch.Tensor):
-        return data.detach()
-    elif isinstance(data, list):
-        ret = []
-        for item in data:
-            ret.append(detach_data(item))
-        return ret
-    elif isinstance(data, dict):
-        ret = dict()
-        for key, val in data.items():
-            ret[key] = detach_data(val)
-        return ret
-    else:
-        raise ValueError("Detach data only support [torch.Tensor, list, dict], but get {}".format(type(data)))
-
-
-def train_op_schedule_gpu_general_dx(entities, epoch, batch_size, model_path, loop_num=50, loop_size=8,
-                                     stack_size=20, logfile="temp.log"):
-    dim = 5
-    timeout = 10.0
-    fail_data_num = 0
-    num_entity = len(entities)
-    datasets = [[] for i in range(num_entity)]
-    train_beg_time = time.time()
-    print("Schedule begins...parameters in {}\n    logs to {}".format(model_path, logfile), flush=True)
-    with open(logfile, "a") as f:
-        f.write("New log [{}]\n".format(train_beg_time))
-    free_device = free_cuda()
-    if free_device:
-        use_device = "cuda:{}".format(free_device[0])
-    else:
-        print("Warning: no available GPU for training, using GPU...")
-        use_device = "cpu:0"
-    print("train_device", use_device)
-    device = torch.device(use_device)
-    model = OpScheduleGPUd5(3, 128, device)
-    if os.path.exists(model_path):
-        print("INFO: using model file from {}".format(model_path))
-        state_dict = torch.load(model_path)
-        model.load_state_dict(state_dict)
-    else:
-        torch.save(model.state_dict(), model_path)
-    model.to(device)
-    model.train()
-    for ep_num in range(epoch):
-        proc_pool = []
-        que_pool = []
-        y_pool = []
-        diary_pool = []
-        arg_lst = []
-        time_cost_pool = []
-        for batch in range(batch_size):
-            for p_entity in range(num_entity):
-                entity = entities[p_entity]
-                func = FUNC_TABLE[entity.func_name].func
-                args = entity.args
-                ops, bufs = func(*args)
-                s = tvm.create_schedule(ops)
-                if not isinstance(ops, (list, tuple)):
-                    ops = [ops]
-                bfs_order, down_graph = graph_analysis(ops)
-                group_points = []
-                for op in bfs_order:
-                    if not isinstance(op, tvm.tensor.ComputeOp):
-                        continue
-                    if able_inline(op, down_graph):
-                        s[op].compute_inline()
-                    else:
-                        group_points.append(op)
-                y, diary = op_schedule_gpu_general_dx(dim, s, group_points[0], model, random=np.random.random()<0.5, sampling=True)
-                y_pool.append(detach_data(y))
-                diary_pool.append(diary)
-                arg_lst.append((dim, entity, diary))
-                time_cost_pool.append([p_entity, float("inf")])
-        target_func = partial(call_with_timeout, _get_data_gpu, timeout)
-        for arg in arg_lst:
-            q = multi.Queue(2)
-            p = multi.Process(target=target_func, args=(q, *arg))
-            proc_pool.append(p)
-            que_pool.append(q)
-            p.start()
-        wait_start = time.time()
-        while time.time() - wait_start < timeout:
-            if any([p.is_alive() for p in proc_pool]):
-                time.sleep(.1)
-            else:
-                break
-        for count_proc, q in enumerate(que_pool):
-            if not q.empty():
-                res = q.get(block=True)
-                if not isinstance(res, multi.TimeoutError):
-                    time_cost_pool[count_proc][1] = res
-                else:
-                    fail_data_num += 1
-            p = proc_pool[count_proc]
-            if p.is_alive():
-                p.terminate()
-            p.join()
-            q.close()
-            q.join_thread()
-            del q
-            del p
-        for count_y, (id, time_cost) in enumerate(time_cost_pool):
-            print("time_cost", time_cost)
-            if time_cost < float("inf"):
-                datasets[id].append((y_pool[count_y], diary_pool[count_y], time_cost))
-        # control dataset
-        cur_time = time.time()
-        with open(logfile, "a") as f:
-            for j in range(num_entity):
-                datasets[j] = heapq.nsmallest(stack_size, datasets[j], key=lambda x: x[-1])
-                entity_key = "{}:{}".format(entities[j].func_name, entities[j].args)
-                duration = cur_time - train_beg_time
-                if datasets[j]:
-                    logs = "epoch {}/{}| {} best perf {}| [{}s]\n".format(ep_num + 1, epoch, entity_key, datasets[j][0][-1],
-                                                                          duration)
-                    f.write(logs)
-                    logs = "schedule {}\n".format(entity_key)
-                    for name, val in datasets[j][0][1].items():  # find the diary, this is ugly now, change later
-                        logs = logs + "{}: {}\n".format(name, val)
-                    logs = logs + "\n"
-                    f.write(logs)
-                else:
-                    logs = "epoch {}/{}| {} best perf not yet get| [{}s]\n".format(ep_num + 1, epoch, entity_key, duration)
-                    f.write(logs)
-        # train on dataset
-        model.train()
-        optimizer = torch.optim.Adadelta(model.parameters(), lr=LR)
-        _train_gpu(dim, entities, model, optimizer, datasets, loop_num, loop_size, logfile)
-        torch.save(model.state_dict(), model_path)
-    print("All done.")
-
-
-def call_with_timeout(func, timeout, resq, *args):
-    proc = multi.Process(target=func, args=(*args, resq))
-    proc.start()
-    proc.join(timeout=timeout)
-    proc.terminate()
-    proc.join()
-    resq.put(multi.TimeoutError())
-
-
-def _get_data_gpu(dim, entity, outer_diary, q):
-    func = FUNC_TABLE[entity.func_name].func
-    args = entity.args
+    perform sequential schedule
+    """
+    task = TASK_TABLE[task_key]
+    func = task.func
+    args = task.args
     ops, bufs = func(*args)
-    s = tvm.create_schedule(ops)
-    if not isinstance(ops, (list, tuple)):
-        ops = [ops]
-    bfs_order, down_graph = graph_analysis(ops)
-    group_points = []
-    for op in bfs_order:
-        if not isinstance(op, tvm.tensor.ComputeOp):
-            continue
-        if able_inline(op, down_graph):
-            s[op].compute_inline()
+    # sort the ops, so that we can distinguish each op
+    op_lst, down_graph = flatten_graph(ops)
+    ##################################################
+    # train op
+    for pos, op in enumerate(op_lst):
+        if task.target == "cuda":
+            space = generate_space_intra_op(op, down_graph, slevel=4)
+        elif task.target == "llvm":
+            space = generate_space_intra_op(op, down_graph, slevel=4, rlevel=3)
         else:
-            group_points.append(op)
-    op_schedule_gpu_general_dx(dim, s, group_points[0], outer_diary=outer_diary)
-    free_device = free_cuda()
-    if free_device:
-        dev_id = free_device[0]
+            raise RuntimeError("Currently no support for target %s"%task.target)
+        name = task.category + "_op" + str(pos)
+        if q:
+            train_q(name, space)
+        if perf:
+            train_perf(name, space)        
+
+    #################################################
+    # train graph
+    graph_space = generate_space_inter_op(op_lst, down_graph)
+    name = task.category + "_graph"
+    if q:
+        train_q(name, graph_space)
+    if perf:
+        train_perf(name, graph_space)
+
+
+def print_perf_data_info(data_path):
+    with open(data_path, "r") as fin:
+        can_out = False
+        while not can_out:
+            line = fin.readline()
+            if len(line) <= 0:
+                print("The data set has no valid data")
+                can_out = True
+            data = tuple(json.loads(line))
+            if len(data[0]) > 0:
+                print("Data input length:", len(data[0][0]))
+                can_out = True
+
+
+def query_perf_data_info(dataset):
+    if len(dataset) <= 0:
+        raise RuntimeError("Dataset size <= 0")
     else:
-        print("Warning: no available GPU for test, trying to use cuda:0")
-        dev_id = 0
-    try:
-        time_cost = _evaluate(s, bufs, "cuda", dev_id=dev_id, number=10)
-    except Exception as e:
-        time_cost = float("inf")
-    q.put(time_cost)
+        data = dataset[0]
+        if len(data[0]) <= 0:
+            raise RuntimeError("In valid data")
+        return len(data[0])
 
 
-def _train_gpu(dim, entities, model, optimizer, datasets, loop_num, loop_size, logfile):
-    gamma = 0.9
-    for r in range(loop_num):
-        acc_loss = 0.0
-        has_data = False
-        for inner in range(loop_size):
-            for q in range(len(entities)):
-                factor = 1.0
-                for (target_y, target_d, time_cost) in datasets[q]:
-                    has_data = True
-                    func_name = entities[q].func_name
-                    func = FUNC_TABLE[func_name].func
-                    args = entities[q].args
-                    ops, bufs = func(*args)
-                    s = tvm.create_schedule(ops)
-                    if not isinstance(ops, (list, tuple)):
-                        ops = [ops]
-                    bfs_order, down_graph = graph_analysis(ops)
-                    group_points = []
-                    for op in bfs_order:
-                        if not isinstance(op, tvm.tensor.ComputeOp):
-                            continue
-                        if able_inline(op, down_graph):
-                            s[op].compute_inline()
-                        else:
-                            group_points.append(op)
-                    point = group_points[0]
-                    y_dict, diary = op_schedule_gpu_general_dx(dim, s, point, model, random=False, sampling=False)
-                    # spatial loss one
-                    spatial_loss = 0.0
-                    # spatial part one
-                    for i in range(dim):
-                        spatial_loss = spatial_loss + torch.nn.functional\
-                            .binary_cross_entropy(y_dict["spatial_one"][i], target_y["spatial_one"][i])
-                    # reduce_loss
-                    reduce_loss = 0.0
-                    for i in range(dim):
-                        reduce_loss = reduce_loss + torch.nn.functional\
-                            .binary_cross_entropy(y_dict["reduce"][i], target_y["reduce"][i])
-                    # reorder_one loss
-                    reorder_one_loss = torch.nn.functional\
-                        .binary_cross_entropy(y_dict["reorder_one"], target_y["reorder_one"])
-                    # reorder_two loss
-                    reorder_two_loss = torch.nn.functional\
-                        .binary_cross_entropy(y_dict["reorder_two"], target_y["reorder_two"])
-                    # reorder_three loss
-                    reorder_three_loss = torch.nn.functional\
-                        .binary_cross_entropy(y_dict["reorder_three"], target_y["reorder_three"])
-                    # accumulate loss
-                    acc_loss = acc_loss + factor * (spatial_loss + reduce_loss + reorder_one_loss
-                                                    + reorder_two_loss + reorder_three_loss)
-                    factor *= gamma
-        if has_data:
-            acc_loss.backward()
-            if r % 10 == 0:
-                logs = "loss={}\n".format(float(acc_loss.detach()))
-                with open(logfile, "a") as f:
-                    f.write(logs)
-            optimizer.step()
-        else:
-            with open(logfile, "a") as f:
-                f.write("no data\n")
-    with open(logfile, "a") as f:
-        f.write("\n")
-
-
-def _eval_gpu(dim, entity, model_path, queue, trial=10, number=10):
-    func_name = entity.func_name
-    func = FUNC_TABLE[func_name].func
-    args = entity.args
-    best_time = float("+inf")
-    model = OpScheduleGPUd5(3, 128)
-    if os.path.exists(model_path):
-        state_dict = torch.load(model_path)
-        model.load_state_dict(state_dict)
-    model.eval()
-    for i in range(trial):
-        ops, bufs = func(*args)
-        s = tvm.create_schedule(ops)
-        if not isinstance(ops, (list, tuple)):
-            ops = [ops]
-        bfs_order, down_graph = graph_analysis(ops)
-        group_points = []
-        for op in bfs_order:
-            if not isinstance(op, tvm.tensor.ComputeOp):
-                continue
-            if able_inline(op, down_graph):
-                s[op].compute_inline()
+def normalize_perf_data(dataset):
+    data_lst = []
+    # normalize
+    max_val = 0.0
+    min_val = float("inf")
+    for data in dataset[:20]:
+        for val in data[1]:
+            if val != float("inf"):
+                if val > max_val:
+                    max_val = val
+                elif val < min_val:
+                    min_val = val
+    interval = max(max_val - min_val, 1e-5)
+    for data in dataset[:20]:
+        # filter empty data
+        if len(data[0]) <= 0:
+            continue
+        # max_val = 0.0
+        # min_val = float("inf")
+        # for i in range(len(data[1])):
+        #     if data[1][i] != float("inf"):
+        #         if data[1][i] > max_val:
+        #             max_val = data[1][i]
+        #         elif data[1][i] < min_val:
+        #             min_val = data[1][i]
+        # interval = max(max_val - min_val, 1e-5)
+        for i in range(len(data[1])):
+            new_data = []
+            new_data.append(copy.deepcopy(data[0][i]))
+            new_data.append(copy.deepcopy(data[1][i]))
+            if data[1][i] == float("inf"):
+                new_data[1] = 1.0
             else:
-                group_points.append(op)
-        op_schedule_gpu_general_dx(dim, s, group_points[0], model, random=False, sampling=True)
-        try:
-            time_cost = _evaluate(s, bufs, "cuda", dev_id=np.random.randint(0, MAX_GPU), number=number)
-            if time_cost < best_time:
-                best_time = time_cost
-        except Exception as e:
-            pass
-    queue.put(best_time)
+                new_data[1] = (data[1][i] - min_val) / interval
+            data_lst.append(new_data)
+    return data_lst
+
+
+def train_performance_model(data_path, model_path, epoch=10, batch_size=1, lr=0.02, override=False, train_ratio=0.8):
+    # load data
+    dataset = []
+    with open(data_path, "r") as fin:
+        for line in fin:
+            data = tuple(json.loads(line))
+            dataset.append(data)
+    # prepare dataset
+    dataset = normalize_perf_data(dataset)
+    data_size = len(dataset)
+    train_size = int(0.8 * data_size)
+    test_size = data_size - train_size
+    print("Train data size:", train_size, "test data size:", test_size)
+    np.random.shuffle(dataset)
+    train_data = dataset[:train_size]
+    test_data = dataset[train_size:]
+
+    # get input length
+    input_len = query_perf_data_info(dataset)
+    print("Input length is:", input_len)
+
+    # load model
+    model = PerformanceModel(input_len)
+    device = torch.device("cuda:0")
+    model.to(device)
+    # if os.path.exists(model_path) and not override and epoch > 0:
+    #     raise RuntimeError("Existing model file %s" % model_path)
+    # elif os.path.exists(model_path):
+    #     print("Warning: override existing model file %s" % model_path)
+    
+    # train
+    optimizer = torch.optim.Adadelta(model.parameters(), lr=lr)
+    print("Training begins...")
+    for ep in range(epoch):
+        model.train()
+        print("Epoch", ep + 1, "begins:")
+        np.random.shuffle(train_data)
+        print("Train data shuffled")
+        count_batch = 0
+        acc_loss = 0.0
+        inputs = []
+        targets = []
+        for count, data in enumerate(train_data):
+            x, t = data
+            inputs.append(x)
+            targets.append(t)
+            if (count + 1) % batch_size == 0:
+                count_batch += 1
+                inputs_torch = torch.FloatTensor(inputs).cuda()
+                targets_torch = torch.softmax(torch.FloatTensor(targets).cuda(), dim=-1)
+                ys = torch.softmax(model(inputs_torch).reshape(-1), dim=-1)
+                print("check ys=", ys.cpu().tolist())
+                print("check targets=", targets_torch.cpu().tolist())
+                print("check diff=", (ys -targets_torch).cpu().tolist())
+                # loss = torch.nn.functional.mse_loss(ys, targets_torch)
+                # loss = rank_loss(ys, targets_torch)
+                loss = torch.nn.functional.binary_cross_entropy(ys, targets_torch)
+                acc_loss = acc_loss + float(loss)
+                optimizer.zero_grad()
+                # for p in model.parameters():
+                #     print("before", p.grad)
+                loss.backward()
+                # for p in model.parameters():
+                #     print("after", p.grad)
+                optimizer.step()
+                # print("####| batch %d loss = %f" % (count_batch, float(loss)))
+                # clear inputs and targets
+                inputs = []
+                targets = []
+        if inputs and targets:
+            # the remaining loss
+            count_batch += 1
+            inputs_torch = torch.FloatTensor(inputs).cuda()
+            targets_torch = torch.softmax(torch.FloatTensor(targets).cuda(), dim=-1)
+            ys = torch.softmax(model(inputs_torch).reshape(-1), dim=-1)
+            print("check ys=", ys.cpu().tolist())
+            print("check targets=", targets_torch.cpu().tolist())
+            print("check diff=", (ys -targets_torch).cpu().tolist())
+            loss = torch.nn.functional.binary_cross_entropy(ys, targets_torch)
+            acc_loss = acc_loss + float(loss)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            # print("####| the last batch %d loss = %f" % (count_batch, float(loss)))
+        print("Accumulated loss of the whole epoch:", acc_loss)
+        torch.save(model.state_dict(), model_path)
+        print("Model saved")
+        if (ep + 1) % 10 == 0:
+            # validation
+            print("Validation:")
+            np.random.shuffle(test_data)
+            print("Validation data shuffled")
+            model.eval()
+            hits = 0
+            soft_hits = 0
+            inputs = []
+            targets = []
+            count_batch = 0
+            for count, data in enumerate(test_data):
+                x, t = data
+                inputs.append(x)
+                targets.append(t)
+                if (count + 1) % 2 == 0:
+                    count_batch += 1
+                    inputs_torch = torch.FloatTensor(inputs).cuda()
+                    ys = model(inputs_torch)
+                    ys_lst = list(enumerate(ys.cpu().tolist()))
+                    targets_lst = list(enumerate(targets))
+                    ys_sorted = sorted(ys_lst, key=lambda x: x[1])
+                    targets_sorted = sorted(targets_lst, key=lambda x: x[1])
+                    full_hit = True
+                    soft_hit = True
+                    for y_item, t_item in zip(ys_sorted, targets_sorted):
+                        if y_item[0] != t_item[0]:
+                            full_hit = False
+                        elif abs(y_item[0] - t_item[0]) > 1:
+                            soft_hit = False
+                    if full_hit:
+                        hits += 1
+                    if soft_hit:
+                        soft_hits += 1
+                    inputs = []
+                    targets = []
+
+            print("Validation full accuracy:", float(hits) / count_batch * 100, "%")
+            print("Validation soft accuracy:", float(soft_hits) / count_batch * 100, "%")
+    print("Train done!")
+    # test
+    print("Testing begins...")
+    np.random.shuffle(test_data)
+    print("Test data shuffled")
+    model.eval()
+    hits = 0
+    soft_hits = 0
+    inputs = []
+    targets = []
+    count_batch = 0
+    for count, data in enumerate(test_data):
+        x, t = data
+        inputs.append(x)
+        targets.append(t)
+        if (count + 1) % 8 == 0:
+            count_batch += 1
+            inputs_torch = torch.FloatTensor(inputs).cuda()
+            ys = model(inputs_torch)
+            ys_lst = list(enumerate(ys.cpu().tolist()))
+            targets_lst = list(enumerate(targets))
+            ys_sorted = sorted(ys_lst, key=lambda x: x[1])
+            targets_sorted = sorted(targets_lst, key=lambda x: x[1])
+            full_hit = True
+            soft_hit = True
+            for y_item, t_item in zip(ys_sorted, targets_sorted):
+                if y_item[0] != t_item[0]:
+                    full_hit = False
+                elif abs(y_item[0] - t_item[0]) > 1:
+                    soft_hit = False
+            if full_hit:
+                hits += 1
+            if soft_hit:
+                soft_hits += 1
+            inputs = []
+            targets = []
+
+    print("Test full accuracy:", float(hits) / count_batch * 100, "%")
+    print("Test soft accuracy:", float(soft_hits) / count_batch * 100, "%")
+    print("Test done!")
+    
+
+# if __name__ == "__main__":
+#     # this is somehow foolish because you need to create a particular task
+#     task = Task(
+#         "conv2d",
+#         "yolo1", 
+#         None, 
+#         (1, 64, 112, 112, 192, 3, 1, 1, 1, 1), 
+#         "cuda", 
+#         2
+#         )
+#     train_for_schedule(task.key, q=False, perf=True)
 
 
 if __name__ == "__main__":
-    entities = []
-    # func = FUNC_TABLE["conv2d_channel_batch"].func
-    # args = (1, 14, 14, 256, 3, 3, 512, 1, 1)
-    # entities.append(Entity("conv2d_channel_batch", args))
-    func = FUNC_TABLE["matmul_batch"].func
-    args = (1, 1024, 1024, 1024)
-    entities.append(Entity("matmul_batch", args))
-    beg = time.time()
-    train_op_schedule_gpu_general_dx(entities, 5, 16, "models/test_gemm_gpu.pkl")
-    end = time.time()
-    print("train done! use {}ms".format((end - beg) * 1e3))
-    test_graph_schedule_gpu_general_dx(entities, "./models/test_gemm_gpu.pkl", sampling=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-t", "--type", help="Type of training `perf` of `q`", type=str, default="perf")
+    parser.add_argument("-d", "--data", help="Path to train data", type=str, default="")
+    parser.add_argument("-m", "--model", help="Path to model", type=str, default="model.pkl")
+    parser.add_argument("--epoch", type=int, default=10)
+    parser.add_argument("--batch", type=int, default=1)
+    parser.add_argument("--lr", type=float, default=0.02)
+    parser.add_argument("--override", action="store_true")
+    parser.add_argument("--ratio", type=float, default=0.8)
+
+    args = parser.parse_args()
+    if args.type == "perf":
+        train_performance_model(
+            args.data, 
+            args.model, 
+            epoch=args.epoch, 
+            batch_size=args.batch, 
+            lr=args.lr, 
+            override=args.override, 
+            train_ratio=args.ratio
+            )
+    else:
+        raise NotImplementedError("Currenly no support for type %s" % args.type)

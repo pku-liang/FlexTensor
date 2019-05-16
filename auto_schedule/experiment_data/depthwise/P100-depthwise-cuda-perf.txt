@@ -1,0 +1,35 @@
+full search:
+
+conv2d_depthwise_(1, 256, 28, 28, 512, 3, 1, 1, 1, 256)_cuda(1) use 0.0166377 ms
+
+conv2d_depthwise_(1, 512, 28, 28, 512, 1, 1, 0, 1, 512)_cuda(1) use 0.008348399999999999 ms
+
+conv2d_depthwise_(1, 512, 28, 28, 1024, 3, 1, 1, 1, 512)_cuda(1) use 0.019949400000000003 ms
+
+
+
+pytorch only:
+
+pytorch baselines convolution 3d for target cuda (2):
+pytorch baselines depthwise convolution for target cuda (0):
+layer 0
+Use 0.079075(ms)
+layer 1
+Use 0.060237(ms)
+layer 2
+Use 0.111664(ms)
+Done!
+
+
+
+pytorch + cudnn:
+pytorch baselines depthwise convolution for target cuda (0):
+layer 0
+Use 0.079232(ms)
+layer 1
+Use 0.062086(ms)
+layer 2
+Use 0.111034(ms)
+Done!
+
+

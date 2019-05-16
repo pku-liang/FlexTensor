@@ -277,6 +277,9 @@ int matrixMultiply(int argc, char **argv, int devID, sMatrixSize &matrix_size)
         checkCudaErrors(cudaEventCreate(&start));
         checkCudaErrors(cudaEventCreate(&stop));
 
+        //warm-up
+        checkCudaErrors(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, matrix_size.uiWB, matrix_size.uiHA, matrix_size.uiWA, &alpha, d_B, matrix_size.uiWB, d_A, matrix_size.uiWA, &beta, d_C, matrix_size.uiWB));
+
         // Record the start event
         checkCudaErrors(cudaEventRecord(start, NULL));
 
@@ -361,11 +364,15 @@ int main(int argc, char **argv)
     printf("[Matrix Multiply CUBLAS] - Starting...\n");
 
     int devID = 0; //, sizeMult = 5;
-    sMatrixSize matrix_size{4096, 4096, 4096, 4096, 4096, 4096};
+    unsigned int shapes[7] = {32, 64, 128, 256, 512, 1024, 2038};
+    for (int i=0; i < 7; ++i)
+    {
+        unsigned int tmp = shapes[i];
+        sMatrixSize matrix_size{tmp, tmp, tmp, tmp, tmp, tmp};
 
-    // initializeCUDA(argc, argv, devID, sizeMult, matrix_size);
+        // initializeCUDA(argc, argv, devID, sizeMult, matrix_size);
 
-    int matrix_result = matrixMultiply(argc, argv, devID, matrix_size);
-
-    return matrix_result;
+        int matrix_result = matrixMultiply(argc, argv, devID, matrix_size);
+    }
+    return 0;
 }

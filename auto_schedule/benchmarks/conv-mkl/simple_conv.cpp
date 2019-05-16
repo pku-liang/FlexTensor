@@ -145,10 +145,12 @@ int main(int argc, char **argv) {
     {
         const memory::dim N = 1;
         try {
+            int times = 10;
+            // warm-up
+            simple_conv(N, arg_lst[i][0], arg_lst[i][1], arg_lst[i][2], arg_lst[i][3], arg_lst[i][4], arg_lst[i][5], arg_lst[i][6], 1);
             auto begin = chrono::duration_cast<chrono::milliseconds>(
                     chrono::steady_clock::now().time_since_epoch())
                                  .count();
-            int times = 10;
             simple_conv(N, arg_lst[i][0], arg_lst[i][1], arg_lst[i][2], arg_lst[i][3], arg_lst[i][4], arg_lst[i][5], arg_lst[i][6], times);
             auto end = chrono::duration_cast<chrono::milliseconds>(
                     chrono::steady_clock::now().time_since_epoch())

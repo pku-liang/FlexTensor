@@ -1,0 +1,36 @@
+full-search:
+conv2d_depthwise_(1, 256, 28, 28, 512, 3, 1, 1, 1, 256)_cuda(0) use 0.009823900000000002 ms
+
+conv2d_depthwise_(1, 512, 28, 28, 512, 1, 1, 0, 1, 512)_cuda(0) use 0.0081958 ms
+
+conv2d_depthwise_(1, 512, 28, 28, 1024, 3, 1, 1, 1, 512)_cuda(0) use 0.028672000000000003 ms
+
+
+q-search:
+conv2d_depthwise_(1, 256, 28, 28, 512, 3, 1, 1, 1, 256)_cuda(0) use 0.015108299999999998 ms
+
+conv2d_depthwise_(1, 512, 28, 28, 512, 1, 1, 0, 1, 512)_cuda(0) use 0.012540000000000003 ms
+
+conv2d_depthwise_(1, 512, 28, 28, 1024, 3, 1, 1, 1, 512)_cuda(0) use 0.023009699999999998 ms
+
+
+pytorch:
+pytorch baselines depthwise convolution for target cuda (0):
+layer 0
+Use 0.064950(ms)
+layer 1
+Use 0.040973(ms)
+layer 2
+Use 0.099206(ms)
+Done!
+
+
+pytorch + cudnn:
+pytorch baselines depthwise convolution for target cuda (0):
+layer 0
+Use 0.065018(ms)
+layer 1
+Use 0.041139(ms)
+layer 2
+Use 0.099565(ms)
+Done!

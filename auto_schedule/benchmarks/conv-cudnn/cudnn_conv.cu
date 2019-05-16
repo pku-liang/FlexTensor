@@ -162,7 +162,7 @@ float conv(int C, int K, int H, int W, int batch_size, int kernel_size, int stri
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     float sum = 0.0;
-    for(int i = 0; i < times; ++i)
+    for(int i = 0; i < times + 1; ++i)
     {
         cudaEventRecord(start, 0);
         checkCUDNN(cudnnConvolutionForward(cudnn, 
@@ -182,7 +182,10 @@ float conv(int C, int K, int H, int W, int batch_size, int kernel_size, int stri
         cudaEventSynchronize(stop);
         float elapsed;
         cudaEventElapsedTime(&elapsed, start, stop);
-        sum += elapsed;
+        if (i > 0)
+        {
+            sum += elapsed;
+        }
     }
     auto end = (unsigned long long)GetCycleCount();
     cudaMemcpy(h_output, d_output, output_bytes, cudaMemcpyDeviceToHost);
@@ -210,7 +213,7 @@ int main(int argc, char const* argv[])
 {
     int arg_lst[][8] = {
         //{256, 256, 14, 14, 3, 512, 1, 1},
-        {32, 1024, 7, 7, 3, 1024, 1, 1},
+        // {1, 1024, 7, 7, 3, 1024, 1, 1},
         // {8, 1024, 7, 7, 3, 1024, 1, 1},
         // {64, 1024, 7, 7, 3, 1024, 1, 1},
         // {256, 1024, 7, 7, 3, 1024, 1, 1},
@@ -221,8 +224,23 @@ int main(int argc, char const* argv[])
         // {1, 192, 56, 56, 1, 128, 1, 0},
         // {1, 64, 112, 112, 3, 192, 1, 1},
         // {1, 3, 448, 448, 7, 64, 2, 3}
+        {1, 3, 448, 448, 7, 64, 2, 3}, 
+        {1, 64, 112, 112, 3, 192, 1, 1},  
+        {1, 192, 56, 56, 1, 128, 1, 0},  
+        {1, 128, 56, 56, 3, 256, 1, 1}, 
+        {1, 256, 56, 56, 1, 256, 1, 0},
+        {1, 256, 56, 56, 3, 512, 1, 1}, 
+        {1, 512, 28, 28, 1, 256, 1, 0},  
+        {1, 256, 28, 28, 3, 512, 1, 1}, 
+        {1, 512, 28, 28, 1, 512, 1, 0},  // conv15      8
+        {1, 512, 28, 28, 3, 1024, 1, 1},  // conv16     9
+        {1, 1024, 14, 14, 1, 512, 1, 0},  // conv17    10
+        {1, 512, 14, 14, 3, 1024, 1, 1},  // conv18     11
+        {1, 1024, 14, 14, 3, 1024, 1, 1},  // conv21   12
+        {1, 1024, 14, 14, 3, 1024, 2, 1}, // conv22   13
+        {1, 1024, 7, 7, 3, 1024, 1, 1},  // conv23     14
     };
-    for(int i=0; i < 1; ++i)
+    for(int i=0; i < 15; ++i)
     {
         int batch_size = arg_lst[i][0];
         int C = arg_lst[i][1];

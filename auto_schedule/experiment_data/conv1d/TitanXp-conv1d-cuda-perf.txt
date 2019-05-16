@@ -1,0 +1,67 @@
+full-search:
+conv1d_conv1d_(1, 192, 3136, 128, 1, 1, 0, 1, 1)_cuda(0) use 0.0737556 ms
+
+conv1d_conv1d_(1, 128, 3136, 256, 9, 1, 1, 1, 1)_cuda(0) use 0.7001134999999999 ms
+
+conv1d_conv1d_(1, 512, 784, 256, 1, 1, 0, 1, 1)_cuda(0) use 0.062063099999999996 ms
+
+conv1d_conv1d_(1, 256, 784, 512, 9, 1, 1, 1, 1)_cuda(0) use 3.6637538 ms
+
+conv1d_conv1d_(1, 1024, 196, 512, 1, 1, 0, 1, 1)_cuda(0) use 0.09867229999999999 ms
+
+conv1d_conv1d_(1, 512, 196, 1024, 9, 1, 1, 1, 1)_cuda(0) use 0.46904640000000003 ms
+
+conv1d_conv1d_(1, 1024, 49, 1024, 9, 1, 1, 1, 1)_cuda(0) use 0.6787597000000001 ms
+
+
+q-search:
+conv1d_conv1d_(1, 192, 3136, 128, 1, 1, 0, 1, 1)_cuda(0) use 0.0409503 ms
+
+conv1d_conv1d_(1, 128, 3136, 256, 9, 1, 1, 1, 1)_cuda(0) use 0.5024183 ms
+
+conv1d_conv1d_(1, 512, 784, 256, 1, 1, 0, 1, 1)_cuda(0) use 0.0666958 ms
+
+conv1d_conv1d_(1, 256, 784, 512, 9, 1, 1, 1, 1)_cuda(0) use 0.614316 ms
+
+conv1d_conv1d_(1, 1024, 196, 512, 1, 1, 0, 1, 1)_cuda(0) use 0.07891029999999999 ms
+
+conv1d_conv1d_(1, 512, 196, 1024, 9, 1, 1, 1, 1)_cuda(0) use 0.41281419999999996 ms
+
+conv1d_conv1d_(1, 1024, 49, 1024, 9, 1, 1, 1, 1)_cuda(0) use 0.4968548 ms
+
+
+pytorch only:
+layer 0
+Use 0.110182(ms)
+layer 1
+Use 0.366182(ms)
+layer 2
+Use 0.088474(ms)
+layer 3
+Use 0.326656(ms)
+layer 4
+Use 0.067277(ms)
+layer 5
+Use 0.421274(ms)
+layer 6
+Use 0.280064(ms)
+Done!
+
+
+pytorch + cudnn:
+pytorch baselines convolution 1d for target cuda (0):
+layer 0
+Use 0.047821(ms)
+layer 1
+Use 0.244634(ms)
+layer 2
+Use 0.065638(ms)
+layer 3
+Use 0.284058(ms)
+layer 4
+Use 0.130560(ms)
+layer 5
+Use 0.559821(ms)
+layer 6
+Use 1.039258(ms)
+Done!

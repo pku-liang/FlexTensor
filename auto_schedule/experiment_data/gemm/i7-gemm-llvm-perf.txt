@@ -1,0 +1,65 @@
+pytorch:
+pytorch baselines gemm for target llvm (0):
+layer 0
+Use 0.004004(ms)
+layer 1
+Use 0.008827(ms)
+layer 2
+Use 0.025763(ms)
+layer 3
+Use 0.173738(ms)
+layer 4
+Use 1.202322(ms)
+layer 5
+Use 9.691601(ms)
+layer 6
+Use 78.257081(ms)
+Done!
+
+numpy:
+numpy baselines gemm for target llvm (0):
+layer 0
+Use 0.014430(ms)
+layer 1
+Use 0.010603(ms)
+layer 2
+Use 0.872004(ms)
+layer 3
+Use 0.461583(ms)
+layer 4
+Use 1.533136(ms)
+layer 5
+Use 6.568689(ms)
+layer 6
+Use 44.998403(ms)
+Done!
+
+
+full-search:
+gemm_gemm_(32, 32, 32)_llvm(0) use 0.0011761 ms
+
+gemm_gemm_(64, 64, 64)_llvm(0) use 0.0047699 ms
+
+gemm_gemm_(128, 128, 128)_llvm(0) use 0.035071899999999996 ms
+
+gemm_gemm_(256, 256, 256)_llvm(0) use 0.3520435 ms
+
+gemm_gemm_(512, 512, 512)_llvm(0) use 2.2784756 ms
+
+gemm_gemm_(1024, 1024, 1024)_llvm(0) use 23.146035700000002 ms
+
+gemm_gemm_(2048, 2048, 2048)_llvm(0) use 430.3592715 ms
+
+
+q-search:
+gemm_gemm_(32, 32, 32)_llvm(0) use 0.0013737 ms
+
+gemm_gemm_(64, 64, 64)_llvm(0) use 0.004883800000000001 ms
+
+gemm_gemm_(128, 128, 128)_llvm(0) use 0.040726899999999996 ms
+
+gemm_gemm_(256, 256, 256)_llvm(0) use 0.3587748 ms
+
+gemm_gemm_(512, 512, 512)_llvm(0) use 2.4266858 ms
+
+gemm_gemm_(1024, 1024, 1024)_llvm(0) use 31.919693399999996 ms

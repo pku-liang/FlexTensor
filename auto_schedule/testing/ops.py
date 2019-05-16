@@ -115,6 +115,42 @@ def zero_pad2d(inputs, padding=0):
         )
 
 
+def zero_pad3d(inputs, padding=0):
+    """Zero padding for 3d tensor
+
+    Args:
+    -----------------------------
+    inputs : tvm.tensor.Tensor
+        shape [batch, channel, depth, height, width]
+    padding: (optional:0) int or tuple
+        expected: (d_pad_up, d_pad_down, h_pad_up, h_pad_down, w_pad_up, w_pad_down)
+    -----------------------------
+
+    Returns:
+    -----------------------------
+    tvm.tensor.Tensor
+        shape [batch, channel, padded_depth, padded_height, padded_width]
+    -----------------------------
+    """
+    padding = (padding, padding, padding, padding, padding, padding) if isinstance(padding, (int, tvm.expr.IntImm)) else padding
+    assert_print(isinstance(padding, tuple), "type(padding)={}".format(type(padding)))
+    if len(padding) == 3:
+        padding = (padding[0], padding[0], padding[1], padding[1], padding[2], padding[2])
+    assert_print(len(padding) == 6)
+
+    padding_zero = 0.0 if "float" in inputs.dtype else 0
+
+    batch_size, in_channel,depth, height, width = inputs.shape
+    return tvm.compute(
+        (batch_size, in_channel, depth + padding[0] + padding[1], height + padding[2] + padding[3], width + padding[4] + padding[5]),
+        lambda b, c, d, h, w: tvm.if_then_else(
+                            tvm.all(d >= padding[0], d < depth + padding[0],h >= padding[2], h < height + padding[2], w >= padding[4], w < width + padding[4]),
+                            inputs[b, c, d - padding[0], h - padding[2], w - padding[4]],
+                            padding_zero
+                            )
+        )
+
+
 def zero_expand2d(inputs, stride=1):
     """Expand the inputs by zeros
 
@@ -155,6 +191,61 @@ def zero_expand2d(inputs, stride=1):
                                 w % stride[1] == 0
                                 ),
                             inputs[b, c, h // stride[0], w // stride[1]],
+                            expand_zero
+                            )
+        )
+
+
+def zero_expand3d(inputs, stride=1):
+    """Expand the inputs by zeros
+
+    explain the expand operation:
+    given stride = 1
+    [[[1, 2] --> [[[1, 0, 2]
+      [3, 4]]      [0, 0, 0]                    
+                   [3, 0, 4]]
+     [[5, 6]        
+      [7, 8]]]    [[0, 0, 0] 
+                   [0, 0, 0] 
+                   [0, 0, 0]]
+
+                  [[5, 0, 6]
+                   [0, 0, 0]
+                   [7, 0, 8]]]
+
+    Args:
+    -----------------------------
+    inputs : tvm.tensor.Tensor
+        shape [batch, channel, depth, height, width]
+    stride: (optional:0) int or tuple
+        expected: (d_stride, h_stride, w_stride)
+    -----------------------------
+
+    Returns:
+    -----------------------------
+    tvm.tensor.Tensor
+        shape [batch, channel, (depth - 1) * d_stride + 1, (height - 1) * h_stride + 1, (width - 1) * w_stride + 1]
+    -----------------------------
+    """
+    stride = (stride, stride, stride) if isinstance(stride, (int, tvm.expr.IntImm)) else stride
+    assert_print(isinstance(stride, tuple), "type(stride)={}".format(type(stride)))
+    assert_print(len(stride) == 3)
+
+    expand_zero = 0.0 if "float" in inputs.dtype else 0
+
+    batch_size, in_channel, depth, height, width = inputs.shape
+    out_depth = (depth - 1) * stride[0] + 1
+    out_height = (height - 1) * stride[1] + 1
+    out_width = (width - 1) * stride[2] + 1
+    return tvm.compute(
+        (batch_size, in_channel, out_depth, out_height, out_width),
+        lambda b, c, d ,h, w: tvm.if_then_else(
+                            tvm.all(
+                                d % stride[0] == 0,
+                                h % stride[1] == 0,
+                                w % stride[2] == 0
+                                ),
+                            inputs[b, c, d // stride[0], h // stride[1], w // stride[2]],
                             expand_zero
                             )
         )
@@ -449,6 +540,151 @@ def depthwise_conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilati
     -----------------------------
     """
     return conv2d_nchw(inputs, weight, bias, stride, padding, dilation, groups=inputs.shape[1])
+
+
+def conv3d_ncdhw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+    """Convolution 3d NCDHW layout
+
+    Args:
+    -----------------------------
+    inputs  : tvm.tensor.Tensor
+        shape [batch, channel, depth, height, width]
+    weight  : tvm.tensor.Tensor
+        shape [out_channel, channel // groups, kernel_depth, kernel_height, kernel_width]
+    bias    : (optional:None) tvm.tensor.Tensor
+        shape [out_channel]
+    stride  : (optional:1) int or tuple
+
+    padding : (optional:0) int or tuple
+
+    dilation: (optional:1) int
+
+    groups  : (optional:1) int
+    -----------------------------
+
+    Returns:
+    -----------------------------
+    tvm.tensor.Tensor
+        shape [batch, out_channel, output_depth, output_height, output_width]
+    -----------------------------
+    """
+    batch_size, in_channel, in_d, in_h, in_w = inputs.shape
+    out_channel, channel_per_group, k_d, k_h, k_w = weight.shape
+    assert_print((channel_per_group * groups).value == in_channel.value)
+    out_channel_per_group = out_channel // groups
+    assert_print((out_channel_per_group * groups).value == out_channel.value)
+
+    stride = (stride, stride, stride) if isinstance(stride, (int, tvm.expr.IntImm)) else stride
+    padding = (padding, padding, padding) if isinstance(padding, (int, tvm.expr.IntImm)) else padding
+    dilation = (dilation, dilation, dilation) if isinstance(dilation, (int, tvm.expr.IntImm)) else dilation
+    assert_print(isinstance(stride, tuple) and len(stride) == 3)
+    assert_print(isinstance(padding, tuple) and len(padding) == 3)
+    assert_print(isinstance(dilation, tuple) and len(dilation) == 3)
+
+    out_d = (in_d + 2 * padding[0] - dilation[0] * (k_d - 1) - 1) // stride[0] + 1
+    out_h = (in_h + 2 * padding[1] - dilation[1] * (k_h - 1) - 1) // stride[1] + 1
+    out_w = (in_w + 2 * padding[2] - dilation[2] * (k_w - 1) - 1) // stride[2] + 1
+    rc = tvm.reduce_axis((0, channel_per_group))
+    rd = tvm.reduce_axis((0, k_d))
+    rh = tvm.reduce_axis((0, k_h))
+    rw = tvm.reduce_axis((0, k_w))
+
+    padded = zero_pad3d(inputs, padding=padding)
+    output = tvm.compute(
+        (batch_size, out_channel, out_d, out_h, out_w),
+        lambda b, c, d, h, w: tvm.sum(
+            (padded[b, c // out_channel_per_group * channel_per_group + rc, 
+                    d * stride[0] + rd * dilation[0], h * stride[1] + rh * dilation[1], w * stride[2] + rw * dilation[2]]
+            * weight[c, rc, rd, rh, rw]),
+            axis=[rc, rd, rw, rh]
+        )
+    )
+    if bias is not None:
+        output = tvm.compute(
+            (batch_size, out_channel, out_d, out_h, out_w),
+            lambda b, c, d, h, w: output[b, c, d, h, w] + bias[c]
+        )
+    return output
+
+
+def conv_transpose3d_ncdhw(inputs, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1):
+    """Convolution transpose 3d NCDHW layout
+
+    Args:
+    -----------------------------
+    inputs  : tvm.tensor.Tensor
+        shape [batch, channel, depth, height, width]
+    weight  : tvm.tensor.Tensor
+        shape [channel, out_channel // groups, kernel_depth, kernel_height, kernel_width]
+    bias    : (optional:None) tvm.tensor.Tensor
+        shape [out_channel]
+    stride  : (optional:1) int or tuple
+
+    padding : (optional:0) int or tuple
+
+    output_padding : (optional:0) int or tuple
+
+    groups  : (optional:1) int
+
+    dilation: (optional:1) int
+    -----------------------------
+
+    Returns:
+    -----------------------------
+    tvm.tensor.Tensor
+        shape [batch, out_channel, out_depth, output_height, output_width]
+    -----------------------------
+    """
+    batch_size, input_channel, in_d, in_h, in_w = inputs.shape
+    input_channel_w, channel_per_group, k_d, k_h, k_w = weight.shape
+    #assert_print(input_channel.value == input_channel_w.value)
+    in_channel_per_group = input_channel // groups
+    #assert_print((in_channel_per_group * groups).value == input_channel.value)
+    output_channel = channel_per_group * groups
+
+    stride = (stride, stride, stride) if isinstance(stride, (int, tvm.expr.IntImm)) else stride
+    padding = (padding, padding, padding) if isinstance(padding, (int, tvm.expr.IntImm)) else padding
+    output_padding = ((output_padding, output_padding, output_padding) 
+                        if isinstance(output_padding, (int, tvm.expr.IntImm)) else output_padding)
+    dilation = (dilation, dilation, dilation) if isinstance(dilation, (int, tvm.expr.IntImm)) else dilation
+    assert_print(isinstance(stride, tuple) and len(stride) == 3)
+    assert_print(isinstance(padding, tuple) and len(padding) == 3)
+    assert_print(isinstance(output_padding, tuple) and len(output_padding) == 3)
+    assert_print(isinstance(groups, (int, tvm.expr.IntImm)))
+    assert_print(isinstance(dilation, tuple) and len(dilation) == 3)
+
+    kernel_d = (k_d - 1) * dilation[0] + 1
+    kernel_h = (k_h - 1) * dilation[1] + 1
+    kernel_w = (k_w - 1) * dilation[2] + 1
+    out_d = (in_d - 1) * stride[0] - 2 * padding[0] + kernel_d + output_padding[0]
+    out_h = (in_h - 1) * stride[1] - 2 * padding[1] + kernel_h + output_padding[1]
+    out_w = (in_w - 1) * stride[2] - 2 * padding[2] + kernel_w + output_padding[2]
+    rc = tvm.reduce_axis((0, in_channel_per_group))
+    rd = tvm.reduce_axis((0, k_d))
+    rh = tvm.reduce_axis((0, k_h))
+    rw = tvm.reduce_axis((0, k_w))
+
+    expanded = zero_expand3d(inputs, stride=stride)
+    padded = zero_pad3d(expanded, padding=(
+                                    kernel_d - 1 - padding[0], 
+                                    kernel_d - 1 - padding[0] + output_padding[0],
+                                    kernel_h - 1 - padding[1], 
+                                    kernel_h - 1 - padding[1] + output_padding[1],
+                                    kernel_w - 1 - padding[2],
+                                    kernel_w - 1 - padding[2] + output_padding[2]))
+    output = tvm.compute(
+        (batch_size, output_channel, out_d, out_h, out_w),
+        lambda b, c, d, h, w: tvm.sum(
+            (padded[b, c // channel_per_group * in_channel_per_group + rc, d + rd * dilation[0], h + rh * dilation[1], w + rw * dilation[2]] * 
+            weight[c // channel_per_group * in_channel_per_group + rc, c % channel_per_group, k_d - rd - 1, k_h - rh - 1, k_w - rw - 1]),
+            axis=[rc, rd, rw, rh])
+    )
+    if bias is not None:
+        output = tvm.compute(
+            (batch_size, output_channel, out_d, out_h, out_w), 
+            lambda b, c, d, h, w: output[b, c, d, h, w] + bias[c]
+            )
+    return output
     
 
 def im2col_nchw_naive(inputs, kernel_size, stride=1, padding=0, dilation=1, groups=1):
@@ -873,7 +1109,7 @@ def mean(inputs, dim=0):
     return tvm.compute(output_shape, _inner)
 
 
-def variance(inputs, dim=0):
+def variance(inputs, mean_val=None, dim=0):
     """Variance
 
     Args:
@@ -898,9 +1134,43 @@ def variance(inputs, dim=0):
         output_shape.append(inputs.shape[i])
     
     k = tvm.reduce_axis((0, inputs.shape[dim]))
-    mean_val = mean(inputs, dim)
+    mean_val = mean_val if mean_val is not None else mean(inputs, dim)
 
     def _inner(*args):
         return tvm.sum((inputs[(*args[:dim], k, *args[dim:])] - mean_val[args]) * 
                     (inputs[(*args[:dim], k, *args[dim:])] - mean_val[args]) / (inputs.shape[dim] - 1), axis=k)
     return tvm.compute(output_shape, _inner)
+
+def batch_normalization2d(inputs, epsilon=1e-5):
+    mean_val = mean(inputs, dim=0)
+    var_val = variance(inputs, mean_val=mean_val, dim=0)
+    return tvm.compute(inputs.shape, lambda i, j: (inputs[i, j] - mean_val[j]) / tvm.sqrt(var_val[j] + epsilon))
+
+def LSTMCell(inputs, hs, cs, weights, bias=None):
+    assert inputs.shape[0].value == hs.shape[0].value
+    assert hs.shape[0].value == cs.shape[0].value
+    assert weights.shape[0].value == 4
+    assert weights.shape[2].value == inputs.shape[1].value + hs.shape[1].value
+    k1 = tvm.reduce_axis((0, inputs.shape[1]))
+    k2 = tvm.reduce_axis((0, hs.shape[1]))
+    A = tvm.compute(
+        (inputs.shape[0], weights.shape[0], weights.shape[1]), 
+        lambda b, i, j: tvm.sum(inputs[b, k1] * weights[i, j, k1], axis=k1))
+    B = tvm.compute(
+        (hs.shape[0], weights.shape[0], weights.shape[1]), 
+        lambda b, i, j: tvm.sum(hs[b, k2] * weights[i, j, k2 + inputs.shape[1]], axis=k2))
+    if bias is not None:
+        C = tvm.compute(
+            (inputs.shape[0], weights.shape[0], weights.shape[1]), 
+            lambda b, i, j: A[b, i, j] + B[b, i, j] + bias[b, i, j])
+    else:
+        C = tvm.compute(
+            (inputs.shape[0], weights.shape[0], weights.shape[1]), 
+            lambda b, i, j: A[b, i, j] + B[b, i, j])
+    next_cs = tvm.compute(
+        (cs.shape[0], weights.shape[1]), 
+        lambda b, i: tvm.sigmoid(C[b, 1, i]) * cs[b, i] + tvm.sigmoid(C[b, 0, i]) * tvm.tanh(C[b, 3, i]))
+    next_hs = tvm.compute(
+        (hs.shape[0], weights.shape[1]), 
+        lambda b, i: tvm.sigmoid(C[b, 2, i]) * tvm.tanh(next_cs[b, i]))
+    return next_hs, next_cs

@@ -43,7 +43,7 @@ out_size = (in_size - kernel + 2*pad) // stride + 1
 # Pad input
 Apad = tvm.compute(
     (in_size + 2*pad, in_size + 2*pad, in_channel, batch),
-    lambda yy, xx, cc, nn: tvm.select(
+    lambda yy, xx, cc, nn: tvm.if_then_else(
         tvm.all(yy >= pad, yy - pad < in_size,
                 xx >= pad, xx - pad < in_size),
         A[yy - pad, xx - pad, cc, nn], tvm.const(0., "float32")),
@@ -224,6 +224,7 @@ w_np = np.random.uniform(size=(kernel, kernel, in_channel, out_channel)).astype(
 a = tvm.nd.array(a_np, ctx)
 w = tvm.nd.array(w_np, ctx)
 b = tvm.nd.array(np.zeros((out_size, out_size, out_channel, batch), dtype=B.dtype), ctx)
-print(tvm.lower(s, [A, W, B], simple_mode=True))
+# print(tvm.lower(s, [A, W, B], simple_mode=True))
+print(func.imported_modules[0].get_source())
 evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
 print('Convolution: %f ms' % (evaluator(a, w, b).mean * 1e3))

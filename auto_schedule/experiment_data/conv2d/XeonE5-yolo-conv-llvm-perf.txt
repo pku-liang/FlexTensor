@@ -1,0 +1,52 @@
+pytorch with mkl
+pytorch baselines for yolo convolution 2d for target llvm (0):
+layer 0
+Use 17.720944(ms)
+layer 1
+Use 18.991426(ms)
+layer 2
+Use 14.050856(ms)
+layer 3
+Use 17.099311(ms)
+layer 4
+Use 15.544953(ms)
+layer 5
+Use 20.421376(ms)
+layer 6
+Use 14.041255(ms)
+layer 7
+Use 15.372663(ms)
+layer 8
+Use 13.694893(ms)
+layer 9
+Use 22.421962(ms)
+layer 10
+Use 13.618985(ms)
+layer 11
+Use 18.996418(ms)
+layer 12
+Use 20.661633(ms)
+layer 13
+Use 19.941610(ms)
+layer 14
+Use 18.440863(ms)
+Done!
+
+full search:
+conv2d_yolo0_(1, 3, 448, 448, 64, 7, 2, 3, 1, 1)_llvm(3) use 13.625040699999998 ms
+conv2d_yolo1_(1, 64, 112, 112, 192, 3, 1, 1, 1, 1)_llvm(3) use 20.3909269 ms
+conv2d_yolo2_(1, 192, 56, 56, 128, 1, 1, 0, 1, 1)_llvm(3) use 2.2341164 ms
+conv2d_yolo3_(1, 128, 56, 56, 256, 3, 1, 1, 1, 1)_llvm(3) use 13.2013768 ms
+conv2d_yolo4_(1, 256, 56, 56, 256, 1, 1, 0, 1, 1)_llvm(3) use 6.2295803 ms
+conv2d_yolo5_(1, 256, 56, 56, 512, 3, 1, 1, 1, 1)_llvm(3) use 44.565104600000005 ms
+conv2d_yolo6_(1, 512, 28, 28, 256, 1, 1, 0, 1, 1)_llvm(3) use 2.1540163 ms
+conv2d_yolo7_(1, 256, 28, 28, 512, 3, 1, 1, 1, 1)_llvm(0) use 35.1884787 ms
+conv2d_yolo8_(1, 512, 28, 28, 512, 1, 1, 0, 1, 1)_llvm(3) use 6.0572403 ms
+conv2d_yolo9_(1, 512, 28, 28, 1024, 3, 1, 1, 1, 1)_llvm(3) use 44.7126573 ms
+conv2d_yolo10_(1, 1024, 14, 14, 512, 1, 1, 0, 1, 1)_llvm(3) use 3.6259157999999996 ms
+conv2d_yolo11_(1, 512, 14, 14, 1024, 3, 1, 1, 1, 1)_llvm(3) use 24.239960200000002 ms
+conv2d_yolo12_(1, 1024, 14, 14, 1024, 3, 1, 1, 1, 1)_llvm(3) use 41.5005278 ms
+conv2d_yolo13_(1, 1024, 14, 14, 1024, 3, 2, 1, 1, 1)_llvm(3) use 12.195988600000002 ms
+conv2d_yolo14_(1, 1024, 7, 7, 1024, 3, 1, 1, 1, 1)_llvm(3) use 17.7018373 ms
+
+q-search:
