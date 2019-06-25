@@ -4,15 +4,79 @@ import argparse
 import time
 import json
 import tvm 
-from auto_schedule.testing.scheduler import Config
+import numpy as np
+from tvm import rpc
+from auto_schedule.testing.scheduler import Config, RpcInfo
 from auto_schedule.testing.task import Task, TASK_TABLE
 from auto_schedule.testing.scheduler import schedule, schedule_with_config
 from auto_schedule.measure import _evaluate
+from auto_schedule.utils import to_tuple
 from auto_schedule.testing.configs.depthwise_config import depthwise_shapes
 
 
+LOCAL_RPC = False
+LIB_DIR = "."
+
+
+def evaluate(name, s, bufs, target, dev_id, number, rpc_info):
+    if rpc_info is not None:
+        host = rpc_info.host
+        port = rpc_info.port
+    else:
+        # local
+        host = "0.0.0.0"
+        port = 9090     # default port
+    if host == "0.0.0.0":
+        if LOCAL_RPC:
+            use_rpc = True
+        else:
+            use_rpc = False
+    else:
+        use_rpc = True
+    if use_rpc:
+        remote = rpc.connect(host, port)
+        ctx = remote.context(target, dev_id)
+    else:
+        ctx = tvm.context(target, dev_id)
+    tvm_arys = []
+    for buf in bufs:
+        shape = to_tuple(buf.shape)
+        tmp = np.random.uniform(-10, 10, size=shape).astype(buf.dtype)
+        tmp = tvm.nd.array(tmp, ctx)
+        tvm_arys.append(tmp)
+    try:
+        func_file = "{}.tar".format(name)
+        if rpc_info is not None and rpc_info.target_host is not None:
+            func = tvm.build(s, bufs, target=target, target_host=rpc_info.target_host)
+        else:
+            func = tvm.build(s, bufs, target=target)
+        if use_rpc:
+            func.export_library(os.path.join(LIB_DIR, func_file))
+            remote.upload(os.path.join(LIB_DIR, func_file))
+            func = remote.load_module(func_file)
+        evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
+        time_cost = evaluator(*tvm_arys).mean * 1e3
+    except Exception as e:
+        print(e)
+        time_cost = float("inf")
+    finally:
+        while len(tvm_arys) > 0:
+            del tvm_arys[-1]
+        if os.path.exists(os.path.join(LIB_DIR, func_file)):
+            try:
+                os.remove(os.path.join(LIB_DIR, func_file))
+            except Exception as e:
+                print(e)
+        elif os.path.exists(os.path.join(LIB_DIR, func_file + ".so")):
+            try:
+                os.remove(os.path.join(LIB_DIR, func_file))
+            except Exception as e:
+                print(e)
+    return time_cost
+
+
 def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, trials=100, parallel=1, 
-        method="searching", use_model=False, logfile=sys.stdout):
+        method="searching", use_model=False, rpc_info=None, logfile=sys.stdout):
     ret = dict()
     for i, shape in enumerate(shapes):
         print("Optimize depthwise conv2d shape {}".format(shape), flush=True)
@@ -36,7 +100,8 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
             op_stop=30, 
             method=method, 
             use_model=use_model,
-            parallel=parallel
+            parallel=parallel,
+            rpc_info=rpc_info
             )
         end = time.time()
         # print(tvm.lower(s, bufs, simple_mode=True))
@@ -56,18 +121,18 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
         line = task.key + ":" + string
         print(line, file=logfile, flush=True)
         s, bufs = schedule_with_config(task.key, configs)
-        time_cost = _evaluate(s, bufs, target, task.dev_id, 10)
+        time_cost = evaluate(task.key, s, bufs, target, task.dev_id, 10, rpc_info)
         print("Use", time_cost, "ms")
         print("Cost", end - beg, "s")
         print()
     return ret
 
 
-def test(task_key, configs, dev_id=None):
+def test(task_key, configs, dev_id=None, rpc_info=None):
     task = TASK_TABLE[task_key]
     s, bufs = schedule_with_config(task_key, configs)
     dev_id = dev_id if dev_id is not None else task.dev_id
-    time_cost = _evaluate(s, bufs, task.target, dev_id, 10)
+    time_cost = evaluate(task_key, s, bufs, task.target, dev_id, 10, rpc_info)
     print(task_key, "use", time_cost, "ms")
     print()
 
@@ -87,8 +152,12 @@ if __name__ == "__main__":
     parser.add_argument("--method", help="how to schedule", type=str, default="searching")
     parser.add_argument("--slevel", type=int, default=4)
     parser.add_argument("--rlevel", type=int, default=3)
+    parser.add_argument("--host", type=str, default="0.0.0.0")
+    parser.add_argument("--target_host", type=str, default="llvm")
+    parser.add_argument("--port", type=int, default=9090)
     args = parser.parse_args()
     shapes = depthwise_shapes
+    rpc_info = RpcInfo(args.host, args.port, args.target_host)
     if args.to < 0:
         end = len(shapes)
     else:
@@ -100,7 +169,7 @@ if __name__ == "__main__":
                 name, string = line.split(":", 1)
                 obj = json.loads(string)
                 configs = Config(obj[0], obj[1])
-                test(name, configs, args.device)
+                test(name, configs, args.device, rpc_info=rpc_info)
 
     elif args.log != "":
         with open(args.log, "a") as flog:
@@ -115,7 +184,8 @@ if __name__ == "__main__":
                 parallel=args.parallel,
                 use_model=args.use_model,
                 method=args.method,
-                logfile=flog
+                logfile=flog,
+                rpc_info=rpc_info,
                 )
     else:
         ret = optimize(
@@ -129,5 +199,6 @@ if __name__ == "__main__":
             parallel=args.parallel,
             use_model=args.use_model,
             method=args.method,
-            logfile=sys.stdout
+            logfile=sys.stdout,
+            rpc_info=rpc_info,
             )

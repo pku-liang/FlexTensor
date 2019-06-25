@@ -37,6 +37,17 @@ def int_to_lst(value, bit=32, base=10):
     return ret
 
 
+def powerx_lst(x, left, right):
+    ret = []
+    beg = left
+    while not is_power_of_x(x, beg):
+        beg += 1
+    while beg < right:
+        ret.append(beg)
+        beg = beg * x
+    return ret
+
+
 def get_factor_lst(value):
     assert isinstance(value, int)
     ret = []
@@ -48,7 +59,7 @@ def get_factor_lst(value):
     if end - int(end) < 1e-10 and value % int(end) == 0:
         ret.append(int(end))
 
-    return list(sorted(ret))
+    return ret
 
 
 def split_part_names(original, parts):
@@ -68,20 +79,29 @@ def str_to_tuple(s):
     return tuple(ret)
 
 
-def any_factor_split(value, number):
+def any_factor_split(value, number, allow_non_divisible='off'):
+    assert allow_non_divisible in ['off', 'power2', 'continuous']
     ret = []
     assert_print(isinstance(number, int))
-    recursive_factor_split(value, [], number, ret)
+    recursive_factor_split(value, [], number, ret, allow_non_divisible)
     return ret
 
 
-def recursive_factor_split(left, cur, number, ret):
+def recursive_factor_split(left, cur, number, ret, policy):
     if number == 1:
         ret.append(cur + [left])
         return
-    f_lst = get_factor_lst(left)
+    if policy == 'power2':
+        f_lst = get_factor_lst(left)
+        f_lst.extend(powerx_lst(2, 1, left))
+        f_lst = list(sorted(list(set(f_lst))))
+    elif policy == 'continuous':
+        f_lst = list(range(1, left + 1))
+    else:
+        f_lst = get_factor_lst(left)
+        f_lst = list(sorted(f_lst))
     for f in f_lst:
-        recursive_factor_split(left // f, cur + [f], number - 1, ret)
+        recursive_factor_split(math.ceil(left / f), cur + [f], number - 1, ret, policy)
 
 
 def three_factor_split(value):
@@ -198,25 +218,25 @@ def gen_enum(elements, length):
     return res
 
 
-def _dfs_gen_group(cur, p, elements, length, res, padding=None):
-    if padding is not None:
-        cha = length - p
-        shao = length - (len(cur) + cha)
+def _dfs_gen_group(cur, elements, p, length, left_groups, res, padding):
+    if left_groups == 1:
+        res.append(cur + [length] * (1 + padding))
+    elif left_groups > 1:
+        # _dfs_gen_group(cur, elements, p, length, left_groups-1, res)
+        for i in range(p + 1, length):
+            _dfs_gen_group(cur + [i], elements, i, length, left_groups-1, res, padding)
     else:
-        cha = 0
-        shao = 0
-    res.append(shao * [padding] + cur + cha * [padding])
-    if p == length:
-        return
-    _dfs_gen_group(cur + [elements[p]], p + 1, elements, length, res, padding)
+        raise RuntimeError("At least 1 group")
+            
 
 
-def gen_group(elements, padding=None):
+def gen_group(elements, most_groups=3):
     res = []
     length = len(elements)
-    for p in range(length):
-        cur = [elements[p]]
-        _dfs_gen_group(cur, p + 1, elements, length, res, padding)
+    lower = min(length, most_groups)
+    upper = min(length, most_groups)
+    for groups in range(lower, upper + 1):
+        _dfs_gen_group([], elements, 0, length, groups, res, most_groups - groups)
     return res
 
 
@@ -231,9 +251,9 @@ def comb(m, n):
     return fact(m) // (fact(n) * fact(m - n))
 
 
-def is_power_of_two(val):
+def is_power_of_x(x, val):
     assert isinstance(val, int) and val > 0
-    return math.fabs(math.pow(2, int(math.log2(val))) - val) < 1e-20
+    return math.fabs(math.pow(x, int(math.log(val, x))) - val) < 1e-20
 
 
 def nearest_power_of_two(val):
@@ -303,7 +323,7 @@ def test_gen_enum():
 
 
 def test_gen_group():
-    elements = ["b", "x", "y", "c"]
+    elements = ['x', 'y', 'z', 'w']
     res = gen_group(elements)
     print("length={}".format(len(res)))
     for ele in res:
@@ -311,12 +331,10 @@ def test_gen_group():
 
 
 def test_any_factor_split():
-    ret = any_factor_split(4, 100)
+    ret = any_factor_split(448, 4, 'power2')
     print(ret)
     print("length=", len(ret))
 
 
 if __name__ == "__main__":
-    lst = any_factor_split(1024, 4)
-    print(len(lst))
-    print(lst)
+    test_any_factor_split()

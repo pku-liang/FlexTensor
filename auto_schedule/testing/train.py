@@ -87,7 +87,7 @@ def normalize_perf_data(dataset):
     # normalize
     max_val = 0.0
     min_val = float("inf")
-    for data in dataset[:20]:
+    for data in dataset[:]:
         for val in data[1]:
             if val != float("inf"):
                 if val > max_val:
@@ -95,7 +95,7 @@ def normalize_perf_data(dataset):
                 elif val < min_val:
                     min_val = val
     interval = max(max_val - min_val, 1e-5)
-    for data in dataset[:20]:
+    for data in dataset[:]:
         # filter empty data
         if len(data[0]) <= 0:
             continue
@@ -113,9 +113,9 @@ def normalize_perf_data(dataset):
             new_data.append(copy.deepcopy(data[0][i]))
             new_data.append(copy.deepcopy(data[1][i]))
             if data[1][i] == float("inf"):
-                new_data[1] = 1.0
-            else:
-                new_data[1] = (data[1][i] - min_val) / interval
+                new_data[1] = 1000.0
+            # else:
+            #     new_data[1] = (data[1][i] - min_val) / interval
             data_lst.append(new_data)
     return data_lst
 
@@ -169,14 +169,16 @@ def train_performance_model(data_path, model_path, epoch=10, batch_size=1, lr=0.
             if (count + 1) % batch_size == 0:
                 count_batch += 1
                 inputs_torch = torch.FloatTensor(inputs).cuda()
-                targets_torch = torch.softmax(torch.FloatTensor(targets).cuda(), dim=-1)
-                ys = torch.softmax(model(inputs_torch).reshape(-1), dim=-1)
-                print("check ys=", ys.cpu().tolist())
-                print("check targets=", targets_torch.cpu().tolist())
-                print("check diff=", (ys -targets_torch).cpu().tolist())
-                # loss = torch.nn.functional.mse_loss(ys, targets_torch)
+                # targets_torch = torch.softmax(torch.FloatTensor(targets).cuda(), dim=-1)
+                # ys = torch.softmax(model(inputs_torch).reshape(-1), dim=-1)
+                targets_torch = torch.FloatTensor(targets).cuda()
+                ys = model(inputs_torch).reshape(-1)
+                # print("check ys=", ys.cpu().tolist())
+                # print("check targets=", targets_torch.cpu().tolist())
+                # print("check diff=", (ys -targets_torch).cpu().tolist())
+                loss = torch.nn.functional.mse_loss(ys, targets_torch)
                 # loss = rank_loss(ys, targets_torch)
-                loss = torch.nn.functional.binary_cross_entropy(ys, targets_torch)
+                # loss = torch.nn.functional.binary_cross_entropy(ys, targets_torch)
                 acc_loss = acc_loss + float(loss)
                 optimizer.zero_grad()
                 # for p in model.parameters():
@@ -193,12 +195,16 @@ def train_performance_model(data_path, model_path, epoch=10, batch_size=1, lr=0.
             # the remaining loss
             count_batch += 1
             inputs_torch = torch.FloatTensor(inputs).cuda()
-            targets_torch = torch.softmax(torch.FloatTensor(targets).cuda(), dim=-1)
-            ys = torch.softmax(model(inputs_torch).reshape(-1), dim=-1)
-            print("check ys=", ys.cpu().tolist())
-            print("check targets=", targets_torch.cpu().tolist())
-            print("check diff=", (ys -targets_torch).cpu().tolist())
-            loss = torch.nn.functional.binary_cross_entropy(ys, targets_torch)
+            # targets_torch = torch.softmax(torch.FloatTensor(targets).cuda(), dim=-1)
+            # ys = torch.softmax(model(inputs_torch).reshape(-1), dim=-1)
+            targets_torch = torch.FloatTensor(targets).cuda()
+            ys = model(inputs_torch).reshape(-1)
+            # print("check ys=", ys.cpu().tolist())
+            # print("check targets=", targets_torch.cpu().tolist())
+            # print("check diff=", (ys -targets_torch).cpu().tolist())
+            loss = torch.nn.functional.mse_loss(ys, targets_torch)
+            # loss = rank_loss(ys, targets_torch)
+            # loss = torch.nn.functional.binary_cross_entropy(ys, targets_torch)
             acc_loss = acc_loss + float(loss)
             optimizer.zero_grad()
             loss.backward()
@@ -232,6 +238,7 @@ def train_performance_model(data_path, model_path, epoch=10, batch_size=1, lr=0.
                     targets_sorted = sorted(targets_lst, key=lambda x: x[1])
                     full_hit = True
                     soft_hit = True
+                    # print(ys_sorted, targets_sorted)
                     for y_item, t_item in zip(ys_sorted, targets_sorted):
                         if y_item[0] != t_item[0]:
                             full_hit = False
@@ -261,7 +268,7 @@ def train_performance_model(data_path, model_path, epoch=10, batch_size=1, lr=0.
         x, t = data
         inputs.append(x)
         targets.append(t)
-        if (count + 1) % 8 == 0:
+        if (count + 1) % 2 == 0:
             count_batch += 1
             inputs_torch = torch.FloatTensor(inputs).cuda()
             ys = model(inputs_torch)

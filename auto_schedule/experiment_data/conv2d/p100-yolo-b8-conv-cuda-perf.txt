@@ -1,0 +1,100 @@
+full search:
+conv2d_yolo_b80_(8, 3, 448, 448, 64, 7, 2, 3, 1, 1)_cuda(0) use 1.4710005999999998 ms
+
+conv2d_yolo_b81_(8, 64, 112, 112, 192, 3, 1, 1, 1, 1)_cuda(0) use 3.9015361 ms
+
+conv2d_yolo_b82_(8, 192, 56, 56, 128, 1, 1, 0, 1, 1)_cuda(0) use 0.329686 ms
+
+conv2d_yolo_b83_(8, 128, 56, 56, 256, 3, 1, 1, 1, 1)_cuda(0) use 3.6534777999999997 ms
+
+conv2d_yolo_b84_(8, 256, 56, 56, 256, 1, 1, 0, 1, 1)_cuda(0) use 0.6695068 ms
+
+conv2d_yolo_b85_(8, 256, 56, 56, 512, 3, 1, 1, 1, 1)_cuda(0) use 13.157438299999999 ms
+
+conv2d_yolo_b86_(8, 512, 28, 28, 256, 1, 1, 0, 1, 1)_cuda(0) use 0.2974652 ms
+
+conv2d_yolo_b87_(8, 256, 28, 28, 512, 3, 1, 1, 1, 1)_cuda(0) use 2.5021225 ms
+
+conv2d_yolo_b88_(8, 512, 28, 28, 512, 1, 1, 0, 1, 1)_cuda(0) use 0.6221889 ms
+
+conv2d_yolo_b89_(8, 512, 28, 28, 1024, 3, 1, 1, 1, 1)_cuda(0) use 10.6791383 ms
+
+conv2d_yolo_b810_(8, 1024, 14, 14, 512, 1, 1, 0, 1, 1)_cuda(0) use 0.3335149 ms
+
+conv2d_yolo_b811_(8, 512, 14, 14, 1024, 3, 1, 1, 1, 1)_cuda(0) use 2.3498680000000003 ms
+
+conv2d_yolo_b812_(8, 1024, 14, 14, 1024, 3, 1, 1, 1, 1)_cuda(0) use 4.3902478 ms
+
+conv2d_yolo_b813_(8, 1024, 14, 14, 1024, 3, 2, 1, 1, 1)_cuda(0) use 1.6214655 ms
+
+conv2d_yolo_b814_(8, 1024, 7, 7, 1024, 3, 1, 1, 1, 1)_cuda(0) use 1.7178214 ms
+
+
+pytorch only:
+pytorch baselines for yolo_b8 convolution 2d for target cuda (0):
+layer 0
+Use 3.518163(ms)
+layer 1
+Use 6.037056(ms)
+layer 2
+Use 0.897722(ms)
+layer 3
+Use 2.999872(ms)
+layer 4
+Use 1.312195(ms)
+layer 5
+Use 9.259533(ms)
+layer 6
+Use 0.677664(ms)
+layer 7
+Use 2.521968(ms)
+layer 8
+Use 0.933658(ms)
+layer 9
+Use 9.316627(ms)
+layer 10
+Use 0.519213(ms)
+layer 11
+Use 2.650323(ms)
+layer 12
+Use 4.830982(ms)
+layer 13
+Use 2.920186(ms)
+layer 14
+Use 2.913866(ms)
+Done!
+
+
+pytorch + cudnn:
+pytorch baselines for yolo_b8 convolution 2d for target cuda (0):
+layer 0
+Use 1.293843(ms)
+layer 1
+Use 1.957072(ms)
+layer 2
+Use 0.252250(ms)
+layer 3
+Use 1.297520(ms)
+layer 4
+Use 0.572387(ms)
+layer 5
+Use 4.621715(ms)
+layer 6
+Use 0.294403(ms)
+layer 7
+Use 1.231043(ms)
+layer 8
+Use 0.544938(ms)
+layer 9
+Use 4.550352(ms)
+layer 10
+Use 0.297891(ms)
+layer 11
+Use 1.293581(ms)
+layer 12
+Use 2.463120(ms)
+layer 13
+Use 1.648842(ms)
+layer 14
+Use 1.615344(ms)
+Done!

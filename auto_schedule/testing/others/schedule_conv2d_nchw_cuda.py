@@ -27,7 +27,7 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
     k_factors = [256, 2, 2, 1]
     p_factors = [1, 1, 1, 7]
     q_factors = [1, 1, 7, 1]
-    rc_factors = [1, 512, 2]         # outer-->inner
+    rc_factors = [32, 16, 2]         # outer-->inner
     ry_factors = [3, 1, 1]
     rx_factors = [1, 3, 1]
 
@@ -76,24 +76,39 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
     # compute at write cache
     s[write_cache].compute_at(s[outputs], inner)
 
-    # split reduce axes
-    wb, wk, wp, wq = s[write_cache].op.axis
+    # rfactor
     rc, ry, rx = s[write_cache].op.reduce_axis
     rco, rci = s[write_cache].split(rc, nparts=rc_factors[0])
-    rcm, rci = s[write_cache].split(rci, nparts=rc_factors[1])
-    rxo, rxi = s[write_cache].split(rx, nparts=rx_factors[0])
-    rxm, rxi = s[write_cache].split(rxi, nparts=rx_factors[1])
     ryo, ryi = s[write_cache].split(ry, nparts=ry_factors[0])
-    rym, ryi = s[write_cache].split(ryi, nparts=ry_factors[1])
+    rxo, rxi = s[write_cache].split(rx, nparts=rx_factors[0])
+    s[write_cache].reorder(rco, ryo, rxo, rci, ryi, rxi)
+    ro = s[write_cache].fuse(rco, ryo, rxo)
+    write_cache_rf = s.rfactor(write_cache, ro)
+    s[write_cache].bind(s[write_cache].op.reduce_axis[0], ty)
+    s[write_cache_rf].compute_at(s[write_cache], s[write_cache].op.reduce_axis[0])
+    print(s[write_cache].op.axis)
+    print(s[write_cache].op.reduce_axis)
+    print(s[write_cache_rf].op.axis)
+    print(s[write_cache_rf].op.reduce_axis)
+
+    # split reduce axes
+    wr, wb, wk, wp, wq = s[write_cache_rf].op.axis
+    rci, ryi, rxi = s[write_cache_rf].op.reduce_axis
+    # rco, rci = s[write_cache_rf].split(rc, nparts=rc_factors[0])
+    rcm, rci = s[write_cache_rf].split(rci, nparts=rc_factors[1])
+    # rxo, rxi = s[write_cache_rf].split(rx, nparts=rx_factors[0])
+    rxm, rxi = s[write_cache_rf].split(rxi, nparts=rx_factors[1])
+    # ryo, ryi = s[write_cache_rf].split(ry, nparts=ry_factors[0])
+    rym, ryi = s[write_cache_rf].split(ryi, nparts=ry_factors[1])
 
     # reorder
-    s[write_cache].reorder(rco, ryo, rxo, rcm, rym, rxm, rci, ryi, rxi, wb, wk, wp, wq)
+    s[write_cache_rf].reorder(rcm, rym, rxm, rci, ryi, rxi, wr, wb, wk, wp, wq)
 
     # compute at read cache
-    s[read_share_weight].compute_at(s[write_cache], rcm)
-    s[read_local_weight].compute_at(s[write_cache], rxi)
-    s[read_share_inputs].compute_at(s[write_cache], rcm)
-    s[read_local_inputs].compute_at(s[write_cache], rxi)
+    s[read_share_weight].compute_at(s[write_cache_rf], rcm)
+    s[read_local_weight].compute_at(s[write_cache_rf], rxi)
+    s[read_share_inputs].compute_at(s[write_cache_rf], rcm)
+    s[read_local_inputs].compute_at(s[write_cache_rf], rxi)
 
     # cooperative fetching
     for cache in [read_share_inputs, read_share_weight]:

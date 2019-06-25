@@ -523,7 +523,7 @@ def depthwise_conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilati
     inputs  : tvm.tensor.Tensor
         shape [batch, channel, height, width]
     weight  : tvm.tensor.Tensor
-        shape [out_channel, 1, kernel_height, kernel_width]
+        shape [in_channel, factor, kernel_height, kernel_width]
     bias    : (optional:None) tvm.tensor.Tensor
         shape [out_channel]
     stride  : (optional:1) int or tuple
@@ -539,7 +539,39 @@ def depthwise_conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilati
         shape [batch, out_channel, output_height, output_width]
     -----------------------------
     """
-    return conv2d_nchw(inputs, weight, bias, stride, padding, dilation, groups=inputs.shape[1])
+    batch_size, in_channel, in_h, in_w = inputs.shape
+    _in_channel, factor, k_h, k_w = weight.shape
+    assert_print(_in_channel.value == in_channel.value)
+    out_channel = in_channel * factor
+
+    stride = (stride, stride) if isinstance(stride, (int, tvm.expr.IntImm)) else stride
+    padding = (padding, padding) if isinstance(padding, (int, tvm.expr.IntImm)) else padding
+    dilation = (dilation, dilation) if isinstance(dilation, (int, tvm.expr.IntImm)) else dilation
+    assert_print(isinstance(stride, tuple) and len(stride) == 2)
+    assert_print(isinstance(padding, tuple) and len(padding) == 2)
+    assert_print(isinstance(dilation, tuple) and len(dilation) == 2)
+
+    out_h = (in_h + 2 * padding[0] - dilation[0] * (k_h - 1) - 1) // stride[0] + 1
+    out_w = (in_w + 2 * padding[1] - dilation[1] * (k_w - 1) - 1) // stride[1] + 1
+    rh = tvm.reduce_axis((0, k_h))
+    rw = tvm.reduce_axis((0, k_w))
+
+    padded = zero_pad2d(inputs, padding=padding)
+    output = tvm.compute(
+        (batch_size, out_channel, out_h, out_w),
+        lambda b, c, h, w: tvm.sum(
+            (padded[b, c//factor, 
+                    h * stride[0] + rh * dilation[0], w * stride[1] + rw * dilation[1]]
+            * weight[c//factor, c%factor, rh, rw]),
+            axis=[rw, rh]
+        )
+    )
+    if bias is not None:
+        output = tvm.compute(
+            (batch_size, out_channel, out_h, out_w),
+            lambda b, c, h, w: output[b, c, h, w] + bias[c]
+        )
+    return output
 
 
 def conv3d_ncdhw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
@@ -1046,10 +1078,11 @@ def MTTKRP3d(A, B, C):
     """
     assert_print(A.shape[1].value == B.shape[0].value)
     assert_print(A.shape[2].value == C.shape[0].value)
+    assert B.shape[1].value == C.shape[1].value
     k = tvm.reduce_axis((0, B.shape[0]))
     l = tvm.reduce_axis((0, C.shape[0]))
 
-    return tvm.compute((A, B, C), lambda i, j: A[i, k, l] * B[k, j] * C[l, j])
+    return tvm.compute((A.shape[0], B.shape[1]), lambda i, j: tvm.sum(A[i, k, l] * B[k, j] * C[l, j], axis=[k, l]))
 
 
 def pointwise_multiply(A, B):

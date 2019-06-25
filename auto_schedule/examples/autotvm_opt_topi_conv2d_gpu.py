@@ -25,12 +25,12 @@ def get_workload(batch_size, image_shape, out_channel, kernel_size=(3, 3), strid
 
 
 target = tvm.target.cuda()
-batch_size = 1
-image_shape = (1024, 7, 7)
-out_channel = 1024
-kernel_size = (3, 3)
-strides = (1, 1)
-padding = (1, 1)
+batch_size = 64
+image_shape = (3, 227, 227)
+out_channel = 96
+kernel_size = (7, 7)
+strides = (2, 2)
+padding = (0, 0)
 dtype = "float32"
 
 

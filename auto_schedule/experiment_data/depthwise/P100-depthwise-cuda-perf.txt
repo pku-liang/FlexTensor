@@ -6,6 +6,22 @@ conv2d_depthwise_(1, 512, 28, 28, 512, 1, 1, 0, 1, 512)_cuda(1) use 0.0083483999
 
 conv2d_depthwise_(1, 512, 28, 28, 1024, 3, 1, 1, 1, 512)_cuda(1) use 0.019949400000000003 ms
 
+mobile:
+conv2d_mobile_v20_(1, 32, 112, 112, 32, 3, 1, 1, 1, 32)_cuda(1) use 0.0164697 ms
+
+conv2d_mobile_v21_(1, 16, 112, 112, 96, 3, 2, 1, 1, 16)_cuda(1) use 0.016580800000000003 ms
+
+conv2d_mobile_v22_(1, 24, 56, 56, 144, 3, 2, 1, 1, 24)_cuda(1) use 0.014144400000000001 ms
+
+conv2d_mobile_v23_(1, 32, 28, 28, 192, 3, 2, 1, 1, 32)_cuda(1) use 0.0070322 ms
+
+conv2d_mobile_v24_(1, 64, 14, 14, 384, 3, 1, 1, 1, 64)_cuda(1) use 0.0087395 ms
+
+conv2d_mobile_v25_(1, 96, 14, 14, 576, 3, 2, 1, 1, 96)_cuda(1) use 0.007348500000000001 ms
+
+conv2d_mobile_v26_(1, 160, 7, 7, 960, 3, 1, 1, 1, 160)_cuda(1) use 0.0073376 ms
+
+
 
 
 pytorch only:
@@ -20,6 +36,25 @@ layer 2
 Use 0.111664(ms)
 Done!
 
+mobile:
+pytorch baselines for mobile_v2 convolution 2d for target cuda (0):
+layer 0
+Use 0.075280(ms)
+layer 1
+Use 0.054646(ms)
+layer 2
+Use 0.042518(ms)
+layer 3
+Use 0.042093(ms)
+layer 4
+Use 0.041392(ms)
+layer 5
+Use 0.041654(ms)
+layer 6
+Use 0.041520(ms)
+Done!
+
+
 
 
 pytorch + cudnn:
@@ -30,6 +65,24 @@ layer 1
 Use 0.062086(ms)
 layer 2
 Use 0.111034(ms)
+Done!
+
+mobile:
+pytorch baselines for mobile_v2 convolution 2d for target cuda (0):
+layer 0
+Use 0.075517(ms)
+layer 1
+Use 0.053424(ms)
+layer 2
+Use 0.042861(ms)
+layer 3
+Use 0.042333(ms)
+layer 4
+Use 0.042026(ms)
+layer 5
+Use 0.041274(ms)
+layer 6
+Use 0.042253(ms)
 Done!
 
 

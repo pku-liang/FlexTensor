@@ -1,0 +1,57 @@
+full search:
+conv3d_conv3d_(1, 3, 16, 112, 112, 64, 7, 2, 3, 1, 1)_cuda(0) use 0.6005148 ms
+
+conv3d_conv3d_(1, 64, 16, 28, 28, 192, 3, 1, 1, 1, 1)_cuda(0) use 1.4840426999999998 ms
+
+conv3d_conv3d_(1, 192, 4, 28, 28, 128, 1, 1, 0, 1, 1)_cuda(0) use 0.0440618 ms
+
+conv3d_conv3d_(1, 128, 4, 28, 28, 256, 3, 1, 1, 1, 1)_cuda(0) use 1.0000513000000002 ms
+
+conv3d_conv3d_(1, 512, 4, 14, 14, 256, 1, 1, 0, 1, 1)_cuda(0) use 0.067645 ms
+
+conv3d_conv3d_(1, 256, 4, 14, 14, 512, 3, 1, 1, 1, 1)_cuda(0) use 1.0263626000000001 ms
+
+conv3d_conv3d_(1, 1024, 4, 7, 7, 512, 1, 1, 0, 1, 1)_cuda(0) use 0.1132043 ms
+
+conv3d_conv3d_(1, 512, 4, 7, 7, 1024, 3, 1, 1, 1, 1)_cuda(0) use 1.5000655 ms
+
+
+pytorch only:
+pytorch baselines convolution 3d for target cuda (0):
+layer 0
+Use 1.204733(ms)
+layer 1
+Use 1.902931(ms)
+layer 2
+Use 0.133622(ms)
+layer 3
+Use 1.028672(ms)
+layer 4
+Use 0.120464(ms)
+layer 5
+Use 0.949133(ms)
+layer 6
+Use 0.101149(ms)
+layer 7
+Use 1.111526(ms)
+Done!
+
+pytorch + cudnn:
+pytorch baselines convolution 3d for target cuda (0):
+layer 0
+Use 0.698531(ms)
+layer 1
+Use 1.372874(ms)
+layer 2
+Use 0.124563(ms)
+layer 3
+Use 1.038346(ms)
+layer 4
+Use 0.289981(ms)
+layer 5
+Use 0.969949(ms)
+layer 6
+Use 0.513002(ms)
+layer 7
+Use 1.410099(ms)
+Done!

@@ -1,0 +1,107 @@
+full search:
+conv2d_dilation_(1, 3, 448, 448, 64, 7, 2, 3, 2, 1)_cuda(0) use 0.30131 ms
+
+conv2d_dilation_(1, 64, 112, 112, 192, 3, 1, 1, 2, 1)_cuda(0) use 0.5910348 ms
+
+conv2d_dilation_(1, 192, 56, 56, 128, 1, 1, 0, 2, 1)_cuda(0) use 0.0553656 ms
+
+conv2d_dilation_(1, 128, 56, 56, 256, 3, 1, 1, 2, 1)_cuda(0) use 0.3333274 ms
+
+conv2d_dilation_(1, 256, 56, 56, 256, 1, 1, 0, 2, 1)_cuda(3) use 0.11173400000000001 ms
+
+conv2d_dilation_(1, 256, 56, 56, 512, 3, 1, 1, 2, 1)_cuda(3) use 1.4167127 ms
+
+conv2d_dilation_(1, 512, 28, 28, 256, 1, 1, 0, 2, 1)_cuda(3) use 0.0668498 ms
+
+conv2d_dilation_(1, 256, 28, 28, 512, 3, 1, 1, 2, 1)_cuda(3) use 0.4665315 ms
+
+conv2d_dilation_(1, 512, 28, 28, 512, 1, 1, 0, 2, 1)_cuda(3) use 0.10226969999999999 ms
+
+conv2d_dilation_(1, 512, 28, 28, 1024, 3, 1, 1, 2, 1)_cuda(3) use 1.2384719 ms
+
+conv2d_dilation_(1, 1024, 14, 14, 512, 1, 1, 0, 2, 1)_cuda(3) use 0.08345570000000001 ms
+
+conv2d_dilation_(1, 512, 14, 14, 1024, 3, 1, 1, 2, 1)_cuda(3) use 0.3808731 ms
+
+conv2d_dilation_(1, 1024, 14, 14, 1024, 3, 1, 1, 2, 1)_cuda(3) use 0.7648203 ms
+
+conv2d_dilation_(1, 1024, 14, 14, 1024, 3, 2, 1, 2, 1)_cuda(3) use 0.6234412 ms
+
+conv2d_dilation_(1, 1024, 7, 7, 1024, 3, 1, 1, 2, 1)_cuda(3) use 0.4833848 ms
+
+
+pytorch only:
+pytorch baselines dilation convolution for target cuda (0):
+layer 0
+Use 0.500662(ms)
+layer 1
+Use 0.784365(ms)
+layer 2
+Use 0.145818(ms)
+layer 3
+Use 0.415933(ms)
+Done!
+
+pytorch baselines dilation convolution for target cuda (0):
+layer 0
+Use 0.230954(ms)
+layer 1
+Use 1.230230(ms)
+layer 2
+Use 0.127782(ms)
+layer 3
+Use 0.348125(ms)
+layer 4
+Use 0.160349(ms)
+layer 5
+Use 1.133450(ms)
+layer 6
+Use 0.104550(ms)
+layer 7
+Use 0.280934(ms)
+layer 8
+Use 0.499520(ms)
+layer 9
+Use 0.338243(ms)
+layer 10
+Use 0.279254(ms)
+Done!
+
+
+
+pytorch + cudnn:
+pytorch baselines dilation convolution for target cuda (0):
+layer 0
+Use 3.084349(ms)
+layer 1
+Use 12.033533(ms)
+layer 2
+Use 1.425904(ms)
+layer 3
+Use 7.719040(ms)
+Done!
+
+pytorch baselines dilation convolution for target cuda (0):
+layer 0
+Use 3.627830(ms)
+layer 1
+Use 28.768909(ms)
+layer 2
+Use 1.899539(ms)
+layer 3
+Use 7.477283(ms)
+layer 4
+Use 3.266730(ms)
+layer 5
+Use 27.497869(ms)
+layer 6
+Use 0.209837(ms)
+layer 7
+Use 0.954954(ms)
+layer 8
+Use 1.872006(ms)
+layer 9
+Use 1.903046(ms)
+layer 10
+Use 1.743891(ms)
+Done!

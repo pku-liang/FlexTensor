@@ -1,0 +1,53 @@
+full search:
+conv2d_depthwise_(8, 32, 112, 112, 32, 3, 1, 1, 1, 32)_cuda(0) use 0.10349929999999999 ms
+
+conv2d_depthwise_(8, 16, 112, 112, 96, 3, 2, 1, 1, 16)_cuda(0) use 0.0610908 ms
+
+conv2d_depthwise_(8, 24, 56, 56, 144, 3, 2, 1, 1, 24)_cuda(0) use 0.036095800000000004 ms
+
+[10:40:13] /home/zchno/tvm/src/pass/loop_partition.cc:376: Cannot prove: (((((((((threadIdx.x % 56)/28)*3) + 8)/6) - 1) - (32 - ((blockIdx.x % 224)/7))) + 1) >= 0), when generating the post doubt loop
+conv2d_depthwise_(8, 32, 28, 28, 192, 3, 2, 1, 1, 32)_cuda(0) use 0.009942 ms
+
+conv2d_depthwise_(8, 64, 14, 14, 384, 3, 1, 1, 1, 64)_cuda(0) use 0.013611700000000001 ms
+
+conv2d_depthwise_(8, 96, 14, 14, 576, 3, 2, 1, 1, 96)_cuda(0) use 0.009007000000000001 ms
+
+conv2d_depthwise_(8, 160, 7, 7, 960, 3, 1, 1, 1, 160)_cuda(0) use 0.014959300000000002 ms
+
+
+pytorch only:
+pytorch baselines depthwise convolution for target cuda (0):
+layer 0
+Use 0.690650(ms)
+layer 1
+Use 0.404342(ms)
+layer 2
+Use 0.122368(ms)
+layer 3
+Use 0.049517(ms)
+layer 4
+Use 0.066602(ms)
+layer 5
+Use 0.061341(ms)
+layer 6
+Use 0.048957(ms)
+Done!
+
+
+pytorch + cudnn:
+pytorch baselines depthwise convolution for target cuda (0):
+layer 0
+Use 0.728269(ms)
+layer 1
+Use 0.409094(ms)
+layer 2
+Use 0.124438(ms)
+layer 3
+Use 0.049859(ms)
+layer 4
+Use 0.066403(ms)
+layer 5
+Use 0.078822(ms)
+layer 6
+Use 0.048454(ms)
+Done!

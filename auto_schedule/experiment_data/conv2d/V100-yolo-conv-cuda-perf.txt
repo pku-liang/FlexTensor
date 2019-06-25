@@ -1,0 +1,86 @@
+full search:
+conv2d_yolo0_(1, 3, 448, 448, 64, 7, 2, 3, 1, 1)_cuda(1) use 0.1321056 ms
+
+conv2d_yolo1_(1, 64, 112, 112, 192, 3, 1, 1, 1, 1)_cuda(1) use 0.3161358 ms
+
+conv2d_yolo2_(1, 192, 56, 56, 128, 1, 1, 0, 1, 1)_cuda(1) use 0.0307614 ms
+
+conv2d_yolo3_(1, 128, 56, 56, 256, 3, 1, 1, 1, 1)_cuda(1) use 0.23021690000000003 ms
+
+conv2d_yolo4_(1, 256, 56, 56, 256, 1, 1, 0, 1, 1)_cuda(1) use 0.064619 ms
+
+conv2d_yolo5_(1, 256, 56, 56, 512, 3, 1, 1, 1, 1)_cuda(1) use 0.8365518000000001 ms
+
+conv2d_yolo6_(1, 512, 28, 28, 256, 1, 1, 0, 1, 1)_cuda(1) use 0.0544889 ms
+
+conv2d_yolo7_(1, 256, 28, 28, 512, 3, 1, 1, 1, 1)_cuda(1) use 0.35802429999999996 ms
+
+
+pytorch only:
+pytorch baselines for yolo convolution 2d for target cuda (0):
+layer 0
+Use 0.345350(ms)
+layer 1
+Use 0.428323(ms)
+layer 2
+Use 0.149619(ms)
+layer 3
+Use 0.315146(ms)
+layer 4
+Use 0.154531(ms)
+layer 5
+Use 0.770253(ms)
+layer 6
+Use 0.108477(ms)
+layer 7
+Use 0.272554(ms)
+layer 8
+Use 0.122640(ms)
+layer 9
+Use 0.792566(ms)
+layer 10
+Use 0.103158(ms)
+layer 11
+Use 0.342090(ms)
+layer 12
+Use 0.544374(ms)
+layer 13
+Use 0.314954(ms)
+layer 14
+Use 0.315341(ms)
+Done!
+
+
+pytorch + cudnn:
+pytorch baselines for yolo convolution 2d for target cuda (0):
+layer 0
+Use 0.187184(ms)
+layer 1
+Use 0.223642(ms)
+layer 2
+Use 0.082256(ms)
+layer 3
+Use 0.159181(ms)
+layer 4
+Use 0.117421(ms)
+layer 5
+Use 0.445754(ms)
+layer 6
+Use 0.110026(ms)
+layer 7
+Use 0.196582(ms)
+layer 8
+Use 0.122781(ms)
+layer 9
+Use 0.607869(ms)
+layer 10
+Use 0.150237(ms)
+layer 11
+Use 0.247120(ms)
+layer 12
+Use 0.444208(ms)
+layer 13
+Use 0.767981(ms)
+layer 14
+Use 0.449744(ms)
+Done!

@@ -1,0 +1,60 @@
+produce compute {
+  // attr [iter_var(blockIdx.x, , blockIdx.x)] thread_extent = 256
+  // attr [compute.local] storage_scope = "local"
+  allocate compute.local[float32 * 7]
+  // attr [compute.local.rf] storage_scope = "local"
+  allocate compute.local.rf[float32 * 2]
+  // attr [compute.shared] storage_scope = "shared"
+  allocate compute.shared[float32 * 26838]
+  // attr [placeholder.shared] storage_scope = "shared"
+  allocate placeholder.shared[float32 * 35784]
+  // attr [compute.shared.local] storage_scope = "local"
+  allocate compute.shared.local[float32 * 1]
+  // attr [placeholder.shared.local] storage_scope = "local"
+  allocate placeholder.shared.local[float32 * 2]
+  // attr [reduce_temp0] storage_scope = "local"
+  allocate reduce_temp0[float32 * 1]
+  // attr [iter_var(threadIdx.x, , threadIdx.x)] thread_extent = 14
+  produce compute.local {
+    for (ax2, 0, 7) {
+      // attr [iter_var(threadIdx.y, , threadIdx.y)] thread_extent = 96
+      produce compute.local.rf {
+        compute.local.rf[0] = 0.000000f
+        compute.local.rf[1] = 0.000000f
+        for (rv.inner.outer, 0, 16) {
+          produce compute.shared {
+            for (ax0.ax1.fused.ax2.fused.ax3.fused.inner, 0, 1917) {
+              compute.shared[((((threadIdx.x*71) + (ax0.ax1.fused.ax2.fused.ax3.fused.inner/27))*27) + ((((ax0.ax1.fused.ax2.fused.ax3.fused.inner/9) % 3)*9) + (ax0.ax1.fused.ax2.fused.ax3.fused.inner % 9)))] = tvm_if_then_else((((((1 - ((ax0.ax1.fused.ax2.fused.ax3.fused.inner/9) % 3)) <= ax2) && (ax2 < (8 - ((ax0.ax1.fused.ax2.fused.ax3.fused.inner/9) % 3)))) && (1 <= (ax0.ax1.fused.ax2.fused.ax3.fused.inner % 9))) && ((ax0.ax1.fused.ax2.fused.ax3.fused.inner % 9) < 8)), placeholder[((((((((threadIdx.x*497) + ax2) + (rv.inner.outer*14)) + ((ax0.ax1.fused.ax2.fused.ax3.fused.inner/27)*7))*7) + (ax0.ax1.fused.ax2.fused.ax3.fused.inner % 9)) + (((ax0.ax1.fused.ax2.fused.ax3.fused.inner/9) % 3)*7)) + -8)], 0.000000f)
+            }
+          }
+          produce placeholder.shared {
+            for (ax0.ax1.fused.ax2.fused.ax3.fused.inner, 0, 2556) {
+              placeholder.shared[((((threadIdx.x*284) + (ax0.ax1.fused.ax2.fused.ax3.fused.inner/9))*9) + ((((ax0.ax1.fused.ax2.fused.ax3.fused.inner/3) % 3)*3) + (ax0.ax1.fused.ax2.fused.ax3.fused.inner % 3)))] = placeholder[(((((((blockIdx.x*2048) + rv.inner.outer) + ((((threadIdx.x*284) + (ax0.ax1.fused.ax2.fused.ax3.fused.inner/9))/994)*512))*18) + (ax0.ax1.fused.ax2.fused.ax3.fused.inner % 3)) + ((((threadIdx.x*284) + (ax0.ax1.fused.ax2.fused.ax3.fused.inner/9)) % 994)*9)) + (((ax0.ax1.fused.ax2.fused.ax3.fused.inner/3) % 3)*3))]
+            }
+          }
+          for (rv.inner.outer, 0, 3) {
+            for (rv.inner.inner, 0, 2) {
+              produce compute.shared.local {
+                compute.shared.local[0] = compute.shared[(((((threadIdx.x % 7) + ((threadIdx.y/3)*864)) + (threadIdx.y % 3)) + (rv.inner.outer*9)) + (rv.inner.inner*27))]
+              }
+              produce placeholder.shared.local {
+                placeholder.shared.local[0] = placeholder.shared[(((((threadIdx.x/7)*8946) + ((threadIdx.y/3)*288)) + ((rv.inner.outer*3) + (threadIdx.y % 3))) + (rv.inner.inner*9))]
+                placeholder.shared.local[1] = placeholder.shared[((((((threadIdx.x/7)*8946) + ((threadIdx.y/3)*288)) + ((rv.inner.outer*3) + (threadIdx.y % 3))) + (rv.inner.inner*9)) + 17892)]
+              }
+              compute.local.rf[0] = (compute.local.rf[0] + (compute.shared.local[0]*placeholder.shared.local[0]))
+              compute.local.rf[1] = (compute.local.rf[1] + (compute.shared.local[0]*placeholder.shared.local[1]))
+            }
+          }
+        }
+      }
+      // attr [comm_reducer(result=[(x + y)], lhs=[x], rhs=[y], identity_element=[0.000000f])] reduce_scope = reinterpret((uint64)0)
+      tvm_thread_allreduce((uint32)1, compute.local.rf[0], (uint1)1, reduce_temp0, threadIdx.y)
+      tvm_thread_allreduce((uint32)1, compute.local.rf[1], (uint1)1, reduce_temp0, threadIdx.y)
+      compute.local[ax2] = reduce_temp0[0]
+    }
+  }
+  for (b.inner.inner.inner.c.inner.inner.inner.fused.h.inner.inner.inner.fused.w.inner.inner.inner.fused, 0, 7) {
+    compute[((((blockIdx.x*4) + (threadIdx.x/7))*49) + ((b.inner.inner.inner.c.inner.inner.inner.fused.h.inner.inner.inner.fused.w.inner.inner.inner.fused*7) + (threadIdx.x % 7)))] = compute.local[b.inner.inner.inner.c.inner.inner.inner.fused.h.inner.inner.inner.fused.w.inner.inner.inner.fused]
+    compute[(((((blockIdx.x*4) + (threadIdx.x/7))*49) + ((b.inner.inner.inner.c.inner.inner.inner.fused.h.inner.inner.inner.fused.w.inner.inner.inner.fused*7) + (threadIdx.x % 7))) + 98)] = compute.local[b.inner.inner.inner.c.inner.inner.inner.fused.h.inner.inner.inner.fused.w.inner.inner.inner.fused]
+  }
+}

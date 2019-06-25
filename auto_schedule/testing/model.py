@@ -97,7 +97,7 @@ class Walker(nn.Module):
         self.memory.append((pre_state, action, post_state, reward))
         self.mem_size += 1
 
-    def train(self, lr=0.02, save=True):
+    def train(self, lr=0.02, decay=0.9, save=True):
         train_data = self.memory
         data_size = min(self.mem_size, 1000)
         print("train walker data size %d" % data_size)
@@ -110,7 +110,7 @@ class Walker(nn.Module):
                 pre_state, action, post_state, reward = data
                 y = self.pre_judger(torch.FloatTensor(pre_state))[action]
                 t = self.post_judger(torch.FloatTensor(post_state)).detach()
-                target = torch.max(t, dim=-1)[0] + reward
+                target = torch.max(t, dim=-1)[0] * decay + reward
                 loss = loss + torch.pow(y - target, 2)      # simple MSE
                 if (p_data + 1) % 32 == 0:
                     optimizer.zero_grad()
@@ -190,40 +190,40 @@ class PerformanceModel(nn.Module):
         super(PerformanceModel, self).__init__()
         self.input_len = input_len
 
-        self.linear1 = nn.Linear(self.input_len, 128, bias=True)
+        self.linear1 = nn.Linear(self.input_len, 32, bias=True)
         # self.batch_norm1 = nn.BatchNorm1d(128)
-        # self.dropout1 = nn.Dropout(p=0.2)
-        self.activate1 = torch.tanh
+        self.dropout1 = nn.Dropout(p=0.01)
+        self.activate1 = torch.relu
 
-        # self.linear2 = nn.Linear(128, 128, bias=True)
+        self.linear2 = nn.Linear(32, 64, bias=True)
         # self.batch_norm2 = nn.BatchNorm1d(128)
-        # self.dropout2 = nn.Dropout(p=0.3)
-        # self.activate2 = torch.relu
+        self.dropout2 = nn.Dropout(p=0.01)
+        self.activate2 = torch.relu
 
-        # self.linear3 = nn.Linear(128, 128, bias=True)
+        self.linear3 = nn.Linear(64, 128, bias=True)
         # self.batch_norm3 = nn.BatchNorm1d(128)
-        # self.dropout3 = nn.Dropout(p=0.4)
-        # self.activate3 = torch.relu
+        self.dropout3 = nn.Dropout(p=0.01)
+        self.activate3 = torch.relu
 
-        # self.linear4 = nn.Linear(128, 128, bias=True)
+        self.linear4 = nn.Linear(128, 64, bias=True)
         # self.batch_norm4 = nn.BatchNorm1d(128)
-        # self.dropout4 = nn.Dropout(p=0.3)
-        # self.activate4 = torch.relu
+        self.dropout4 = nn.Dropout(p=0.01)
+        self.activate4 = torch.relu
 
-        self.linear5 = nn.Linear(128, 128, bias=True)
+        self.linear5 = nn.Linear(64, 16, bias=True)
         # self.batch_norm5 = nn.BatchNorm1d(128)
         # self.dropout5 = nn.Dropout(p=0.2)
-        self.activate5 = torch.tanh
+        self.activate5 = torch.relu
 
-        self.linear6 = nn.Linear(128, 1, bias=True)
-        self.activate6 = torch.tanh
+        self.linear6 = nn.Linear(16, 1, bias=True)
+        self.activate6 = torch.relu
 
     def forward(self, inputs):
-        output1 = self.activate1(self.linear1(inputs))
-        # output2 = self.activate2(self.dropout2(self.batch_norm2(self.linear2(output1))))
-        # output3 = self.activate3(self.dropout3(self.batch_norm3(self.linear3(output2))))
-        # output4 = self.activate4(self.dropout4(self.batch_norm4(self.linear4(output3))))
-        output5 = self.activate5(self.linear5(output1))
+        output1 = self.activate1(self.dropout1(self.linear1(inputs)))
+        output2 = self.activate2(self.dropout2(self.linear2(output1)))
+        output3 = self.activate3(self.dropout3(self.linear3(output2)))
+        output4 = self.activate4(self.dropout4(self.linear4(output3)))
+        output5 = self.activate5(self.linear5(output4))
         output6 = self.activate6(self.linear6(output5))
         return output6
 

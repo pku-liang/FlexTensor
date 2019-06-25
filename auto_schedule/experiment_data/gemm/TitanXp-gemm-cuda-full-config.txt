@@ -1,0 +1,7 @@
+gemm_gemm_(32, 32, 32)_cuda(0):[[{"inline": [], "unroll": [[1500, 1]], "spatial": [[4, 1, 2, 4], [8, 1, 4, 1]], "reduce": [[1, 1, 32]]}], {"inline": [[0]], "unroll": [], "spatial": [], "reduce": []}]
+gemm_gemm_(64, 64, 64)_cuda(0):[[{"inline": [], "unroll": [[0, 1]], "spatial": [[2, 1, 32, 1], [8, 2, 4, 1]], "reduce": [[2, 2, 16]]}], {"inline": [[0]], "unroll": [], "spatial": [], "reduce": []}]
+gemm_gemm_(128, 128, 128)_cuda(0):[[{"inline": [], "unroll": [[1, 1]], "spatial": [[4, 1, 16, 2], [4, 1, 8, 4]], "reduce": [[4, 1, 32]]}], {"inline": [[0]], "unroll": [], "spatial": [], "reduce": []}]
+gemm_gemm_(256, 256, 256)_cuda(0):[[{"inline": [], "unroll": [[512, 0]], "spatial": [[8, 2, 8, 2], [8, 1, 16, 2]], "reduce": [[8, 1, 32]]}], {"inline": [[0]], "unroll": [], "spatial": [], "reduce": []}]
+gemm_gemm_(512, 512, 512)_cuda(0):[[{"inline": [], "unroll": [[512, 1]], "spatial": [[8, 4, 8, 2], [16, 1, 16, 2]], "reduce": [[1, 32, 16]]}], {"inline": [[0]], "unroll": [], "spatial": [], "reduce": []}]
+gemm_gemm_(1024, 1024, 1024)_cuda(0):[[{"inline": [], "unroll": [[1500, 1]], "spatial": [[8, 4, 16, 2], [16, 2, 8, 4]], "reduce": [[8, 32, 4]]}], {"inline": [[0]], "unroll": [], "spatial": [], "reduce": []}]
+gemm_gemm_(2048, 2048, 2048)_cuda(0):[[{"inline": [], "unroll": [[512, 1]], "spatial": [[16, 4, 16, 2], [32, 2, 8, 4]], "reduce": [[16, 32, 4]]}], {"inline": [[0]], "unroll": [], "spatial": [], "reduce": []}]
