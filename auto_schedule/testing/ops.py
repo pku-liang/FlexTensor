@@ -1207,3 +1207,18 @@ def LSTMCell(inputs, hs, cs, weights, bias=None):
         (hs.shape[0], weights.shape[1]), 
         lambda b, i: tvm.sigmoid(C[b, 2, i]) * tvm.tanh(next_cs[b, i]))
     return next_hs, next_cs
+
+def block_celluar(Input):
+    assert Input.shape[0].value == Input.shape[1].value
+    N, _ = Input.shape
+    k = tvm.reduce_axis((0, N))
+    Output = tvm.compute(
+        (N,),
+        lambda i: (
+            tvm.sum(
+                Input[k, (i + k) % N],
+                axis = k
+            )
+        )
+    )
+    return Output
