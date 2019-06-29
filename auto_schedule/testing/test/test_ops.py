@@ -418,7 +418,7 @@ def test_batch_norm():
         print("Batch_norm basic case failed!")
 
 
-def test_block_celluar():
+def test_block_circulant_matrix():
     N = 100
     input_np = np.random.random([N, N].astype(np.float32))
     output_np = np.ndarray([N], dtype=np.float32)
@@ -432,16 +432,16 @@ def test_block_celluar():
     input_tvm = tvm.nd.array(input_np, tvm_ctx)
     output_tvm = tvm.nd.array(np.zeros(output_np.shape).astype(np.float32), tvm_ctx)
     input_t = tvm.placeholder(input_np.shape, dtype='float32')
-    output_t = block_celluar(input_t)
+    output_t = block_circulant_matrix(input_t)
     s = tvm.create_schedule(output_t.op)
     func = tvm.build(s, [input_t, output_t], 'llvm')
     func(input_tvm, output_tvm)
 
     passed = test_allclose(output_tvm.asnumpy(), output_np, rtol=1e-5, print_diff=True)
     if passed == 1:
-        print("Block_celluar basic case passed")
+        print("Block_circulant_matrix basic case passed")
     else:
-        print("Block_celluar basic case failed")
+        print("Block_circulant_matrix case failed")
 
 def test():
     test_conv1d()
@@ -456,7 +456,7 @@ def test():
     test_mean()
     test_variance()
     test_batch_norm()
-    test_block_celluar()
+    test_block_circulant_matrix()
 
 
 if __name__ == "__main__":

@@ -1208,7 +1208,7 @@ def LSTMCell(inputs, hs, cs, weights, bias=None):
         lambda b, i: tvm.sigmoid(C[b, 2, i]) * tvm.tanh(next_cs[b, i]))
     return next_hs, next_cs
 
-def block_celluar(Input):
+def block_circulant_matrix(Input):
     assert Input.shape[0].value == Input.shape[1].value
     N, _ = Input.shape
     k = tvm.reduce_axis((0, N))

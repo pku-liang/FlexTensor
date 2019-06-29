@@ -1,7 +1,7 @@
 import tvm 
 from auto_schedule.testing.ops import conv2d_nchw, gemm as op_gemm, conv1d as op_conv1d, conv3d_ncdhw, \
     gemm_conv2d_nchw, gemv as op_gemv, bilinear as op_bilinear, MTTKRP3d, conv_transpose1d as op_conv_transpose1d, \
-    conv_transpose2d_nchw, conv_transpose3d_ncdhw, depthwise_conv2d_nchw, block_celluar as op_block_celluar
+    conv_transpose2d_nchw, conv_transpose3d_ncdhw, depthwise_conv2d_nchw, block_circulant_matrix as op_block_circulant_matrix
 from auto_schedule.testing.configs.conv1d_config import conv1d_shapes
 from auto_schedule.testing.configs.conv2d_config import yolo_shapes, res_shapes, google_shapes, squeeze_shapes, \
     vgg_16_shapes, test_conv_shapes, yolo_shapes_b8, mobilev2_shapes
@@ -13,7 +13,7 @@ from auto_schedule.testing.configs.mttkrp_config import mttkrp_shapes
 from auto_schedule.testing.configs.depthwise_config import depthwise_shapes
 from auto_schedule.testing.configs.grouped_config import grouped_shapes
 from auto_schedule.testing.configs.dilation_config import dilation_shapes
-from auto_schedule.testing.configs.block_celluar_config import block_celluar_shapes
+from auto_schedule.testing.configs.block_circulant_matrix_config import block_circulant_matrix_shapes
 TASK_TABLE = {}
 
 
@@ -126,9 +126,9 @@ def conv2d_1x1_packed(N, C, H, W, K, kernel_size):
     Output = tvm.compute((N, K, H * W), lambda b, k, i: tvm.sum(A[b, rc, i] * B[k, rc], axis=rc))
     return [Output.op], [A, B, Output]
 
-def block_celluar(N):
+def block_circulant_matrix(N):
     Input = tvm.placeholder((N, N))
-    Output = op_block_celluar(Input)
+    Output = op_block_circulant_matrix(Input)
     return [Output.op], [Input, Output]
 
 register_task(Task("conv2d", "1x1-packed", conv2d_1x1_packed, (256, 256, 14, 14, 512, 1), "cuda", 0))
@@ -394,8 +394,8 @@ for shape in mttkrp_shapes:
         register_task(Task("mttkrp", "mttkrp", mttkrp, (N, K1, K2, M), "llvm", j))
         register_task(Task("mttkrp", "mttkrp", mttkrp, (N, K1, K2, M), "cuda", j))
 
-for shape in block_celluar_shapes:
+for shape in block_circulant_matrix_shapes:
     N, _ = shape
     for j in range(4):
         for platform in ('llvm', 'cuda'):
-            register_task(Task('block_celluar', 'block_celluar', block_celluar, (N,), platform, j))
+            register_task(Task('block_circulant_matrix', 'block_circulant_matrix', block_circulant_matrix, (N,), platform, j))
