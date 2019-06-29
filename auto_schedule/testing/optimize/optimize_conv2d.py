@@ -143,7 +143,7 @@ def optimize(prefix, from_, shapes, target="llvm", dev_id=0, trials=100, timeout
 def test(task_key, configs, dev_id=None, rpc_info=None):
     task = TASK_TABLE[task_key]
     s, bufs = schedule_with_config(task_key, configs)
-    print(tvm.lower(s, bufs, simple_mode=True))
+    # print(tvm.lower(s, bufs, simple_mode=True))
     dev_id = dev_id if dev_id is not None else task.dev_id
     time_cost = evaluate(task_key, s, bufs, task.target, dev_id, 10, rpc_info)
     print(task_key, "use", time_cost, "ms")

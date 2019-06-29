@@ -30,6 +30,220 @@ conv2d_yolo_b813_(8, 1024, 14, 14, 1024, 3, 2, 1, 1, 1)_cuda(0) use 1.6214655 ms
 conv2d_yolo_b814_(8, 1024, 7, 7, 1024, 3, 1, 1, 1, 1)_cuda(0) use 1.7178214 ms
 
 
+2019-06-26:
+conv2d_yolo0_(8, 3, 448, 448, 64, 7, 2, 3, 1, 1)_cuda(0) use 1.2074063 ms
+
+conv2d_yolo1_(8, 64, 112, 112, 192, 3, 1, 1, 1, 1)_cuda(1) use 3.5823099999999997 ms
+
+[20:15:05] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:05] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+conv2d_yolo2_(8, 192, 56, 56, 128, 1, 1, 0, 1, 1)_cuda(2) use 0.26090610000000003 ms
+
+conv2d_yolo3_(8, 128, 56, 56, 256, 3, 1, 1, 1, 1)_cuda(3) use 2.2045414 ms
+
+[20:15:07] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:07] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+conv2d_yolo4_(8, 256, 56, 56, 256, 1, 1, 0, 1, 1)_cuda(1) use 0.6515550999999999 ms
+
+[20:15:08] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:08] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+[20:15:08] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:08] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+conv2d_yolo5_(8, 256, 56, 56, 512, 3, 1, 1, 1, 1)_cuda(2) use 9.6863569 ms
+
+[20:15:09] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:09] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+conv2d_yolo6_(8, 512, 28, 28, 256, 1, 1, 0, 1, 1)_cuda(3) use 0.338999 ms
+
+conv2d_yolo7_(8, 256, 28, 28, 512, 3, 1, 1, 1, 1)_cuda(1) use 1.9781599 ms
+
+[20:15:10] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:10] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+conv2d_yolo8_(8, 512, 28, 28, 512, 1, 1, 0, 1, 1)_cuda(2) use 0.5961417999999999 ms
+
+[20:15:10] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:10] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+[20:15:10] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:10] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+conv2d_yolo9_(8, 512, 28, 28, 1024, 3, 1, 1, 1, 1)_cuda(3) use 8.2911358 ms
+
+conv2d_yolo10_(8, 1024, 14, 14, 512, 1, 1, 0, 1, 1)_cuda(1) use 0.24099500000000001 ms
+
+[20:15:13] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:13] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+[20:15:13] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:13] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+conv2d_yolo11_(8, 512, 14, 14, 1024, 3, 1, 1, 1, 1)_cuda(2) use 2.0126375 ms
+
+[20:15:13] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:13] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+conv2d_yolo12_(8, 1024, 14, 14, 1024, 3, 1, 1, 1, 1)_cuda(3) use 4.0065759 ms
+
+[20:15:14] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:14] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+[20:15:14] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:303: Return Everything in CombineInterval Div
+[20:15:14] /home/CORP.PKUSC.ORG/zchno/tvm/src/arithmetic/int_set.cc:320: Return Everything in CombineInterval Mod
+conv2d_yolo13_(8, 1024, 14, 14, 1024, 3, 2, 1, 1, 1)_cuda(1) use 1.3083676000000002 ms
+
+conv2d_yolo14_(8, 1024, 7, 7, 1024, 3, 1, 1, 1, 1)_cuda(2) use 1.1411149 ms
+
+
+autotvm:
+tvm_opt baselines for yolo convolution 2d for target cuda (0):
+layer 0 (8, 3, 448, 448, 64, 3, 7, 7, 1, 2, 3, 1, 1)
+config_space length: 202309632
+Finish loading 1000 records
+Optimize use  9.5367431640625e-07 s
+
+Best config:
+[('tile_f', [1, 2, 32, 1]), ('tile_y', [224, 1, 1, 1]), ('tile_x', [4, 8, 7, 1]), ('tile_rc', [1, 3]), ('tile_ry', [7, 1]), ('tile_rx', [7, 1]), ('auto_unroll_max_step', 0), ('unroll_explicit', 0)],,None,4835738
+Finish loading 1000 records
+Use 3.102755(ms)
+
+layer 1 (8, 64, 112, 112, 192, 64, 3, 3, 1, 1, 1, 1, 1)
+config_space length: 1106380800
+Finish loading 1000 records
+Optimize use  4.291534423828125e-06 s
+
+Best config:
+[('tile_f', [12, 1, 1, 16]), ('tile_y', [28, 1, 2, 2]), ('tile_x', [1, 1, 112, 1]), ('tile_rc', [64, 1]), ('tile_ry', [1, 3]), ('tile_rx', [1, 3]), ('auto_unroll_max_step', 512), ('unroll_explicit', 0)],,None,324782254
+Finish loading 1000 records
+Use 4.066205(ms)
+
+layer 2 (8, 192, 56, 56, 128, 192, 1, 1, 1, 1, 0, 1, 1)
+config_space length: 64512000
+Finish loading 1000 records
+Optimize use  4.5299530029296875e-06 s
+
+Best config:
+[('tile_f', [4, 32, 1, 1]), ('tile_y', [14, 1, 4, 1]), ('tile_x', [1, 1, 28, 2]), ('tile_rc', [64, 3]), ('tile_ry', [1, 1]), ('tile_rx', [1, 1]), ('auto_unroll_max_step', 0), ('unroll_explicit', 0)],,None,1988885
+Finish loading 1000 records
+Use 0.283360(ms)
+
+layer 3 (8, 128, 56, 56, 256, 128, 3, 3, 1, 1, 1, 1, 1)
+config_space length: 202752000
+Finish loading 1000 records
+Optimize use  4.76837158203125e-06 s
+
+Best config:
+[('tile_f', [8, 2, 16, 1]), ('tile_y', [14, 1, 2, 2]), ('tile_x', [4, 7, 2, 1]), ('tile_rc', [64, 2]), ('tile_ry', [1, 3]), ('tile_rx', [1, 3]), ('auto_unroll_max_step', 512), ('unroll_explicit', 0)],,None,60343171
+Finish loading 1000 records
+Use 2.323924(ms)
+
+layer 4 (8, 256, 56, 56, 256, 256, 1, 1, 1, 1, 0, 1, 1)
+config_space length: 57024000
+Finish loading 1000 records
+Optimize use  4.5299530029296875e-06 s
+
+Best config:
+[('tile_f', [8, 4, 8, 1]), ('tile_y', [28, 1, 1, 2]), ('tile_x', [1, 1, 28, 2]), ('tile_rc', [32, 8]), ('tile_ry', [1, 1]), ('tile_rx', [1, 1]), ('auto_unroll_max_step', 512), ('unroll_explicit', 0)],,None,13297376
+Finish loading 1000 records
+Use 0.629660(ms)
+
+layer 5 (8, 256, 56, 56, 512, 256, 3, 3, 1, 1, 1, 1, 1)
+config_space length: 304128000
+Finish loading 1000 records
+Optimize use  4.76837158203125e-06 s
+
+Best config:
+[('tile_f', [16, 1, 16, 2]), ('tile_y', [4, 14, 1, 1]), ('tile_x', [7, 2, 4, 1]), ('tile_rc', [256, 1]), ('tile_ry', [3, 1]), ('tile_rx', [1, 3]), ('auto_unroll_max_step', 1500), ('unroll_explicit', 1)],,None,279049185
+Finish loading 1000 records
+Use 9.290334(ms)
+
+layer 6 (8, 512, 28, 28, 256, 512, 1, 1, 1, 1, 0, 1, 1)
+config_space length: 15840000
+Finish loading 1000 records
+Optimize use  5.0067901611328125e-06 s
+
+Best config:
+[('tile_f', [4, 2, 32, 1]), ('tile_y', [7, 2, 1, 2]), ('tile_x', [1, 1, 14, 2]), ('tile_rc', [64, 8]), ('tile_ry', [1, 1]), ('tile_rx', [1, 1]), ('auto_unroll_max_step', 0), ('unroll_explicit', 0)],,None,966771
+Finish loading 1000 records
+Use 0.343418(ms)
+
+layer 7 (8, 256, 28, 28, 512, 256, 3, 3, 1, 1, 1, 1, 1)
+config_space length: 76032000
+Finish loading 1000 records
+Optimize use  1.9311904907226562e-05 s
+
+Best config:
+[('tile_f', [8, 4, 16, 1]), ('tile_y', [14, 2, 1, 1]), ('tile_x', [1, 1, 4, 7]), ('tile_rc', [256, 1]), ('tile_ry', [1, 3]), ('tile_rx', [1, 3]), ('auto_unroll_max_step', 512), ('unroll_explicit', 0)],,None,22484256
+Finish loading 1000 records
+Use 2.515081(ms)
+
+layer 8 (8, 512, 28, 28, 512, 512, 1, 1, 1, 1, 0, 1, 1)
+config_space length: 21120000
+Finish loading 1000 records
+Optimize use  4.76837158203125e-06 s
+
+Best config:
+[('tile_f', [8, 4, 16, 1]), ('tile_y', [7, 1, 1, 4]), ('tile_x', [1, 1, 14, 2]), ('tile_rc', [32, 16]), ('tile_ry', [1, 1]), ('tile_rx', [1, 1]), ('auto_unroll_max_step', 0), ('unroll_explicit', 0)],,None,1642776
+Finish loading 1000 records
+Use 0.606997(ms)
+
+layer 9 (8, 512, 28, 28, 1024, 512, 3, 3, 1, 1, 1, 1, 1)
+config_space length: 109824000
+Finish loading 1000 records
+Optimize use  4.291534423828125e-06 s
+
+Best config:
+[('tile_f', [16, 2, 32, 1]), ('tile_y', [7, 2, 2, 1]), ('tile_x', [1, 1, 4, 7]), ('tile_rc', [256, 2]), ('tile_ry', [1, 3]), ('tile_rx', [3, 1]), ('auto_unroll_max_step', 1500), ('unroll_explicit', 1)],,None,96956048
+Finish loading 1000 records
+Use 9.530436(ms)
+
+layer 10 (8, 1024, 14, 14, 512, 1024, 1, 1, 1, 1, 0, 1, 1)
+config_space length: 3717120
+Finish loading 1000 records
+Optimize use  5.0067901611328125e-06 s
+
+Best config:
+[('tile_f', [4, 2, 16, 4]), ('tile_y', [7, 2, 1, 1]), ('tile_x', [1, 1, 14, 1]), ('tile_rc', [256, 4]), ('tile_ry', [1, 1]), ('tile_rx', [1, 1]), ('auto_unroll_max_step', 512), ('unroll_explicit', 1)],,None,2619227
+Finish loading 1000 records
+Use 0.406793(ms)
+
+layer 11 (8, 512, 14, 14, 1024, 512, 3, 3, 1, 1, 1, 1, 1)
+config_space length: 17571840
+Finish loading 1000 records
+Optimize use  4.5299530029296875e-06 s
+
+Best config:
+[('tile_f', [32, 2, 16, 1]), ('tile_y', [7, 2, 1, 1]), ('tile_x', [1, 1, 7, 2]), ('tile_rc', [512, 1]), ('tile_ry', [1, 3]), ('tile_rx', [1, 3]), ('auto_unroll_max_step', 512), ('unroll_explicit', 1)],,None,13961701
+Finish loading 1000 records
+Use 3.404304(ms)
+
+layer 12 (8, 1024, 14, 14, 1024, 1024, 3, 3, 1, 1, 1, 1, 1)
+config_space length: 19329024
+Finish loading 1000 records
+Optimize use  4.5299530029296875e-06 s
+
+Best config:
+[('tile_f', [16, 2, 16, 2]), ('tile_y', [2, 1, 1, 7]), ('tile_x', [1, 1, 14, 1]), ('tile_rc', [1024, 1]), ('tile_ry', [1, 3]), ('tile_rx', [1, 3]), ('auto_unroll_max_step', 512), ('unroll_explicit', 0)],,None,5677773
+Finish loading 1000 records
+Use 5.640486(ms)
+
+layer 13 (8, 1024, 14, 14, 1024, 1024, 3, 3, 1, 2, 1, 1, 1)
+config_space length: 1208064
+Finish loading 1000 records
+Optimize use  4.291534423828125e-06 s
+
+Best config:
+[('tile_f', [32, 2, 16, 1]), ('tile_y', [1, 1, 7, 1]), ('tile_x', [1, 7, 1, 1]), ('tile_rc', [1024, 1]), ('tile_ry', [1, 3]), ('tile_rx', [1, 3]), ('auto_unroll_max_step', 512), ('unroll_explicit', 1)],,None,958139
+Finish loading 1000 records
+Use 2.206689(ms)
+
+layer 14 (8, 1024, 7, 7, 1024, 1024, 3, 3, 1, 1, 1, 1, 1)
+config_space length: 1208064
+Finish loading 1000 records
+Optimize use  4.5299530029296875e-06 s
+
+Best config:
+[('tile_f', [64, 1, 8, 2]), ('tile_y', [1, 1, 7, 1]), ('tile_x', [1, 7, 1, 1]), ('tile_rc', [128, 8]), ('tile_ry', [1, 3]), ('tile_rx', [3, 1]), ('auto_unroll_max_step', 0), ('unroll_explicit', 0)],,None,65873
+Finish loading 1000 records
+Use 1.615777(ms)
+
+Done!
+
+
+
 pytorch only:
 pytorch baselines for yolo_b8 convolution 2d for target cuda (0):
 layer 0
