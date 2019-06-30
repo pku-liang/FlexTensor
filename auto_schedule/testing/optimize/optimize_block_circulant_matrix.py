@@ -20,13 +20,13 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
     ret = dict()
     for i, shape in enumerate(shapes):
         print("Optimize block_circulant_matrix shape {}".format(shape), flush=True)
-        N, _ = shape
+        ROW, COL, FFT = shape
         # create an empty task but has the correct key we want
         task = Task(
             "block_circulant_matrix",
             "block_circulant_matrix",
             None,
-            (N,),
+            (ROW, COL, FFT),
             target,
             dev_id
         )

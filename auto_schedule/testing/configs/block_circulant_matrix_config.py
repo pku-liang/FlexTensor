@@ -1,21 +1,5 @@
-def power2_list(bounds):
-    lower_bound, upper_bound = 1, 1
-    if isinstance(bounds, int):
-        upper_bound = bounds
-    elif isinstance(bounds, (list, tuple)):
-        lower_bound, upper_bound = bounds
-    else:
-        raise ValueError
-
-    ret = []
-    cur = lower_bound
-    while cur <= upper_bound:
-        ret.append(cur)
-        cur *= 2
-    return ret
-
-
-block_circulant_matrix_shapes = []
-
-for N in power2_list((32, 256)):
-    block_circulant_matrix_shapes.append((N, N))
+block_circulant_matrix_shapes = [
+    [32, 256, 8],
+    [128, 128, 32],
+    [1024, 16, 4],
+]

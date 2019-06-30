@@ -126,9 +126,9 @@ def conv2d_1x1_packed(N, C, H, W, K, kernel_size):
     Output = tvm.compute((N, K, H * W), lambda b, k, i: tvm.sum(A[b, rc, i] * B[k, rc], axis=rc))
     return [Output.op], [A, B, Output]
 
-def block_circulant_matrix(N):
-    Input = tvm.placeholder((N, N))
-    Output = op_block_circulant_matrix(Input)
+def block_circulant_matrix(ROW, COL, FFT):
+    Input = tvm.placeholder((ROW, COL))
+    Output = op_block_circulant_matrix(Input, FFT)
     return [Output.op], [Input, Output]
 
 register_task(Task("conv2d", "1x1-packed", conv2d_1x1_packed, (256, 256, 14, 14, 512, 1), "cuda", 0))
@@ -395,7 +395,7 @@ for shape in mttkrp_shapes:
         register_task(Task("mttkrp", "mttkrp", mttkrp, (N, K1, K2, M), "cuda", j))
 
 for shape in block_circulant_matrix_shapes:
-    N, _ = shape
+    ROW, COL, FFT = shape
     for j in range(4):
         for platform in ('llvm', 'cuda'):
-            register_task(Task('block_circulant_matrix', 'block_circulant_matrix', block_circulant_matrix, (N,), platform, j))
+            register_task(Task('block_circulant_matrix', 'block_circulant_matrix', block_circulant_matrix, (ROW, COL, FFT), platform, j))
