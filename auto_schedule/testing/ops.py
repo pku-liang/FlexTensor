@@ -1208,17 +1208,26 @@ def LSTMCell(inputs, hs, cs, weights, bias=None):
         lambda b, i: tvm.sigmoid(C[b, 2, i]) * tvm.tanh(next_cs[b, i]))
     return next_hs, next_cs
 
-def block_circulant_matrix(Input):
-    assert Input.shape[0].value == Input.shape[1].value
-    N, _ = Input.shape
-    k = tvm.reduce_axis((0, N))
-    Output = tvm.compute(
-        (N,),
-        lambda i: (
+def block_circulant_matrix(Input, factor):
+    ROW, COL = Input.shape
+    FFT = factor
+
+    k = tvm.reduce_axis((0, FFT))
+    Compress = tvm.compute(
+        (ROW // FFT, COL),
+        lambda i, j: (
             tvm.sum(
-                Input[k, (i + k) % N],
-                axis = k
+                Input[i * FFT + k, (j // FFT) * FFT + (j % FFT + k) % FFT] / FFT,
+                axis=k
             )
         )
     )
+
+    Output = tvm.compute(
+        (ROW, COL),
+        lambda i, j: (
+            Compress[i // FFT, (j // FFT) * FFT + ((j % FFT) + FFT - (i % FFT)) % FFT]
+        )
+    )
+
     return Output

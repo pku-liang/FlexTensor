@@ -5,9 +5,12 @@ Using PyTorch.
 ====================================
 **Author**: `Size Zheng`
 """
+import sys 
+sys.path.append('../../../')
 import tvm
 import torch
 import numpy as np
+import copy
 from auto_schedule.testing.ops import *
 from auto_schedule.utils import test_allclose
 
@@ -419,20 +422,33 @@ def test_batch_norm():
 
 
 def test_block_circulant_matrix():
-    N = 100
-    input_np = np.random.random([N, N].astype(np.float32))
-    output_np = np.ndarray([N], dtype=np.float32)
-    for i in range(N):
-        tmp = np.float32(0)
-        for k in range(N):
-            tmp += input_np[k, (i + k) % N]
-        output_np[i] = tmp
+    ROW, COL, FFT = 8, 12, 4
+    input_np = np.random.random([ROW, COL]).astype(np.float32)
+    # input_np = np.ones([ROW, COL], dtype=np.float32)
+    output_np = np.ndarray([ROW, COL], dtype=np.float32)
+
+    for i in range(ROW // FFT):
+        sub_vec = np.zeros([FFT], dtype=np.float32)
+        vec = np.zeros([COL], dtype=np.float32)
+        for t in range(COL // FFT):
+            for m in range(FFT):
+                for n in range(FFT):
+                    vec[t * FFT + m] += \
+                        input_np[FFT * i + n][t * FFT + (m + n) % FFT] / FFT
+
+        for j in range(FFT):
+            for k in range(COL//FFT):
+                if j >= 1:
+                    sub_vec[0] = vec[FFT * (k + 1) - 1]
+                    sub_vec[1: 8] = vec[FFT * k: FFT * (k + 1) - 1]
+                    vec[FFT * k: FFT * (k + 1)] = sub_vec
+            output_np[FFT * i + j][:] = copy.deepcopy(vec)
 
     tvm_ctx = tvm.context('llvm', 0)
     input_tvm = tvm.nd.array(input_np, tvm_ctx)
     output_tvm = tvm.nd.array(np.zeros(output_np.shape).astype(np.float32), tvm_ctx)
     input_t = tvm.placeholder(input_np.shape, dtype='float32')
-    output_t = block_circulant_matrix(input_t)
+    output_t = block_circulant_matrix(input_t, FFT)
     s = tvm.create_schedule(output_t.op)
     func = tvm.build(s, [input_t, output_t], 'llvm')
     func(input_tvm, output_tvm)
@@ -444,18 +460,18 @@ def test_block_circulant_matrix():
         print("Block_circulant_matrix case failed")
 
 def test():
-    test_conv1d()
-    test_conv_transpose1d()
-    test_conv2d_nchw()
-    test_conv_transpose2d_nchw()
-    test_conv3d_ncdhw()
-    test_conv_transpose3d_ncdhw()
-    test_gemm_conv2d_nchw()
-    test_linear()
-    test_bilinear()
-    test_mean()
-    test_variance()
-    test_batch_norm()
+    # test_conv1d()
+    # test_conv_transpose1d()
+    # test_conv2d_nchw()
+    # test_conv_transpose2d_nchw()
+    # test_conv3d_ncdhw()
+    # test_conv_transpose3d_ncdhw()
+    # test_gemm_conv2d_nchw()
+    # test_linear()
+    # test_bilinear()
+    # test_mean()
+    # test_variance()
+    # test_batch_norm()
     test_block_circulant_matrix()
 
 
