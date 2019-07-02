@@ -422,10 +422,10 @@ def test_batch_norm():
 
 
 def test_block_circulant_matrix():
-    ROW, COL, FFT = 8, 12, 4
+    ROW, COL, FFT = 1024, 40, 16
     input_np = np.random.random([ROW, COL]).astype(np.float32)
     # input_np = np.ones([ROW, COL], dtype=np.float32)
-    output_np = np.ndarray([ROW, COL], dtype=np.float32)
+    output_np = np.zeros([ROW, COL], dtype=np.float32)
 
     for i in range(ROW // FFT):
         sub_vec = np.zeros([FFT], dtype=np.float32)
@@ -440,7 +440,7 @@ def test_block_circulant_matrix():
             for k in range(COL//FFT):
                 if j >= 1:
                     sub_vec[0] = vec[FFT * (k + 1) - 1]
-                    sub_vec[1: 8] = vec[FFT * k: FFT * (k + 1) - 1]
+                    sub_vec[1: FFT] = vec[FFT * k: FFT * (k + 1) - 1]
                     vec[FFT * k: FFT * (k + 1)] = sub_vec
             output_np[FFT * i + j][:] = copy.deepcopy(vec)
 
