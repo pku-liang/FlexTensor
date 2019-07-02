@@ -1214,7 +1214,7 @@ def block_circulant_matrix(Input, factor):
 
     k = tvm.reduce_axis((0, FFT))
     Compress = tvm.compute(
-        (ROW // FFT, COL),
+        (ROW // FFT, (COL // FFT) * FFT),
         lambda i, j: (
             tvm.sum(
                 Input[i * FFT + k, (j // FFT) * FFT + (j % FFT + k) % FFT] / FFT,
@@ -1226,7 +1226,11 @@ def block_circulant_matrix(Input, factor):
     Output = tvm.compute(
         (ROW, COL),
         lambda i, j: (
-            Compress[i // FFT, (j // FFT) * FFT + ((j % FFT) + FFT - (i % FFT)) % FFT]
+            tvm.if_then_else(
+                tvm.all(i < (ROW // FFT) * FFT, j < (COL // FFT) * FFT),
+                Compress[i // FFT, (j // FFT) * FFT + ((j % FFT) + FFT - (i % FFT)) % FFT], 
+                tvm.const(0, Input.dtype)
+            )
         )
     )
 
