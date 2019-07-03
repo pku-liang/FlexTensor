@@ -64,6 +64,11 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
         print("Use", time_cost, "ms")
         print("Cost", end - beg, "s")
         print()
+
+        f = tvm.build(s, bufs, 'cuda')
+        print(f.imported_modules[0].get_source())
+        print()
+        
     return ret
 
 
