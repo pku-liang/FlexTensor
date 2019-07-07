@@ -1520,14 +1520,11 @@ def GatedPixelCNN(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector=No
     assert kernelHeight.value == kernelWidth.value
 
     ConvV = PixelCNN(Input, KernelV, mask_type='B', bias=bias, dilation=dilation, stride=stride, padding=padding)
-    print(ConvV.shape)
-    print(KernelV2H.shape)
     Vertical2HorizonTal = conv2d_nhwc(ConvV, KernelV2H, bias=bias, stride=1, padding=0, dilation=1)
     ConvH = PixelCNN(Input, KernelH, mask_type='B', bias=bias, dilation=dilation, stride=stride, padding=(0, padding))
     CombineFeature = tvm.compute(ConvH.shape, 
                                  lambda b, h, w, c : ConvH[b, h, w, c] + Vertical2HorizonTal[b, h, w, c], 
                                  name='CombineFeature')
-    
     if ClassVector == None:
         ActivationV = tvm.compute(ConvV.shape, 
                             lambda b, h, w, o : tvm.if_then_else(o < out_channels, 
@@ -1544,6 +1541,7 @@ def GatedPixelCNN(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector=No
                          lambda b, h, w, c : ActivationV[b, h, w, c] * ActivationV[b, h, w, c + out_channels], 
                          name='GateV')
     
+
     ActivationH = tvm.compute(CombineFeature.shape, 
                               lambda b, h, w, o : tvm.if_then_else(o < out_channels, 
                                                                    tvm.tanh(CombineFeature[b, h, w, o]), 
@@ -1553,9 +1551,7 @@ def GatedPixelCNN(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector=No
                          lambda b, h, w, c : ActivationH[b, h, w, c] * ActivationH[b, h, w, c + out_channels], 
                          name='GateH')
     ConvGateH = conv2d_nhwc(GateH, KernelHOut, bias=bias, stride=stride, padding=padding, dilation=dilation)
-
-    Output = tvm.compute(ConvGateH, 
+    Output = tvm.compute(ConvGateH.shape, 
                          lambda b, h, w, o : ConvGateH[b, h, w, o] + Input[b, h, w, o], 
                          name='Output')
-
     return GateV, Output
