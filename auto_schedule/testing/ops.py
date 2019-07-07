@@ -6,6 +6,7 @@ Follow the convention of PyTorch.
 **Author**: `Size Zheng`
 """
 import tvm 
+import topi
 from auto_schedule.utils import test_allclose, assert_print
 
 
@@ -719,6 +720,71 @@ def conv_transpose3d_ncdhw(inputs, weight, bias=None, stride=1, padding=0, outpu
     return output
     
 
+def conv2d_nhwc(inputs, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+    """Convolution 2d NCHW layout
+
+    Args:
+    -----------------------------
+    inputs  : tvm.tensor.Tensor
+        shape [batch, height, width, channel]
+    weight  : tvm.tensor.Tensor
+        shape [out_channel, channel // groups, kernel_height, kernel_width]
+    bias    : (optional:None) tvm.tensor.Tensor
+        shape [out_channel]
+    stride  : (optional:1) int or tuple
+
+    padding : (optional:0) int or tuple
+
+    dilation: (optional:1) int
+
+    groups  : (optional:1) int
+    -----------------------------
+
+    Returns:
+    -----------------------------
+    tvm.tensor.Tensor
+        shape [batch, output_height, output_width, out_channel]
+    -----------------------------
+    """
+    batch_size, in_h, in_w, in_channel = inputs.shape
+    out_channel, channel_per_group, k_h, k_w = weight.shape
+    assert_print((channel_per_group * groups).value == in_channel.value)
+    out_channel_per_group = out_channel // groups
+    assert_print((out_channel_per_group * groups).value == out_channel.value)
+
+    stride = (stride, stride) if isinstance(stride, (int, tvm.expr.IntImm)) else stride
+    padding = (padding, padding) if isinstance(padding, (int, tvm.expr.IntImm)) else padding
+    dilation = (dilation, dilation) if isinstance(dilation, (int, tvm.expr.IntImm)) else dilation
+    assert_print(isinstance(stride, tuple) and len(stride) == 2)
+    assert_print(isinstance(padding, tuple) and len(padding) == 2)
+    assert_print(isinstance(dilation, tuple) and len(dilation) == 2)
+
+    out_h = (in_h + 2 * padding[0] - dilation[0] * (k_h - 1) - 1) // stride[0] + 1
+    out_w = (in_w + 2 * padding[1] - dilation[1] * (k_w - 1) - 1) // stride[1] + 1
+    rc = tvm.reduce_axis((0, channel_per_group))
+    rh = tvm.reduce_axis((0, k_h))
+    rw = tvm.reduce_axis((0, k_w))
+    print((out_h, out_w))
+
+    padded = zero_pad2d(inputs, padding=padding)
+    output = tvm.compute(
+        (batch_size, out_h, out_w, out_channel),
+        lambda b, h, w, c: tvm.sum(
+            (padded[b, 
+                    h * stride[0] + rh * dilation[0], w * stride[1] + rw * dilation[1],
+                    c // out_channel_per_group * channel_per_group + rc]
+            * weight[c, rc, rh, rw]),
+            axis=[rc, rw, rh]
+        )
+    )
+    if bias is not None:
+        output = tvm.compute(
+            (batch_size, out_h, out_w, out_channel),
+            lambda b, h, w, c: output[b, h, w, c] + bias[c]
+        )
+    return output
+
+
 def im2col_nchw_naive(inputs, kernel_size, stride=1, padding=0, dilation=1, groups=1):
     """Image to column NCHW layout
 
@@ -1174,10 +1240,12 @@ def variance(inputs, mean_val=None, dim=0):
                     (inputs[(*args[:dim], k, *args[dim:])] - mean_val[args]) / (inputs.shape[dim] - 1), axis=k)
     return tvm.compute(output_shape, _inner)
 
+
 def batch_normalization2d(inputs, epsilon=1e-5):
     mean_val = mean(inputs, dim=0)
     var_val = variance(inputs, mean_val=mean_val, dim=0)
     return tvm.compute(inputs.shape, lambda i, j: (inputs[i, j] - mean_val[j]) / tvm.sqrt(var_val[j] + epsilon))
+
 
 def LSTMCell(inputs, hs, cs, weights, bias=None):
     assert inputs.shape[0].value == hs.shape[0].value
@@ -1208,6 +1276,7 @@ def LSTMCell(inputs, hs, cs, weights, bias=None):
         lambda b, i: tvm.sigmoid(C[b, 2, i]) * tvm.tanh(next_cs[b, i]))
     return next_hs, next_cs
 
+
 def block_circulant_matrix(Input, factor):
     ROW, COL = Input.shape
     FFT = factor
@@ -1235,3 +1304,258 @@ def block_circulant_matrix(Input, factor):
     )
 
     return Output
+
+
+def MaxUnpooling1d(Input, Indices, kernel_size, stride, padding):
+    """
+    Max Unpooling 1d Operator
+
+    Parameters
+    ----------
+    Input: tvm.tensor.Tensor
+        3-D with shape [batch_size, channels, in_lengths]
+    Indices: tvm.tensor.Tensor
+        3-D with shape [batch_size, channels, out_lengths]
+    kernel_size: int
+    stride: int
+
+    Returns
+    -------
+    Output: tvm.tensor.Tensor
+        3-D with shape [batch_size, channels, out_lengths]
+    """
+
+    batch_size, channels, in_lengths = Input.shape
+    batch_size, channels, in_lengths = Indices.shape
+
+    out_lengths = (in_lengths - 1) * stride - 2 * padding + kernel_size
+
+    iterK = tvm.reduce_axis((0, in_lengths), name='k')
+
+    Output = tvm.compute((batch_size, channels, out_lengths), 
+                          lambda b, c, l : 
+                            tvm.max(
+                                tvm.if_then_else(l == Indices[b, c, iterK], 
+                                                 Input[b, c, iterK], 
+                                                 0.0), 
+                                axis=iterK), 
+                          name='output')
+
+    return Output
+
+def MaxUnpooling2d(Input, Indices, kernel_size, stride, padding, output_size=None):
+    """
+    Max Unpooling 2d Operator
+
+    Parameters
+    ----------
+    Input: tvm.tensor.Tensor
+        4-D with shape [batch_size, channels, in_height, in_width]
+    Indices: tvm.tensor.Tensor
+        4-D with shape [batch_size, channels, in_height, in_width]
+    kernel_size: int or tuple
+    stride: int or tuple
+
+    Returns
+    -------
+    Output: tvm.tensor.Tensor
+        4-D with shape [batch_size, channels, out_height, out_width]
+    """
+
+    batch_size, channels, in_height, in_width = Input.shape
+    batch_size, channels, in_height, in_width = Indices.shape
+
+    if type(kernel_size) == int:
+        kernel_size = (kernel_size, kernel_size)
+    if type(stride) == int:
+        stride = (stride, stride)
+    if type(padding) == int:
+        padding = (padding, padding)
+
+    out_height = (in_height - 1) * stride[0] - 2 * padding[0] + kernel_size[0]
+    out_width = (in_width - 1) * stride[1] - 2 * padding[1] + kernel_size[1]
+
+    iterH = tvm.reduce_axis((0, in_height), name='h')
+    iterW = tvm.reduce_axis((0, in_width), name='ws')
+
+    Output = tvm.compute((batch_size, channels, out_height, out_width), 
+                          lambda b, c, h, w : 
+                            tvm.max(
+                                tvm.if_then_else(h * out_width + w == Indices[b, c, iterH, iterW], 
+                                                 Input[b, c, iterH, iterW], 
+                                                 0.0), 
+                                axis=[iterH, iterW]), 
+                          name='output')
+    return Output
+
+def ShiftConv2d_nhwc(Input, Kernel, dilation, stride):
+    """
+    Shift Convolution Operator
+
+    Parameters
+    ----------
+    Input: tvm.tensor.Tensor
+        4-D with shape [batch_size, input_height, input_width, channels]
+    Kernel: tvm.tensor.Tensor
+        4-D with shape [channels, kernel_height, kernel_width]
+    dilation: int or tuple
+    stride: int or tuple
+
+    Returns
+    -------
+    Output: tvm.tensor.Tensor
+        4-D with shape [batch_size, out_height, out_width, channels]
+    """
+
+    batch, inputHeight, inputWidth, channels = Input.shape
+    channels_, kernelHeight, kernelWidth = Kernel.shape
+
+    assert channels.value == channels_.value
+
+    if type(dilation) == int:
+        dilation = (dilation, dilation)
+    if type(stride) == int:
+        stride = (stride, stride)
+    
+    assert len(dilation) == 2
+    assert len(stride) == 2
+
+    padding = [((stride[0] - 1) * inputHeight - stride[0] + dilation[0] * (kernelHeight - 1) + 1) / 2, 
+                ((stride[1] - 1) * inputWidth - stride[1] + dilation[1] * (kernelWidth - 1) + 1) / 2]
+
+    outHeight = (inputHeight + 2 * padding[0]- dilation[0] * (kernelHeight - 1) - 1) // stride[0] + 1
+    outWidth = (inputWidth + 2 * padding[1] - dilation[1] * (kernelWidth - 1) - 1) // stride[1] + 1
+
+    PInput = topi.nn.pad(Input, (0, padding[0], padding[1], 0),
+                            (0, padding[0], padding[1], 0), name="PInput")
+
+    # argmax(data, axis=None, keepdims=False): topi argmax function
+    kernelIndex = topi.argmax(Kernel, axis=(1, 2))
+
+    Output = tvm.compute((batch, outHeight, outWidth, channels),
+                     lambda n, h, w, o : PInput[n, h * stride[0] + (kernelIndex[o] // kernelHeight) * dilation[0], 
+                                                   w * stride[1] + (kernelIndex[o] % kernelWidth) * dilation[1], 
+                                                o],
+                     name="Output")
+    return PInput, kernelIndex, Output
+
+def PixelCNN(Input, Kernel, mask_type, bias=None, dilation=1, stride=1, padding=0):
+    """
+    Pixel CNN Operator
+
+    Parameters
+    ----------
+    Input: tvm.tensor.Tensor
+        4-D with shape [batch_size, input_height, input_width, in_channels]
+    Kernel: tvm.tensor.Tensor
+        4-D with shape [out_channels, in_channels, kernel_height, kernel_width]
+    mask_type: str 'A' or 'B'
+    dilation: int or tuple
+    stride: int or tuple
+    padding: int or tuple
+
+    Returns
+    -------
+    Output: tvm.tensor.Tensor
+        4-D with shape [batch_size, out_height, out_width, channels]
+    """
+
+    batch, inputHeight, inputWidth, in_channels = Input.shape
+    batch, out_channels, kernelHeight, kernelWidth = Kernel.shape
+
+    assert mask_type in ['A', 'B']
+
+    if mask_type == 'A':
+        Mask = tvm.compute(Kernel.shape, 
+                           lambda b, o, h, w : tvm.if_then_else(tvm.expr.Or(tvm.expr.And(h == kernelHeight // 2, w >= kernelWidth // 2), h > kernelHeight // 2), Kernel[b, o, h, w], 0.0), 
+                           name='MaskA')
+    else:
+        Mask = tvm.compute(Kernel.shape, 
+                           lambda b, o, h, w : tvm.if_then_else(tvm.expr.Or(tvm.expr.And(h == kernelHeight // 2, w > kernelWidth // 2), h > kernelHeight // 2), Kernel[b, o, h, w], 0.0), 
+                           name='MaskB')
+    
+    Output = conv2d_nhwc(Input, Mask, bias, stride=stride, padding=padding, dilation=dilation)
+
+    return Output
+
+
+def GatedPixelCNN(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector=None, bias=None, dilation=1, stride=1, padding=0):
+    """
+    Gated Pixel CNN Operator
+
+    Parameters
+    ----------
+    Input: tvm.tensor.Tensor
+        4-D with shape [batch_size, input_height, input_width, in_channels]
+    KernelV: tvm.tensor.Tensor
+        Vertical Kernel
+        4-D with shape [2 * out_channels, in_channels, kernel_size, kernel_size]
+    KernelV2H: tvm.tensor.Tensor
+        Combine output from vertical to horizontal
+        4-D with shape [2 * out_channels, 2 * out_channels, 1, 1]
+    KernelH: tvm.tensor.Tensor
+        Horizontal Kernel
+        4-D with shape [2 * out_channels, in_channels, 1, kernel_size]
+    KernelHOut: tvm.tensor.Tensor
+        Horizontal Output Kernel
+        4-D with shape [out_channels, out_channels, 1, 1]
+    ClassVector: tvm.tensor.Tensor
+        4-D with shape [batch_size, 2 * out_channels, 1, 1]
+    dilation: int
+    stride: int
+    padding: int
+
+    Returns
+    -------
+    GateV: tvm.tensor.Tensor
+        4-D with shape [batch_szie, out_height, out_width, out_channels]
+    Output: tvm.tensor.Tensor
+        4-D with shape [batch_size, out_height, out_width, out_channels]
+    """
+
+    batch, inputHeight, inputWidth, in_channels = Input.shape
+    out_channels, in_channels, kernelHeight, kernelWidth = KernelV.shape
+    out_channels /= 2
+
+    assert kernelHeight.value == kernelWidth.value
+
+    ConvV = PixelCNN(Input, KernelV, mask_type='B', bias=bias, dilation=dilation, stride=stride, padding=padding)
+    print(ConvV.shape)
+    print(KernelV2H.shape)
+    Vertical2HorizonTal = conv2d_nhwc(ConvV, KernelV2H, bias=bias, stride=1, padding=0, dilation=1)
+    ConvH = PixelCNN(Input, KernelH, mask_type='B', bias=bias, dilation=dilation, stride=stride, padding=(0, padding))
+    CombineFeature = tvm.compute(ConvH.shape, 
+                                 lambda b, h, w, c : ConvH[b, h, w, c] + Vertical2HorizonTal[b, h, w, c], 
+                                 name='CombineFeature')
+    
+    if ClassVector == None:
+        ActivationV = tvm.compute(ConvV.shape, 
+                            lambda b, h, w, o : tvm.if_then_else(o < out_channels, 
+                                                                 tvm.tanh(ConvV[b, h, w, o]), 
+                                                                 tvm.sigmoid(ConvV[b, h, w, o])), 
+                            name="ActivationV")
+    else:
+        ActivationV = tvm.compute(ConvV.shape, 
+                            lambda b, h, w, o : tvm.if_then_else(o < out_channels, 
+                                                                 tvm.tanh(ConvV[b, h, w, o] + ClassVector[b, 0, 0, o]), 
+                                                                 tvm.sigmoid(ConvV[b, h, w, o] + ClassVector[b, 0, 0, o])), 
+                            name='ActivationV')
+    GateV = tvm.compute((batch, ActivationV.shape[1], ActivationV.shape[2], out_channels), 
+                         lambda b, h, w, c : ActivationV[b, h, w, c] * ActivationV[b, h, w, c + out_channels], 
+                         name='GateV')
+    
+    ActivationH = tvm.compute(CombineFeature.shape, 
+                              lambda b, h, w, o : tvm.if_then_else(o < out_channels, 
+                                                                   tvm.tanh(CombineFeature[b, h, w, o]), 
+                                                                   tvm.sigmoid(CombineFeature[b, h, w, o])), 
+                              name="ActivationH")
+    GateH = tvm.compute((batch, ActivationH.shape[1], ActivationH.shape[2], out_channels), 
+                         lambda b, h, w, c : ActivationH[b, h, w, c] * ActivationH[b, h, w, c + out_channels], 
+                         name='GateH')
+    ConvGateH = conv2d_nhwc(GateH, KernelHOut, bias=bias, stride=stride, padding=padding, dilation=dilation)
+
+    Output = tvm.compute(ConvGateH, 
+                         lambda b, h, w, o : ConvGateH[b, h, w, o] + Input[b, h, w, o], 
+                         name='Output')
+
+    return GateV, Output
