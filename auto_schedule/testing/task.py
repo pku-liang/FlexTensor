@@ -1,4 +1,5 @@
-import tvm 
+import experiment.shape as test_shape
+import tvm
 from auto_schedule.testing.ops import conv2d_nchw, gemm as op_gemm, conv1d as op_conv1d, conv3d_ncdhw, \
     gemm_conv2d_nchw, gemv as op_gemv, bilinear as op_bilinear, MTTKRP3d, conv_transpose1d as op_conv_transpose1d, \
     conv_transpose2d_nchw, conv_transpose3d_ncdhw, depthwise_conv2d_nchw, block_circulant_matrix as op_block_circulant_matrix
@@ -19,7 +20,8 @@ TASK_TABLE = {}
 
 class Task(object):
     def __init__(self, category, name, func, args, target, dev_id=0):
-        self.key = "{}_{}_{}_{}({})".format(category, name, args, target, dev_id)
+        self.key = "{}_{}_{}_{}({})".format(
+            category, name, args, target, dev_id)
         self.func = func
         self.args = args
         self.target = target
@@ -36,56 +38,64 @@ def register_task(task, override=False):
 def conv1d(N, C, L, K, kernel, stride=1, padding=0, dilation=1, groups=1):
     Seq = tvm.placeholder((N, C, L))
     W = tvm.placeholder((K, C//groups, kernel))
-    Output = op_conv1d(Seq, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
+    Output = op_conv1d(Seq, W, stride=stride, padding=padding,
+                       dilation=dilation, groups=groups)
     return [Output.op], [Seq, W, Output]
 
 
 def conv_transpose1d(N, C, L, K, kernel, stride=1, padding=0, dilation=1, groups=1):
     Seq = tvm.placeholder((N, C, L))
     W = tvm.placeholder((C, K//groups, kernel))
-    Output = op_conv_transpose1d(Seq, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
+    Output = op_conv_transpose1d(
+        Seq, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
     return [Output.op], [Seq, W, Output]
 
 
 def conv2d(N, C, H, W, K, kernel_size, stride=1, padding=0, dilation=1, groups=1):
     Img = tvm.placeholder((N, C, H, W))
     W = tvm.placeholder((K, C//groups, kernel_size, kernel_size))
-    Output = conv2d_nchw(Img, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
+    Output = conv2d_nchw(Img, W, stride=stride,
+                         padding=padding, dilation=dilation, groups=groups)
     return [Output.op], [Img, W, Output]
 
 
 def depthwise_conv2d(N, C, H, W, K, kernel_size, stride=1, padding=0, dilation=1):
     Img = tvm.placeholder((N, C, H, W))
     W = tvm.placeholder((C, K, kernel_size, kernel_size))
-    Ouput = depthwise_conv2d_nchw(Img, W, stride=stride, padding=padding, dilation=dilation)
+    Ouput = depthwise_conv2d_nchw(
+        Img, W, stride=stride, padding=padding, dilation=dilation)
     return [Ouput.op], [Img, W, Ouput]
 
 
 def conv_transpose2d(N, C, H, W, K, kernel_size, stride=1, padding=0, dilation=1, groups=1):
     Inputs = tvm.placeholder((N, C, H, W))
     W = tvm.placeholder((C, K//groups, kernel_size, kernel_size))
-    Output = conv_transpose2d_nchw(Inputs, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
+    Output = conv_transpose2d_nchw(
+        Inputs, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
     return [Output.op], [Inputs, W, Output]
 
 
 def conv3d(N, C, D, H, W, K, kernel_size, stride=1, padding=0, dilation=1, groups=1):
     Img = tvm.placeholder((N, C, D, H, W))
     W = tvm.placeholder((K, C//groups, kernel_size, kernel_size, kernel_size))
-    Output = conv3d_ncdhw(Img, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
+    Output = conv3d_ncdhw(Img, W, stride=stride,
+                          padding=padding, dilation=dilation, groups=groups)
     return [Output.op], [Img, W, Output]
 
 
 def conv_transpose3d(N, C, D, H, W, K, kernel_size, stride=1, padding=0, dialtion=1, groups=1):
     Img = tvm.placeholder((N, C, D, H, W))
     W = tvm.placeholder((C, K//groups, kernel_size, kernel_size, kernel_size))
-    Output = conv_transpose3d_ncdhw(Img, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
+    Output = conv_transpose3d_ncdhw(
+        Img, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
     return [Output.op], [Img, W, Output]
 
 
 def gemm_conv2d(N, C, H, W, K, kernel_size, stride=1, padding=0, dilation=1, groups=1):
     Img = tvm.placeholder((N, C, H, W))
     W = tvm.placeholder((K, C, kernel_size, kernel_size))
-    Output = gemm_conv2d_nchw(Img, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
+    Output = gemm_conv2d_nchw(
+        Img, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
     return [Output.op], [Img, W, Output]
 
 
@@ -123,15 +133,19 @@ def conv2d_1x1_packed(N, C, H, W, K, kernel_size):
     A = tvm.placeholder((N, C, H * W))
     B = tvm.placeholder((K, C))
     rc = tvm.reduce_axis((0, C))
-    Output = tvm.compute((N, K, H * W), lambda b, k, i: tvm.sum(A[b, rc, i] * B[k, rc], axis=rc))
+    Output = tvm.compute((N, K, H * W), lambda b, k,
+                         i: tvm.sum(A[b, rc, i] * B[k, rc], axis=rc))
     return [Output.op], [A, B, Output]
+
 
 def block_circulant_matrix(ROW, COL, FFT):
     Input = tvm.placeholder((ROW, COL))
     Output = op_block_circulant_matrix(Input, FFT)
     return [Output.op], [Input, Output]
 
-register_task(Task("conv2d", "1x1-packed", conv2d_1x1_packed, (256, 256, 14, 14, 512, 1), "cuda", 0))
+
+register_task(Task("conv2d", "1x1-packed", conv2d_1x1_packed,
+                   (256, 256, 14, 14, 512, 1), "cuda", 0))
 
 
 for shape in conv1d_shapes:
@@ -142,40 +156,44 @@ for shape in conv1d_shapes:
     for j in range(4):
         register_task(
             Task(
-                "conv1d", 
-                "conv1d", 
-                conv1d, 
-                (batch, in_channel, length, out_channel, k_len, stride, padding, dilation, groups), 
-                "llvm", 
+                "conv1d",
+                "conv1d",
+                conv1d,
+                (batch, in_channel, length, out_channel,
+                 k_len, stride, padding, dilation, groups),
+                "llvm",
                 j
-                ))
+            ))
         register_task(
             Task(
-                "conv1d", 
-                "conv1d", 
-                conv1d, 
-                (batch, in_channel, length, out_channel, k_len, stride, padding, dilation, groups), 
-                "cuda", 
+                "conv1d",
+                "conv1d",
+                conv1d,
+                (batch, in_channel, length, out_channel,
+                 k_len, stride, padding, dilation, groups),
+                "cuda",
                 j
-                ))
+            ))
         register_task(
             Task(
-                "conv_transpose1d", 
-                "conv_transpose1d", 
-                conv_transpose1d, 
-                (batch, rin_channel, rlength, rout_channel, k_len, stride, padding, dilation, groups), 
-                "llvm", 
+                "conv_transpose1d",
+                "conv_transpose1d",
+                conv_transpose1d,
+                (batch, rin_channel, rlength, rout_channel,
+                 k_len, stride, padding, dilation, groups),
+                "llvm",
                 j
-                ))
+            ))
         register_task(
             Task(
-                "conv_transpose1d", 
-                "conv_transpose1d", 
-                conv_transpose1d, 
-                (batch, rin_channel, rlength, rout_channel, k_len, stride, padding, dilation, groups), 
-                "cuda", 
+                "conv_transpose1d",
+                "conv_transpose1d",
+                conv_transpose1d,
+                (batch, rin_channel, rlength, rout_channel,
+                 k_len, stride, padding, dilation, groups),
+                "cuda",
                 j
-                ))
+            ))
 
 
 conv2d_shape_dict = {
@@ -195,129 +213,142 @@ for name in ["yolo", "google", "res", "squeeze", "vgg-16", "test", "yolo_b8", "m
         batch, in_channel, height, width, out_channel, _, k_h, k_w, _, stride, padding, dilation, groups = shape
         rout_channel = in_channel
         rin_channel = out_channel
-        rheight = (height + 2 * padding - dilation * (k_h - 1) - 1) // stride + 1
+        rheight = (height + 2 * padding - dilation *
+                   (k_h - 1) - 1) // stride + 1
         rwidth = (width + 2 * padding - dilation * (k_w - 1) - 1) // stride + 1
         for j in range(4):
             register_task(
                 Task(
                     "conv2d",
-                    name + str(i), 
-                    conv2d, 
-                    (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation, groups), 
-                    "llvm", 
+                    name + str(i),
+                    conv2d,
+                    (batch, in_channel, height, width, out_channel,
+                     k_h, stride, padding, dilation, groups),
+                    "llvm",
                     j
-                    ))
+                ))
             register_task(
                 Task(
                     "conv2d",
-                    name + str(i), 
-                    conv2d, 
-                    (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation, groups), 
-                    "cuda", 
+                    name + str(i),
+                    conv2d,
+                    (batch, in_channel, height, width, out_channel,
+                     k_h, stride, padding, dilation, groups),
+                    "cuda",
                     j
-                    ))
+                ))
             register_task(
                 Task(
                     "gemm_conv2d",
-                    name + str(i), 
-                    gemm_conv2d, 
-                    (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation, groups), 
-                    "llvm", 
+                    name + str(i),
+                    gemm_conv2d,
+                    (batch, in_channel, height, width, out_channel,
+                     k_h, stride, padding, dilation, groups),
+                    "llvm",
                     j
-                    ))
+                ))
             register_task(
                 Task(
                     "gemm_conv2d",
-                    name + str(i), 
-                    gemm_conv2d, 
-                    (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation, groups), 
-                    "cuda", 
+                    name + str(i),
+                    gemm_conv2d,
+                    (batch, in_channel, height, width, out_channel,
+                     k_h, stride, padding, dilation, groups),
+                    "cuda",
                     j
-                    ))
+                ))
             register_task(
                 Task(
                     "conv_transpose2d",
-                    name + str(i), 
-                    conv_transpose2d, 
-                    (batch, rin_channel, rheight, rwidth, rout_channel, k_h, stride, padding, dilation, groups), 
-                    "llvm", 
+                    name + str(i),
+                    conv_transpose2d,
+                    (batch, rin_channel, rheight, rwidth, rout_channel,
+                     k_h, stride, padding, dilation, groups),
+                    "llvm",
                     j
-                    ))
+                ))
             register_task(
                 Task(
                     "conv_transpose2d",
-                    name + str(i), 
-                    conv_transpose2d, 
-                    (batch, rin_channel, rheight, rwidth, rout_channel, k_h, stride, padding, dilation, groups), 
-                    "cuda", 
+                    name + str(i),
+                    conv_transpose2d,
+                    (batch, rin_channel, rheight, rwidth, rout_channel,
+                     k_h, stride, padding, dilation, groups),
+                    "cuda",
                     j
-                    ))
+                ))
 
 for shape in depthwise_shapes:
     batch, in_channel, H, W, factor, k, _, stride, padding, dilation = shape
     for j in range(4):
         register_task(
             Task(
-                "conv2d", 
-                "depthwise", 
-                depthwise_conv2d, 
-                (batch, in_channel, H, W, factor, k, stride, padding, dilation, in_channel), 
-                "llvm", 
+                "conv2d",
+                "depthwise",
+                depthwise_conv2d,
+                (batch, in_channel, H, W, factor, k,
+                 stride, padding, dilation, in_channel),
+                "llvm",
                 j
-                ))
+            ))
         register_task(
             Task(
-                "conv2d", 
-                "depthwise", 
-                depthwise_conv2d, 
-                (batch, in_channel, H, W, factor, k, stride, padding, dilation, in_channel), 
-                "cuda", 
+                "conv2d",
+                "depthwise",
+                depthwise_conv2d,
+                (batch, in_channel, H, W, factor, k,
+                 stride, padding, dilation, in_channel),
+                "cuda",
                 j
-                ))
+            ))
 
 for shape in grouped_shapes:
     batch, in_channel, H, W, out_channel, k, _, stride, padding, dilation, groups = shape
     for j in range(4):
         register_task(
             Task(
-                "conv2d", 
-                "grouped", 
-                conv2d, 
-                (batch, in_channel, H, W, out_channel, k, stride, padding, dilation, groups), 
-                "llvm", 
+                "conv2d",
+                "grouped",
+                conv2d,
+                (batch, in_channel, H, W, out_channel,
+                 k, stride, padding, dilation, groups),
+                "llvm",
                 j
-                ))
+            ))
         register_task(
             Task(
-                "conv2d", 
-                "grouped", 
-                conv2d, 
-                (batch, in_channel, H, W, out_channel, k, stride, padding, dilation, groups), 
-                "cuda", 
+                "conv2d",
+                "grouped",
+                conv2d,
+                (batch, in_channel, H, W, out_channel,
+                 k, stride, padding, dilation, groups),
+                "cuda",
                 j
-                ))
+            ))
 
 for shape in dilation_shapes:
     batch, in_channel, H, W, out_channel, k, _, stride, padding, dilation, groups = shape
     for j in range(4):
         register_task(
             Task(
-                "conv2d", 
-                "dilation", 
-                conv2d, 
-                (batch, in_channel, H, W, out_channel, k, stride, padding, dilation, groups), 
-                "llvm", 
+                "conv2d",
+                "dilation",
+                conv2d,
+                (batch, in_channel, H, W, out_channel,
+                 k, stride, padding, dilation, groups),
+                "llvm",
                 j
-                ))
+            ))
         register_task(
             Task(
-                "conv2d", 
-                "dilation", 
-                conv2d, 
-                (batch, in_channel, H, W, out_channel, k, stride, padding, dilation, groups), 
-                "cuda", 
+                "conv2d",
+                "dilation",
+                conv2d,
+                (batch, in_channel, H, W, out_channel,
+                 k, stride, padding, dilation, groups),
+                "cuda",
                 j
-                ))
+            ))
 
 for shape in conv3d_shapes:
     batch, in_channel, D, H, W, out_channel, _, k, _, stride, padding, dilation, groups = shape
@@ -329,40 +360,44 @@ for shape in conv3d_shapes:
     for j in range(4):
         register_task(
             Task(
-                "conv3d", 
-                "conv3d", 
-                conv3d, 
-                (batch, in_channel, D, H, W, out_channel, k, stride, padding, dilation, groups), 
-                "llvm", 
+                "conv3d",
+                "conv3d",
+                conv3d,
+                (batch, in_channel, D, H, W, out_channel,
+                 k, stride, padding, dilation, groups),
+                "llvm",
                 j
-                ))
+            ))
         register_task(
             Task(
-                "conv3d", 
-                "conv3d", 
-                conv3d, 
-                (batch, in_channel, D, H, W, out_channel, k, stride, padding, dilation, groups), 
-                "cuda", 
+                "conv3d",
+                "conv3d",
+                conv3d,
+                (batch, in_channel, D, H, W, out_channel,
+                 k, stride, padding, dilation, groups),
+                "cuda",
                 j
-                ))
+            ))
         register_task(
             Task(
-                "conv_transpose3d", 
-                "conv_transpose3d", 
-                conv_transpose3d, 
-                (batch, rin_channel, rD, rH, rW, rout_channel, k, stride, padding, dilation, groups), 
-                "llvm", 
+                "conv_transpose3d",
+                "conv_transpose3d",
+                conv_transpose3d,
+                (batch, rin_channel, rD, rH, rW, rout_channel,
+                 k, stride, padding, dilation, groups),
+                "llvm",
                 j
-                ))
+            ))
         register_task(
             Task(
-                "conv_transpose3d", 
-                "conv_transpose3d", 
-                conv_transpose3d, 
-                (batch, rin_channel, rD, rH, rW, rout_channel, k, stride, padding, dilation, groups), 
-                "cuda", 
+                "conv_transpose3d",
+                "conv_transpose3d",
+                conv_transpose3d,
+                (batch, rin_channel, rD, rH, rW, rout_channel,
+                 k, stride, padding, dilation, groups),
+                "cuda",
                 j
-                ))
+            ))
 
 for shape in gemv_shapes:
     N, K, _ = shape
@@ -385,17 +420,88 @@ for shape in gemm_shapes:
 for shape in bilinear_shapes:
     N, K1, K2, M = shape
     for j in range(4):
-        register_task(Task("bilinear", "bilinear", bilinear, (N, K1, K2, M), "llvm", j))
-        register_task(Task("bilinear", "bilinear", bilinear, (N, K1, K2, M), "cuda", j))
+        register_task(Task("bilinear", "bilinear",
+                           bilinear, (N, K1, K2, M), "llvm", j))
+        register_task(Task("bilinear", "bilinear",
+                           bilinear, (N, K1, K2, M), "cuda", j))
 
 for shape in mttkrp_shapes:
     N, K1, K2, M = shape
     for j in range(4):
-        register_task(Task("mttkrp", "mttkrp", mttkrp, (N, K1, K2, M), "llvm", j))
-        register_task(Task("mttkrp", "mttkrp", mttkrp, (N, K1, K2, M), "cuda", j))
+        register_task(Task("mttkrp", "mttkrp", mttkrp,
+                           (N, K1, K2, M), "llvm", j))
+        register_task(Task("mttkrp", "mttkrp", mttkrp,
+                           (N, K1, K2, M), "cuda", j))
 
 for shape in block_circulant_matrix_shapes:
     ROW, COL, FFT = shape
     for j in range(4):
         for platform in ('llvm', 'cuda'):
-            register_task(Task('block_circulant_matrix', 'block_circulant_matrix', block_circulant_matrix, (ROW, COL, FFT), platform, j))
+            register_task(Task('block_circulant_matrix', 'block_circulant_matrix',
+                               block_circulant_matrix, (ROW, COL, FFT), platform, j))
+
+
+
+for shape in test_shape.conv2d_yolo_batch32_shapes:
+    N, C, H, W, K, _, Hk, _, _, stride, padding, dilation, groups = shape
+    for j in range(4):
+        for platform in ('llvm', 'cuda'):
+            register_task(Task('conv2d', 'conv2d_yolo_batch32', conv2d, (N, C,
+                                                                         H, W, K, Hk, stride, padding, dilation, groups), platform, j))
+
+for shape in test_shape.conv2d_yolo_batch128_shapes:
+    N, C, H, W, K, _, Hk, _, _, stride, padding, dilation, groups = shape
+    for j in range(4):
+        for platform in ('llvm', 'cuda'):
+            register_task(Task('conv2d', 'conv2d_yolo_batch128', conv2d, (N, C,
+                                                                          H, W, K, Hk, stride, padding, dilation, groups), platform, j))
+
+for shape in test_shape.conv3d_batch1_shapes:
+    N, C, D, H, W, K, _, Hk, _, stride, padding, dilation, groups = shape
+    for j in range(4):
+        for platform in ('llvm', 'cuda'):
+            register_task(Task('conv3d', 'conv3d_batch1', conv3d, (N, C, D,
+                                                                   H, W, K, Hk, stride, padding, dilation, groups), platform, j))
+
+    D = (D + 2 * padding - dilation * (Hk - 1) - 1) // stride + 1
+    H = (H + 2 * padding - dilation * (Hk - 1) - 1) // stride + 1
+    W = (W + 2 * padding - dilation * (Hk - 1) - 1) // stride + 1
+    K, C = C, K
+
+    for j in range(4):
+        for platform in ('llvm', 'cuda'):
+            register_task(Task('conv3d', 'conv_transpose3d_batch1', conv3d, (N, C, D,
+                                                                             H, W, K, Hk, stride, padding, dilation, groups), platform, j))
+
+for shape in test_shape.conv1d_batch1_shapes:
+    N, C, L, K, _, Lk, _, stride, padding, dilation, groups = shape
+    for j in range(4):
+        for platform in ('llvm', 'cuda'):
+            register_task(Task('conv1d', 'conv1d_batch1', conv1d, (N, C,
+                                                                   L, K, Lk, stride, padding, dilation, groups), platform, j))
+
+    L = (L + 2 * padding - dilation * (Lk - 1) - 1) // stride + 1
+    C, K = K, C
+
+    for j in range(4):
+        for platform in ('llvm', 'cuda'):
+            register_task(Task('conv1d', 'conv_transpose1d_batch1', conv1d, (N, C,
+                                                                             L, K, Lk, stride, padding, dilation, groups), platform, j))
+
+for shape in test_shape.conv2d_batch1_shapes:
+    N, C, H, W, K, _, Hk, _, _, stride, padding, dilation, groups = shape
+    H = (H + 2 * padding - dilation * (Hk - 1) - 1) // stride + 1
+    W = (W + 2 * padding - dilation * (Hk - 1) - 1) // stride + 1
+    C, K = K, C
+
+    for j in range(4):
+        for platform in ('llvm', 'cuda'):
+            register_task(Task('conv2d', 'conv_transpose2d_batch1', conv2d, (N, C,
+                                                                             H, W, K, Hk, stride, padding, dilation, groups), platform, j))
+
+for shape in test_shape.group_conv2d_batch1_shapes:
+    N, C, H, W, K, Hk, _, stride, padding, dilation, groups = shape
+    for j in range(4):
+        for platform in ('llvm', 'cuda'):
+            register_task(Task('conv2d', 'group_conv2d_batch1', conv2d, (N, C,
+                                                                         H, W, K, Hk, stride, padding, dilation, groups), platform, j))
