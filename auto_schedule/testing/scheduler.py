@@ -41,8 +41,8 @@ def flatten_graph(ops):
             if t.op not in visited:
                 visited.add(t.op)
                 q.append(t.op)
-            if t.op not in down_graph:
-                down_graph[t.op] = []
+            if t not in down_graph:
+                down_graph[t] = []
             down_graph[t].append(cur)
     return list(reversed(bfs_order)), down_graph
 

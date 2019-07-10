@@ -320,6 +320,8 @@ def run(name, N, H, W, CO, CI, KH, KW, stride, pad, dilation, trials=100, timeou
         with tvm.target.create(target):
             s, arg_bufs = conv2d_nchw(N, H, W, CO, CI, KH, KW, strides, padding, dilation)
             # print(tvm.lower(s, arg_bufs, simple_mode=True))
+            func = tvm.build(s, arg_bufs, "cuda")
+            print(func.imported_modules[0].get_source())
             func = tvm.build(s, arg_bufs)
 
     # check correctness

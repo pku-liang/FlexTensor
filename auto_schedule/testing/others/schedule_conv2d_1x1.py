@@ -187,8 +187,9 @@ def evaluate(s, bufs, target, dev_id, number=1):
         tvm_arys.append(tmp)
     stmt = tvm.lower(s, bufs, simple_mode=True)
     from auto_schedule.test.test_ir_visit_print import visit
-    visit(stmt, 0)
+    # visit(stmt, 0)
     func = tvm.build(s, bufs, target)
+    print(func.imported_modules[0].get_source())
     evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
     time_cost = evaluator(*tvm_arys).mean * 1e3
     return time_cost

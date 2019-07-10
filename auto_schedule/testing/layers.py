@@ -75,6 +75,21 @@ class YoloConvLayer1(Conv2dLayer):
         return (3, 448, 448)
 
 
+class YoloConvLayer17(Conv2dLayer):
+    """YOLO convolution Layer 1
+
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv1 |   x   |   1024  |  14 |  14 |     512     |  1  |  1  |    0    |    1   |
+    """
+    def __init__(self):
+        super(YoloConvLayer17, self).__init__(1024, 512, 14, False, 0, 1, 1, 1)
+
+    @staticmethod
+    def get_intput_shape():
+        return (1024, 14, 14)
+
+
 class YoloConvLayer24(Conv2dLayer):
     """YOLO convolution Layer 1
 
