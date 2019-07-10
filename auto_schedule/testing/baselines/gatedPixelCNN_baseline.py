@@ -244,7 +244,7 @@ def pytorch_cuda(B, H, W, in_C, out_C, kernel_size, classVector, bias, dilation,
 def tvm_GatedPixelCNN_cpu(B, H, W, in_C, out_C, kernel_size, classVector, bias, dilation, stride, padding, number=10, dev=0):
     Input = torch.rand([B, H, W, in_C], dtype=torch.float32)
     KernelV = torch.rand([2 * out_C, in_C, kernel_size, kernel_size], dtype=torch.float32)
-    KernelV2H = torch.rand([2 * out_C, in_C, 1, 1], dtype=torch.float32)
+    KernelV2H = torch.rand([2 * out_C, 2 * out_C, 1, 1], dtype=torch.float32)
     KernelH = torch.rand([2 * out_C, in_C, 1, kernel_size], dtype=torch.float32)
     KernelHOut = torch.rand([out_C, out_C, 1, 1], dtype=torch.float32)
 
@@ -255,18 +255,22 @@ def tvm_GatedPixelCNN_cpu(B, H, W, in_C, out_C, kernel_size, classVector, bias, 
     f = tvm.build(s, bufs, 'llvm')
 
     im = tvm.nd.array(Input.numpy().astype(np.float32), ctx)
-    fi = tvm.nd.array(indices.numpy().astype(np.float32), ctx)
+    kv = tvm.nd.array(KernelV.numpy().astype(np.float32), ctx)
+    kv2h = tvm.nd.array(KernelV2H.numpy().astype(np.float32), ctx)
+    kh = tvm.nd.array(KernelH.numpy().astype(np.float32), ctx)
+    kho = tvm.nd.array(KernelHOut.numpy().astype(np.float32), ctx)
 
     in_height = Input.shape[2]
     in_width = Input.shape[3]
     out_height = (in_height - 1) * stride - 2 * padding + kernel_size
     out_width = (in_width - 1) * stride - 2 * padding + kernel_size
-    output_shape = bufs[-1].shape
+    tmp_output_shape = bufs[-1].shape
+    output_shape = [int(x.value) for x in tmp_output_shape]
     un = tvm.nd.array(np.zeros(output_shape).astype(np.float32), ctx)
 
     start_time = time.time()
     for i in range(number):
-        f(im, fi, un)
+        f(im, kv, kv2h, kh, kho, un)
     end_time = time.time()
     return (end_time - start_time) * 1e3 / number
 
@@ -281,7 +285,7 @@ if __name__ == "__main__":
         print("Pytorch cost on cpu: {}ms".format(cost))
         cost = pytorch_cuda(*shape)
         print("Pytorch cost on cuda: {}ms".format(cost))
-        cost = tvm_unpool2d_cpu(*shape)
+        cost = tvm_GatedPixelCNN_cpu(*shape)
         print("Tvm cost on cpu: {}ms".format(cost))
         
     print("Done!")

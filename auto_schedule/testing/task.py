@@ -171,7 +171,7 @@ def gatedpixelcnn(N, H, W, C, OutC, kernel_size, ClassVector=None, bias=None, st
     if ClassVector is not None:
         ClassVector = tvm.placeholder((N, 2 * OutC, 1, 1))
     GateV, Output = op_gated_pixel_cnn(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector, bias=bias, dilation=dilation, stride=stride, padding=padding)
-    return [GateV.op, Output.op], [Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector, GateV, Output]
+    return [Output.op], [Input, KernelV, KernelV2H, KernelH, KernelHOut, Output]
 
 
 register_task(Task("conv2d", "1x1-packed", conv2d_1x1_packed, (256, 256, 14, 14, 512, 1), "cuda", 0))
