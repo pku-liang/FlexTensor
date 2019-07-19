@@ -4,6 +4,8 @@ import argparse
 import time
 import json
 import tvm 
+import torch
+
 from auto_schedule.testing.scheduler import Config
 from auto_schedule.testing.task import Task, TASK_TABLE
 from auto_schedule.testing.scheduler import schedule, schedule_with_config
@@ -35,6 +37,7 @@ def optimize(prefix, from_, shapes, target="llvm", dev_id=0, trials=100, timeout
             target, 
             dev_id
             )
+
         beg = time.time()
         s, bufs, configs = schedule(
             task.key, 
@@ -55,6 +58,7 @@ def optimize(prefix, from_, shapes, target="llvm", dev_id=0, trials=100, timeout
             for name, value in config.items():
                 if value:
                     print(name, value)
+        print("######################################")
         print("graph schedules:")
         for name, value in configs.graph_config.items():
             if value:
@@ -65,6 +69,7 @@ def optimize(prefix, from_, shapes, target="llvm", dev_id=0, trials=100, timeout
         print(line, file=logfile, flush=True)
         s, bufs = schedule_with_config(task.key, configs)
         time_cost = _evaluate(s, bufs, target, task.dev_id, 10)
+        print("######################################")
         print("Use", time_cost, "ms")
         print("Cost", end - beg, "s")
         print()
@@ -79,6 +84,57 @@ def test(task_key, configs, dev_id=None):
     print(task_key, "use", time_cost, "ms")
     print()
 
+def schedule_with_config_local():
+    with open("/home/retina/skw/work/AutoScheduler/gemm_conv.log", 'r') as f:
+        
+
+"""
+(1, 3, 448, 448, 64, 3, 7, 7, 1, 2, 3, 1, 1)
+    Conv 2d on cpu: 0.011640000343322753s
+    Conv 2d on cuda: 0.006447720527648926s
+(1, 64, 112, 112, 192, 64, 3, 3, 1, 1, 1, 1, 1)
+    Conv 2d on cpu: 0.010520696640014648s
+    Conv 2d on cuda: 0.006895184516906738s
+(1, 192, 56, 56, 128, 192, 1, 1, 1, 1, 0, 1, 1)
+    Conv 2d on cpu: 0.00572810173034668s
+    Conv 2d on cuda: 0.005124855041503906s
+(1, 128, 56, 56, 256, 128, 3, 3, 1, 1, 1, 1, 1)
+    Conv 2d on cpu: 0.005372405052185059s
+    Conv 2d on cuda: 0.003541111946105957s
+(1, 256, 56, 56, 256, 256, 1, 1, 1, 1, 0, 1, 1)
+    Conv 2d on cpu: 0.00752255916595459s
+    Conv 2d on cuda: 0.0071736335754394535s
+(1, 256, 56, 56, 512, 256, 3, 3, 1, 1, 1, 1, 1)
+    Conv 2d on cpu: 0.014762544631958007s
+    Conv 2d on cuda: 0.006854510307312012s
+(1, 512, 28, 28, 256, 512, 1, 1, 1, 1, 0, 1, 1)
+    Conv 2d on cpu: 0.0043433189392089845s
+    Conv 2d on cuda: 0.0035385370254516603s
+(1, 256, 28, 28, 512, 256, 3, 3, 1, 1, 1, 1, 1)
+    Conv 2d on cpu: 0.005109810829162597s
+    Conv 2d on cuda: 0.0018965244293212891s
+(1, 512, 28, 28, 512, 512, 1, 1, 1, 1, 0, 1, 1)
+    Conv 2d on cpu: 0.004613542556762695s
+    Conv 2d on cuda: 0.003508114814758301s
+(1, 512, 28, 28, 1024, 512, 3, 3, 1, 1, 1, 1, 1)
+    Conv 2d on cpu: 0.015011453628540039s
+    Conv 2d on cuda: 0.0038038253784179687s
+(1, 1024, 14, 14, 512, 1024, 1, 1, 1, 1, 0, 1, 1)
+    Conv 2d on cpu: 0.003091883659362793s
+    Conv 2d on cuda: 0.001864314079284668s
+(1, 512, 14, 14, 1024, 512, 3, 3, 1, 1, 1, 1, 1)
+    Conv 2d on cpu: 0.007311129570007324s
+    Conv 2d on cuda: 0.0012821674346923829s
+(1, 1024, 14, 14, 1024, 1024, 3, 3, 1, 1, 1, 1, 1)
+    Conv 2d on cpu: 0.020050597190856934s
+    Conv 2d on cuda: 0.0026390790939331056s
+(1, 1024, 14, 14, 1024, 1024, 3, 3, 1, 2, 1, 1, 1)
+    Conv 2d on cpu: 0.0181943416595459s
+    Conv 2d on cuda: 0.002562427520751953s
+(1, 1024, 7, 7, 1024, 1024, 3, 3, 1, 1, 1, 1, 1)
+    Conv 2d on cpu: 0.018287014961242676s
+    Conv 2d on cuda: 0.0017349958419799806s
+"""
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -94,6 +150,7 @@ if __name__ == "__main__":
     parser.add_argument("--parallel", help="parallel", type=int, default=1)
     parser.add_argument("--use_model", help="use performance model", action="store_true")
     parser.add_argument("--method", help="how to schedule", type=str, default="searching")
+    parser.add_argument("--test_torch", help="whether to test torch implementation", type=bool, default=False)
     args = parser.parse_args()
     if args.shapes != "":
         shapes = shape_dict[args.shapes]
@@ -137,3 +194,32 @@ if __name__ == "__main__":
                 obj = json.loads(string)
                 configs = Config(obj[0], obj[1])
                 test(name, configs, dev_id=args.device)
+    
+    if args.test_torch:
+        assert args.shapes != ""
+        shapes = shape_dict[args.shapes]
+        """ Warm up """
+
+        batch, in_channel, height, width, out_channel, _, k_h, k_w, _, stride, padding, dilation, groups = shapes[0]
+        conv2d = torch.nn.Conv2d(in_channel, out_channel, (k_h, k_w), stride=stride, padding=padding, dilation=dilation, groups=groups).cuda()
+        img = torch.rand((batch, in_channel, height, width)).cuda()
+        res = conv2d(img)
+        
+        for shape in shapes:
+            print(shape)
+            batch, in_channel, height, width, out_channel, _, k_h, k_w, _, stride, padding, dilation, groups = shape
+            start_time = time.time()
+            conv2d = torch.nn.Conv2d(in_channel, out_channel, (k_h, k_w), stride=stride, padding=padding, dilation=dilation, groups=groups)
+            for i in range(args.trials):
+                img = torch.rand((batch, in_channel, height, width))
+                res = conv2d(img)
+            cpu_time = time.time() - start_time
+            print("Conv 2d on cpu: {}s".format(cpu_time / args.trials))
+
+            start_time = time.time()
+            conv2d = conv2d.cuda()
+            for i in range(args.trials):
+                img = torch.rand((batch, in_channel, height, width)).cuda()
+                res = conv2d(img)
+            cuda_time = time.time() - start_time
+            print("Conv 2d on cuda: {}s".format(cuda_time / args.trials))

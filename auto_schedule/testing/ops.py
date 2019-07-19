@@ -112,7 +112,8 @@ def zero_pad2d(inputs, padding=0):
                             tvm.all(h >= padding[0], h < height + padding[0], w >= padding[2], w < width + padding[2]),
                             inputs[b, c, h - padding[0], w - padding[2]],
                             padding_zero
-                            )
+                            ),
+        name='Padding'
         )
 
 
@@ -836,9 +837,9 @@ def im2col_nchw_naive(inputs, kernel_size, stride=1, padding=0, dilation=1, grou
         lambda g, h, w: padded[w // (P * Q), 
                             g * channel_per_group + h // (k_h * k_w), 
                             w % (P * Q) // Q * stride[0] + h % (k_h * k_w) // k_w * dilation[0],
-                            w % Q * stride[1] + h % k_w * dilation[1]]
-        )
-    return output
+                            w % Q * stride[1] + h % k_w * dilation[1]], 
+        name='Img2Col')
+    return output, padded
 
 
 def col2img_nchw(inputs, P, Q):
@@ -864,7 +865,8 @@ def col2img_nchw(inputs, P, Q):
     batch_size = width // (P * Q)
     output = tvm.compute(
         (batch_size, out_channel_per_group * groups, P, Q),
-        lambda b, c, h, w: inputs[c // out_channel_per_group, c % out_channel_per_group, b * (P * Q) + h * Q + w]
+        lambda b, c, h, w: inputs[c // out_channel_per_group, c % out_channel_per_group, b * (P * Q) + h * Q + w],
+        name='Col2Img'
     )
     return output
 
@@ -922,12 +924,14 @@ def gemm_conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilation=1,
                                     k % (k_h * k_w) // k_w, 
                                     k % k_w],
                                 axis=k
-                                )
+                                ), 
+        name='ComputeGemm'
                     )
     if bias is not None:
         gemm = tvm.compute(
             (groups, out_channel_per_group, col.shape[2]),
-            lambda g, h, w: gemm[g, h, w] + bias[g * out_channel_per_group + h])
+            lambda g, h, w: gemm[g, h, w] + bias[g * out_channel_per_group + h],
+            name='ComputeBias')
     img = col2img_nchw(gemm, P, Q)
     return img
 
