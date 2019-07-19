@@ -839,7 +839,7 @@ def im2col_nchw_naive(inputs, kernel_size, stride=1, padding=0, dilation=1, grou
                             w % (P * Q) // Q * stride[0] + h % (k_h * k_w) // k_w * dilation[0],
                             w % Q * stride[1] + h % k_w * dilation[1]], 
         name='Img2Col')
-    return output, padded
+    return output
 
 
 def col2img_nchw(inputs, P, Q):

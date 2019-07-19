@@ -4,6 +4,16 @@ Target x86 CPU
 
 ====================================
 **Author**: `Kaiwen Sheng`
+
+**Machine Specification"": 
+    Linux DellT7910 4.15.0-52-generic #56~16.04.1-Ubuntu SMP Thu Jun 6 12:03:31 UTC 2019 x86_64 x86_64 x86_64 GNU/Linux
+    cpu             : Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz
+    cpu cores       : 14
+    number of cpu   : 56
+    MemTotal        : 528300924 kB
+    
+    gpu             : NVIDIA Corporation GM200GL [Quadro M6000 24GB] (rev a1)
+    number of gpu   : 1
 """
 import tvm 
 from auto_schedule.measure import _evaluate
