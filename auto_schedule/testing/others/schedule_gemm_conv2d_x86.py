@@ -104,6 +104,8 @@ def schedule_yolo_conv_x86(s, outputs, inputs, weight, bias):
         stage(ComputeBias, 0x555fc1729fc0), 
         stage(Col2Img, 0x555fc172a150)]
     """
+    out_channel, in_channel, kh, kw = weight.shape
+
     Padding = s.stages[1].op
     Img2Col = s.stages[2].op
     ComputeGemm = s.stages[4].op
@@ -111,14 +113,16 @@ def schedule_yolo_conv_x86(s, outputs, inputs, weight, bias):
     Col2Img = s.stages[-1].op
 
     b, c, h, w = s[Padding].op.axis
+    batch_size = b.dom.extent
+    print("Batch: ", batch_size)
     
-    """gv = s[ComputeGemm].op.reduce_axis[0]
-    gc, gt = s[ComputeGemm].split(gv, nparts=c.dom.extent.value)
+    gv = s[ComputeGemm].op.reduce_axis[0]
+    """gc, gt = s[ComputeGemm].split(gv, nparts=c.dom.extent.value)
     gh, gw = s[ComputeGemm].split(gt, nparts=h.dom.extent.value)"""
 
     ig, iv, ib = s[Img2Col].op.axis
-    ic, it = s[Img2Col].split(iv, nparts=c.dom.extent.value)
-    ih, iw = s[Img2Col].split(it, nparts=h.dom.extent.value)
+    """ic, it = s[Img2Col].split(iv, nparts=c.dom.extent.value)
+    ih, iw = s[Img2Col].split(it, nparts=h.dom.extent.value)"""
 
     # inline padding
     s[Padding].compute_at(s[Img2Col], ib)
@@ -130,34 +134,76 @@ def schedule_yolo_conv_x86(s, outputs, inputs, weight, bias):
     # cache write
     bias_tensor = outputs.op.input_tensors[0]
     gemm_tensor = bias_tensor.op.input_tensors[0]
-    write_cache = s.cache_write(gemm_tensor, 'local')
+    write_cache = s.cache_write(gemm_tensor, 'global')
 
-    gemm_g, gemm_h, gemm_w = s[write_cache].op.axis
-    gemm_rv = s[write_cache].op.reduce_axis[0]
-    h_factor = [4]
-    rv_factor = [16, 8, 3, 27, 27]
-    gemm_go, gemm_gi = s[write_cache].split(gemm_h, nparts=h_factor[0])
-    gemm_rvo, gemm_rvi = s[write_cache].split(gemm_rv, nparts=rv_factor[0])
-    gemm_rvmo, gemm_rvmi = s[write_cache].split(gemm_rvi, nparts=rv_factor[1])
-    gemm_rvno, gemm_rvni = s[write_cache].split(gemm_rvmi, nparts=rv_factor[2])
-    gemm_rvlo, gemm_rvli = s[write_cache].split(gemm_rvni, nparts=rv_factor[3])
+    gemm_cache_g, gemm_cache_h, gemm_cache_w = s[write_cache].op.axis
+    gemm_cache_rv = s[write_cache].op.reduce_axis[0]
+    h_factor = [8]
+    w_factor = [27]
+    rv_factor = [8 * kh.value, 8 * kw.value]
 
-    # s[write_cache].reorder(gemm_g, gemm_go, gemm_rvno, gemm_rvmo, gemm_gi, gemm_rvo, gemm_rvlo, gemm_rvli, gemm_w)
-    s[write_cache].reorder(gemm_g, gemm_go, gemm_rvo, gemm_rvmo, gemm_gi, gemm_w, gemm_rvno, gemm_rvlo, gemm_rvli)
+    gemm_cache_wo, gemm_cache_wi = s[write_cache].split(gemm_cache_w, nparts=w_factor[0])
+    gemm_cache_wio, gemm_cache_wii = s[write_cache].split(gemm_cache_wi, nparts=batch_size)
 
-    outer = s[write_cache].fuse(gemm_g, gemm_go, gemm_rvo)
-    s[write_cache].parallel(outer)
-    # s[write_cache].compute_at(s[gemm_tensor], s[gemm_tensor].op.axis[1])
+    gemm_cache_ho, gemm_cache_hi = s[write_cache].split(gemm_cache_h, nparts=h_factor[0])
+
+    gemm_cache_rvo, gemm_cache_rvi = s[write_cache].split(gemm_cache_rv, nparts=rv_factor[0])
+    gemm_cache_rvmo, gemm_cache_rvmi = s[write_cache].split(gemm_cache_rvi, nparts=rv_factor[1])
+    """gemm_cache_rvno, gemm_cache_rvni = s[write_cache].split(gemm_cache_rvmi, nparts=rv_factor[2])
+    gemm_cache_rvlo, gemm_cache_rvli = s[write_cache].split(gemm_cache_rvni, nparts=rv_factor[3])"""
+
+    # s[write_cache].reorder(gemm_cache_g, gemm_cache_ho, gemm_cache_rvmo, gemm_cache_hi, gemm_cache_rvo, gemm_cache_wo, gemm_cache_wi) # good one
+    # outer = s[write_cache].fuse(gemm_cache_g, gemm_cache_ho, gemm_cache_rvmo)
+    
+    s[write_cache].reorder(gemm_cache_g, gemm_cache_wio, gemm_cache_ho, gemm_cache_hi, gemm_cache_rvmo, gemm_cache_rvmi, gemm_cache_wo, gemm_cache_rvo, gemm_cache_wii) # good one
+    cache_outer = s[write_cache].fuse(gemm_cache_g, gemm_cache_wio, gemm_cache_ho, gemm_cache_hi)
+
+    # The same split on gemm operato
+    # r# cache write
+    print(s[gemm_tensor].op.axis)
+    gemm_g, gemm_h, gemm_w = s[gemm_tensor].op.axis
+    h_factor = [8]
+    w_factor = [27]
+    rv_factor = [8, 8]
+
+    gemm_wo, gemm_wi = s[gemm_tensor].split(gemm_w, nparts=w_factor[0])
+
+    gemm_ho, gemm_hi = s[gemm_tensor].split(gemm_h, nparts=h_factor[0])
+
+    """gemm_rvo, gemm_rvi = s[gemm_tensor].split(gemm_rv, nparts=rv_factor[0])
+    gemm_rvmo, gemm_rvmi = s[gemm_tensor].split(gemm_rvi, nparts=rv_factor[1])
+    gemm_rvno, gemm_rvni = s[gemm_tensor].split(gemm_rvmi, nparts=rv_factor[2])
+    gemm_rvlo, gemm_rvli = s[gemm_tensor].split(gemm_rvni, nparts=rv_factor[3])"""
+
+    # s[gemm_tensor].reorder(gemm_g, gemm_ho, gemm_rvmo, gemm_hi, gemm_rvo, gemm_wo, gemm_wi) # good one
+    # outer = s[gemm_tensor].fuse(gemm_g, gemm_ho, gemm_rvmo)
+    
+    s[gemm_tensor].reorder(gemm_g, gemm_ho, gemm_hi, gemm_wo, gemm_wi) # good one
+    outer = s[gemm_tensor].fuse(gemm_g, gemm_ho, gemm_hi)
+    
+    # sc
+    # s[gemm_tensor].reorder(gemm_g, gemm_go, gemm_rvo, gemm_rvmo, gemm_gi, gemm_w, gemm_rvno, gemm_rvlo, gemm_rvli)
+    # outer = s[gemm_tensor].fuse(gemm_g, gemm_go, gemm_rvo)
+    
+    # Yolo conv24 use 148.2433819 ms
+    # Pytorch on cpu use: 1.0495901107788086ms
+    # s[gemm_tensor].reorder(gemm_g, gemm_go, gemm_rvno, gemm_rvmo, gemm_gi, gemm_rvo, gemm_rvlo, gemm_rvli, gemm_w)
+    # outer = s[gemm_tensor].fuse(gemm_g, gemm_go, gemm_rvno)
+
+    s[write_cache].parallel(cache_outer)
+    # s[write_cache].compute_at(s[gemm_tensor], outer)
 
     # inline bias
     cb, cc, ch, cw = s[Col2Img].op.axis
     s[ComputeBias].compute_at(s[Col2Img], ch)
     s[ComputeBias].compute_inline()
 
+    s[Col2Img].parallel(cc)
+
     return s
 
 
-def try_yolo_conv(batch_size=2, number=10):
+def try_yolo_conv(batch_size=2, number=100):
     # get the compute
     yolo_conv = SqueezeNetFire8Gemm()
     input_shape = yolo_conv.get_intput_shape()
@@ -185,6 +231,7 @@ def try_yolo_conv(batch_size=2, number=10):
     # warm up
     inputs = torch.rand(batch_size, *input_shape)
     res = conv2d_torch(inputs)
+
     times = time.time()
     for _ in range(number):
         res = conv2d_torch(inputs)
@@ -221,35 +268,29 @@ def try_yolo_conv(batch_size=2, number=10):
 """
 Result:
     batch: 1
-        Yolo conv24 use 2.35451994 ms
-                    20.24905221 ms (no par)
-        Pytorch on cpu use: 21.737585067749023ms
+        Yolo conv24 use 0.5344364 ms
+        Pytorch on cpu use: 1.259779930114746ms
 
     batch: 2
-        Yolo conv24 use 2.55474187 ms
-                    19.25091492 ms (no par)
-        Pytorch on cpu use: 22.944021224975586ms
+        Yolo conv24 use 1.9315735 ms
+        Pytorch on cpu use: 1.2192821502685547ms
 
     batch: 8
-        Yolo conv24 use 5.0500178799999995 ms
-                    32.270561429999994 ms (no par)
-        Pytorch on cpu use: 47.98856973648071ms
+        Yolo conv24 use 7.96527069 ms
+        Pytorch on cpu use: 2.0935559272766113ms
     
     batch: 16
-        Yolo conv24 use 9.15822354 ms
-                    60.95276349 ms (no par)
-        Pytorch on cpu use: 79.13750886917114ms
+        Yolo conv24 use 15.24043944 ms
+        Pytorch on cpu use: 2.525360584259033ms
 
     batch: 32
-        Yolo conv24 use 21.21312621 ms
-                    119.80994848 ms (no par)
-        Pytorch on cpu use: 159.64627742767334ms
+        Yolo conv24 use 38.23161417000001 ms
+        Pytorch on cpu use: 8.913915157318115ms
 
     batch: 64
-        Yolo conv24 use 44.853183 ms
-                    220.24257290000003 ms (no par)
-        Pytorch on cpu use: 287.0194435119629ms
+        Yolo conv24 use 101.92375082999999 ms
+        Pytorch on cpu use: 15.264289379119873ms
 """
 
 if __name__ == "__main__":
-    try_yolo_conv(batch_size=1)
+    try_yolo_conv(batch_size=64)
