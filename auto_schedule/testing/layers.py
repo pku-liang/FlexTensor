@@ -114,7 +114,7 @@ class SqueezeNetFire8(Conv2dLayer):
     | conv8 |   x   |   384   | 27  | 27  |      64     |  1  |  1  |    0    |    1   |
     """
     def __init__(self):
-        super(SqueezeNetFire8, self).__init__(384, 64, 27, True, 0, 1, 1, 1)
+        super(SqueezeNetFire8, self).__init__(384, 64, 1, True, 0, 1, 1, 1)
 
     @staticmethod
     def get_intput_shape():
