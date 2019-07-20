@@ -83,7 +83,7 @@ class YoloConvLayer17(Conv2dLayer):
     | conv1 |   x   |   1024  |  14 |  14 |     512     |  1  |  1  |    0    |    1   |
     """
     def __init__(self):
-        super(YoloConvLayer17, self).__init__(1024, 512, 14, False, 0, 1, 1, 1)
+        super(YoloConvLayer17, self).__init__(1024, 512, 1, False, 0, 1, 1, 1)
 
     @staticmethod
     def get_intput_shape():

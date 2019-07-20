@@ -1583,6 +1583,9 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
     # first generate graph space
     graph_space = generate_space_inter_op(op_lst, down_graph, force_inline=force_inline)
 
+    tmp = len(graph_space)
+    print("graph space size", tmp)
+
     ##################################################
     # intra operations schedule decisionss
     op_space_lst = []
@@ -1598,6 +1601,8 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
             space = generate_space_intra_op(op, down_graph, slevel=slevel, rlevel=rlevel)
         else:
             raise RuntimeError("Currently no support for target %s"%task.target)
+        tmp *= len(space)
+        print("op", pos, "space size:", len(space))
         op_space_lst.append(space)
         op_scheduler = OpScheduler(
             task_key, 
@@ -1617,13 +1622,16 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
         if force_inline and graph_space.subspaces["inline"].able_inline(pos):
             op_config = {}
         else:
-            op_config = op_scheduler.schedule(
-                configs, 
-                method=method, 
-                use_model=use_model, 
-                perf_path=perf_path,
-                )
+            op_config = None
+            # op_config = op_scheduler.schedule(
+            #     configs, 
+            #     method=method, 
+            #     use_model=use_model, 
+            #     perf_path=perf_path,
+            #     )
         configs.op_config_lst.append(op_config)
+    
+    print("space size", tmp)
 
     #################################################
     # inter operations schedule decisions 
@@ -1638,8 +1646,8 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
         rpc_info=rpc_info
         )
     use_model = False if graph_perf_model_path is None else True
-    graph_config = graph_scheduler.schedule(configs, method=method, use_model=use_model, perf_path=graph_perf_model_path)
-
+    # graph_config = graph_scheduler.schedule(configs, method=method, use_model=use_model, perf_path=graph_perf_model_path)
+    graph_config = None
     #################################################
     # combine the configs
     configs = Config(configs.op_config_lst, graph_config)

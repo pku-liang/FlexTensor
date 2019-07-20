@@ -27,7 +27,7 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
     k_factors = [8, 4, 8, 2]
     p_factors = [7, 1, 2, 1]
     q_factors = [1, 1, 14, 1]
-    rc_factors = [1, 32, 32]         # outer-->inner
+    rc_factors = [1, 32, 32]         
     ry_factors = [1, 1, 1]
     rx_factors = [1, 1, 1]
 
@@ -44,6 +44,9 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
 
     # split the spatial axes
     b, k, p, q = s[outputs].op.axis
+
+    kernel_scope, b = s[outputs].split(b, nparts=1)
+
     bo, bi = s[outputs].split(b, nparts=b_factors[0])
     ko, ki = s[outputs].split(k, nparts=k_factors[0])
     po, pi = s[outputs].split(p, nparts=p_factors[0])
@@ -60,9 +63,7 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
     tqo, qi = s[outputs].split(qi, nparts=q_factors[2])
 
     # reorder
-    s[outputs].reorder(bo, ko, po, qo, vbo, vko, vpo, vqo, tbo, tko, tpo, tqo, bi, ki, pi, qi)
-
-    kernel_scope, bo = s[outputs].split(bo, nparts=1)
+    s[outputs].reorder(po, bo, ko, qo, vqo, vbo, vko, vpo, tbo, tko, tpo, tqo, bi, ki, pi, qi)
 
     # fuse
     bko = s[outputs].fuse(bo, ko)
@@ -71,12 +72,12 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
     bki = s[outputs].fuse(bi, ki)
 
     # bind
-    s[outputs].bind(bko, bz)
-    s[outputs].bind(po, by)
+    s[outputs].bind(bko, by)
+    s[outputs].bind(po, bz)
     s[outputs].bind(qo, bx)
-    s[outputs].bind(vbko, vz)
+    s[outputs].bind(vbko, vx)
     s[outputs].bind(vpo, vy)
-    s[outputs].bind(vqo, vx)
+    s[outputs].bind(vqo, vz)
     s[outputs].bind(tbko, tz)
     s[outputs].bind(tpo, ty)
     s[outputs].bind(tqo, tx)
@@ -84,7 +85,6 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
     # compute at write cache
     s[write_cache].compute_at(s[outputs], tqo)
 
-    # rfactor
     rc, ry, rx = s[write_cache].op.reduce_axis
     rco, rci = s[write_cache].split(rc, nparts=rc_factors[0])
     rcm, rci = s[write_cache].split(rci, nparts=rc_factors[1])
@@ -92,7 +92,8 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
     rym, ryi = s[write_cache].split(ryi, nparts=ry_factors[1])
     rxo, rxi = s[write_cache].split(rx, nparts=rx_factors[0])
     rxm, rxi = s[write_cache].split(rxi, nparts=rx_factors[1])
-    s[write_cache].reorder(rco, ryo, rxo, rcm, rym, rxm, rci, ryi, rxi, *s[write_cache].op.axis)
+    a, b, c, d = s[write_cache].op.axis
+    s[write_cache].reorder(rco, ryo, rxo, rcm, rym, rxm, rci, ryi, rxi, a, b, c, d)
 
     # compute at read cache
     s[read_share_weight].compute_at(s[write_cache], rxm)
@@ -104,9 +105,10 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
     for cache in [read_share_inputs, read_share_weight]:
         cb, ck, ch, cw = s[cache].op.axis
         fused = s[cache].fuse(cb, ck, ch, cw)
-        bindz, fused = s[cache].split(fused, nparts=k_factors[2])
-        bindy, fused = s[cache].split(fused, nparts=p_factors[2])
-        bindx, fused = s[cache].split(fused, nparts=q_factors[2])
+        fused, bindx = s[cache].split(fused, factor=q_factors[2])
+        fused, bindy = s[cache].split(fused, factor=p_factors[2])
+        fused, bindz = s[cache].split(fused, factor=b_factors[2] * k_factors[2])       
+        
         s[cache].bind(bindx, tx)
         s[cache].bind(bindy, ty)
         s[cache].bind(bindz, tz)
@@ -131,7 +133,7 @@ def try_yolo_conv(batch_size=1):
     arg_bufs = [inputs, weight, outputs]
     stmt = tvm.lower(s, arg_bufs, simple_mode=True)
     print(stmt)
-    dev_id = 0
+    dev_id = 3
     ctx = tvm.nd.context("cuda", dev_id)
     max_dims = ctx.max_thread_dimensions
     kwargs = {
@@ -143,10 +145,8 @@ def try_yolo_conv(batch_size=1):
     }
     verify = tvm.ir_pass.VerifyGPUCode(stmt, kwargs)
     print(verify)
-    func = tvm.build(s, arg_bufs, "cuda")
-    print(func.import_modules)
-    time_cost = _evaluate(s, arg_bufs, "cuda", dev_id, 100)
-    print("Yolo conv24 use", time_cost, "ms")
+    time_cost = _evaluate(s, arg_bufs, "cuda", dev_id, 10)
+    print("Yolo conv17 use", time_cost, "ms")
 
 
 if __name__ == "__main__":
