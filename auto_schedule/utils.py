@@ -269,6 +269,7 @@ def test_allclose(value, target, rtol=1e-5, print_diff=False):
         passed = 0
         if print_diff:
             print(target - value)
+            print("Max diff:", np.max(np.fabs(target - value)))
     return passed
 
 

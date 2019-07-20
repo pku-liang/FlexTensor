@@ -18,7 +18,9 @@ Target x86 CPU
 import tvm 
 from auto_schedule.measure import _evaluate
 from auto_schedule.testing.layers import SqueezeNetFire8Gemm
+from auto_schedule.utils import test_allclose, to_tuple
 import torch
+import numpy as np
 import time
 
 
@@ -141,9 +143,9 @@ def schedule_yolo_conv_x86(s, outputs, inputs, weight, bias):
     gemm_rvlo, gemm_rvli = s[write_cache].split(gemm_rvni, nparts=rv_factor[3])
 
     # s[write_cache].reorder(gemm_g, gemm_go, gemm_rvno, gemm_rvmo, gemm_gi, gemm_rvo, gemm_rvlo, gemm_rvli, gemm_w)
-    s[write_cache].reorder(gemm_g, gemm_go, gemm_rvno, gemm_rvmo, gemm_gi, gemm_rvo, gemm_rvlo, gemm_rvli, gemm_w)
+    s[write_cache].reorder(gemm_g, gemm_go, gemm_rvo, gemm_rvmo, gemm_gi, gemm_w, gemm_rvno, gemm_rvlo, gemm_rvli)
 
-    outer = s[write_cache].fuse(gemm_g, gemm_go, gemm_rvno)
+    outer = s[write_cache].fuse(gemm_g, gemm_go, gemm_rvo)
     s[write_cache].parallel(outer)
     # s[write_cache].compute_at(s[gemm_tensor], s[gemm_tensor].op.axis[1])
 
@@ -185,10 +187,36 @@ def try_yolo_conv(batch_size=2, number=10):
     res = conv2d_torch(inputs)
     times = time.time()
     for _ in range(number):
-        inputs = torch.rand(batch_size, *input_shape)
         res = conv2d_torch(inputs)
     times = time.time() - times
     print("Pytorch on cpu use: {}ms".format(times / number * 1e3))
+
+    # to test the correctness, currently the result is wrong becasue of the schedule
+    # if you change line 148 to 'outer = s[write_cache].fuse(gemm_g, gemm_go)'
+    # the result is correct
+    ctx = tvm.context("llvm", 0)
+    inputs_np = np.random.random(inputs.shape).astype("float32") * 100
+    weight_np = np.random.random(to_tuple(weight.shape)).astype(weight.dtype) * 100
+    outputs_np = np.zeros(shape=to_tuple(outputs.shape), dtype=np.float32) 
+    bias_np = np.random.random(size=to_tuple(bias.shape)).astype(bias.dtype) * 100
+
+    inputs_tvm = tvm.nd.array(inputs_np, ctx)
+    weight_tvm = tvm.nd.array(weight_np, ctx)
+    outputs_tvm = tvm.nd.array(outputs_np, ctx)
+    bias_tvm = tvm.nd.array(bias_np, ctx)
+
+    inputs_torch = torch.tensor(inputs_np)
+    weight_torch = torch.tensor(weight_np)
+    bias_torch = torch.tensor(bias_np)
+
+    func_tvm = tvm.build(s, arg_bufs, "llvm")
+    func_tvm(inputs_tvm, weight_tvm, bias_tvm, outputs_tvm)
+    outputs_torch = torch.nn.functional.conv2d(inputs_torch, weight_torch, bias=bias_torch, padding=padding, stride=stride, dilation=dilation, groups=groups)
+    the_same = test_allclose(outputs_tvm.asnumpy(), outputs_torch.numpy(), rtol=1e-5, print_diff=True)
+    if the_same:
+        print("The same!")
+    else:
+        print("Not the same!")
 
 """
 Result:
@@ -224,4 +252,4 @@ Result:
 """
 
 if __name__ == "__main__":
-    try_yolo_conv(batch_size=64)
+    try_yolo_conv(batch_size=1)

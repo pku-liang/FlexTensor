@@ -84,9 +84,9 @@ def test_conv_transpose1d():
 def test_conv2d_nchw():
     #################################
     # test basic case
-    inputs_np = np.random.random([4, 6, 7, 7]).astype(np.float32) * 100
-    weight_np = np.random.random([9, 2, 3, 3]).astype(np.float32) * 100
-    bias_np = np.random.random([9]).astype(np.float32) * 100
+    inputs_np = np.random.uniform(-1, 1, size=[4, 6, 7, 7]).astype(np.float32) * 1000
+    weight_np = np.random.uniform(-1, 1, size=[9, 2, 3, 3]).astype(np.float32) * 1000
+    bias_np = np.random.uniform(-1, 1, size=[9]).astype(np.float32) * 1000
     
     inputs_torch = torch.tensor(inputs_np)
     weight_torch = torch.tensor(weight_np)
@@ -107,7 +107,7 @@ def test_conv2d_nchw():
     func = tvm.build(s, [inputs_t, weight_t, bias_t, output_t], "llvm")
     func(inputs_tvm, weight_tvm, bias_tvm, output_tvm)
 
-    passed = test_allclose(output_tvm.asnumpy(), output_torch.numpy(), rtol=1e-5, print_diff=True)
+    passed = test_allclose(output_tvm.asnumpy(), output_torch.numpy(), rtol=1e-5 * 1000, print_diff=True)
     if passed == 1:
         print("Conv2d_nchw basic case passed!")
     else:
@@ -251,15 +251,15 @@ def test_conv_transpose3d_ncdhw():
 def test_gemm_conv2d_nchw():
     #################################
     # test basic case
-    inputs_np = np.random.random([4, 6, 7, 7]).astype(np.float32) * 100
-    weight_np = np.random.random([9, 2, 3, 3]).astype(np.float32) * 100
-    bias_np = np.random.random([9]).astype(np.float32) * 100
+    inputs_np = np.random.random([1, 384, 27, 27]).astype(np.float32) * 100
+    weight_np = np.random.random([64, 384, 1, 1]).astype(np.float32) * 100
+    bias_np = np.random.random([64]).astype(np.float32) * 100
     
     inputs_torch = torch.tensor(inputs_np)
     weight_torch = torch.tensor(weight_np)
     bias_torch = torch.tensor(bias_np)
     output_torch = torch.nn.functional.conv2d(
-        inputs_torch, weight_torch, bias_torch, stride=2, padding=1, dilation=2, groups=3)
+        inputs_torch, weight_torch, bias_torch, stride=1, padding=0, dilation=1, groups=1)
 
     tvm_ctx = tvm.context("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
@@ -269,7 +269,7 @@ def test_gemm_conv2d_nchw():
     inputs_t = tvm.placeholder(inputs_np.shape, dtype="float32")
     weight_t = tvm.placeholder(weight_np.shape, dtype="float32")
     bias_t = tvm.placeholder(bias_np.shape, dtype="float32")
-    output_t = gemm_conv2d_nchw(inputs_t, weight_t, bias_t, stride=2, padding=1, dilation=2, groups=3)
+    output_t = gemm_conv2d_nchw(inputs_t, weight_t, bias_t, stride=1, padding=0, dilation=1, groups=1)
     s = tvm.create_schedule(output_t.op)
     func = tvm.build(s, [inputs_t, weight_t, bias_t, output_t], "llvm")
     func(inputs_tvm, weight_tvm, bias_tvm, output_tvm)
@@ -403,7 +403,9 @@ def test_batch_norm():
     inputs_np = np.random.random([100, 200]).astype(np.float32) * 100
     
     inputs_torch = torch.tensor(inputs_np)
-    output_torch = torch.nn.functional.batch_norm(inputs_torch, 1.0, 0.0)
+    running_mean = torch.mean(inputs_torch, dim=0)
+    running_var = inputs_torch.var(dim=0)
+    output_torch = torch.nn.functional.batch_norm(inputs_torch, running_mean, running_var)
 
     tvm_ctx = tvm.context("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
@@ -414,7 +416,7 @@ def test_batch_norm():
     func = tvm.build(s, [inputs_t, output_t], "llvm")
     func(inputs_tvm, output_tvm)
 
-    passed = test_allclose(output_tvm.asnumpy(), output_torch.numpy(), rtol=1e-5, print_diff=True)
+    passed = test_allclose(output_tvm.asnumpy(), output_torch.numpy(), rtol=1e-2, print_diff=True)
     if passed == 1:
         print("Batch_norm basic case passed!")
     else:

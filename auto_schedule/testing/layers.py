@@ -184,7 +184,7 @@ class YoloGemmConvLayer17(GemmConv2dLayer):
     | conv1 |   x   |   1024  |  14 |  14 |     512     |  1  |  1  |    0    |    1   |
     """
     def __init__(self):
-        super(YoloGemmConvLayer17, self).__init__(1024, 512, 14, False, 0, 1, 1, 1)
+        super(YoloGemmConvLayer17, self).__init__(1024, 512, 1, False, 0, 1, 1, 1)
 
     @staticmethod
     def get_intput_shape():
@@ -214,7 +214,7 @@ class SqueezeNetFire8Gemm(GemmConv2dLayer):
     | conv8 |   x   |   384   | 27  | 27  |      64     |  1  |  1  |    0    |    1   |
     """
     def __init__(self):
-        super(SqueezeNetFire8Gemm, self).__init__(384, 64, 27, True, 0, 1, 1, 1)
+        super(SqueezeNetFire8Gemm, self).__init__(384, 64, 1, True, 0, 1, 1, 1)
 
     @staticmethod
     def get_intput_shape():
