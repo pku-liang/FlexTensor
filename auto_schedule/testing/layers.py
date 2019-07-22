@@ -1,6 +1,5 @@
 """
 Base class for layers
-
 ====================================
 **Author**: `Size Zheng`
 """
@@ -12,7 +11,6 @@ from auto_schedule.testing.ops import gemm_conv2d_nchw
 
 class Layer(object):
     """Base class for layers
-
     """
     def __init__(self):
         self.params = {}
@@ -29,7 +27,6 @@ class Layer(object):
 
 class Conv2dLayer(Layer):
     """Convolution 2D Layer
-
     """
     def __init__(self, in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1):
         super(Conv2dLayer, self).__init__()
@@ -63,7 +60,6 @@ class Conv2dLayer(Layer):
 
 class YoloConvLayer1(Conv2dLayer):
     """YOLO convolution Layer 1
-
     configuration:
     | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
     | conv1 |   x   |    3    | 448 | 448 |     64      |  7  |  7  |    3    |    2   |
@@ -78,7 +74,6 @@ class YoloConvLayer1(Conv2dLayer):
 
 class YoloConvLayer17(Conv2dLayer):
     """YOLO convolution Layer 1
-
     configuration:
     | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
     | conv1 |   x   |   1024  |  14 |  14 |     512     |  1  |  1  |    0    |    1   |
@@ -93,7 +88,6 @@ class YoloConvLayer17(Conv2dLayer):
 
 class YoloConvLayer24(Conv2dLayer):
     """YOLO convolution Layer 1
-
     configuration:
     | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
     | conv1 |   x   |  1024   |  7  |  7  |     1024    |  3  |  3  |    1    |    1   |
@@ -108,13 +102,12 @@ class YoloConvLayer24(Conv2dLayer):
 
 class SqueezeNetFire8(Conv2dLayer):
     """SqueezeNet convolution Layer 8
-
     Configuration:
     | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
     | conv8 |   x   |   384   | 27  | 27  |      64     |  1  |  1  |    0    |    1   |
     """
     def __init__(self):
-        super(SqueezeNetFire8, self).__init__(384, 64, 27, True, 0, 1, 1, 1)
+        super(SqueezeNetFire8, self).__init__(384, 64, 1, True, 0, 1, 1, 1)
 
     @staticmethod
     def get_intput_shape():
@@ -125,7 +118,6 @@ class SqueezeNetFire8(Conv2dLayer):
 """
 class GemmConv2dLayer(Layer):
     """Convolution 2D Layer
-
     """
     def __init__(self, in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1):
         super(GemmConv2dLayer, self).__init__()
@@ -163,7 +155,6 @@ class GemmConv2dLayer(Layer):
 
 class YoloGemmConvLayer1(GemmConv2dLayer):
     """YOLO convolution Layer 1
-
     configuration:
     | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
     | conv1 |   x   |    3    | 448 | 448 |     64      |  7  |  7  |    3    |    2   |
@@ -178,7 +169,6 @@ class YoloGemmConvLayer1(GemmConv2dLayer):
 
 class YoloGemmConvLayer17(GemmConv2dLayer):
     """YOLO convolution Layer 1
-
     configuration:
     | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
     | conv1 |   x   |   1024  |  14 |  14 |     512     |  1  |  1  |    0    |    1   |
@@ -193,7 +183,6 @@ class YoloGemmConvLayer17(GemmConv2dLayer):
 
 class YoloGemmConvLayer24(GemmConv2dLayer):
     """YOLO convolution Layer 1
-
     configuration:
     | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
     | conv1 |   x   |  1024   |  7  |  7  |     1024    |  3  |  3  |    1    |    1   |
@@ -208,7 +197,6 @@ class YoloGemmConvLayer24(GemmConv2dLayer):
 
 class SqueezeNetFire8Gemm(GemmConv2dLayer):
     """SqueezeNet convolution Layer 8
-
     Configuration:
     | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
     | conv8 |   x   |   384   | 27  | 27  |      64     |  1  |  1  |    0    |    1   |
