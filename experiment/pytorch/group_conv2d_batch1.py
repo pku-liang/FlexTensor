@@ -7,20 +7,20 @@ from tvm import autotvm
 
 
 def pytorch_func(shape, target='llvm', dev=0):
-    N, C, H, W, K, Hk, Wk, stride, padding, dilation, groups = shape
+    N, C, H, W, K, Hk, _, stride, padding, dilation, groups = shape
     A, B = None, None
 
     def setup_gpu():
         nonlocal A, B
         A = torch.rand([N, C, H, W], dtype=torch.float32).cuda(
             "cuda:" + str(dev))
-        B = torch.rand([K, C//groups, Hk, Wk],
+        B = torch.rand([K, C//groups, Hk, Hk],
                        dtype=torch.float32).cuda("cuda:" + str(dev))
 
     def setup_cpu():
         nonlocal A, B
         A = torch.rand([N, C, H, W], dtype=torch.float32)
-        B = torch.rand([K, C//groups, Hk, Wk],
+        B = torch.rand([K, C//groups, Hk, Hk],
                        dtype=torch.float32)
 
     def stmt():

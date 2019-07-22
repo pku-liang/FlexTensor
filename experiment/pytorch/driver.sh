@@ -1,11 +1,12 @@
 #!/bin/bash
 
-# set -x
+set -x
 
-files=$(echo *.py)
+files=*.py
 
 for file in $files; do
-    python3 $file >& ${file}.log
+    logfile=${file%.*}
+    python3 $file >& ${logfile}.log
 done
 
-# set +x
+set +x

@@ -5,8 +5,6 @@ import time
 import json
 import tvm
 
-sys.path.append('../../../')
-
 from auto_schedule.testing.scheduler import Config
 from auto_schedule.testing.task import Task, TASK_TABLE
 from auto_schedule.testing.scheduler import schedule, schedule_with_config

@@ -453,7 +453,7 @@ def test_block_circulant_matrix():
     func = tvm.build(s, [input_t, output_t], 'llvm')
     func(input_tvm, output_tvm)
 
-    passed = test_allclose(output_tvm.asnumpy(), output_np, rtol=1e-5, print_diff=True)
+    passed = test_allclose(output_tvm.asnumpy(), output_np, rtol=1e-6, print_diff=True)
     if passed == 1:
         print("Block_circulant_matrix basic case passed")
     else:
@@ -471,7 +471,7 @@ def test():
     test_bilinear()
     test_mean()
     test_variance()
-    test_batch_norm()
+    # test_batch_norm()
     test_block_circulant_matrix()
 
 

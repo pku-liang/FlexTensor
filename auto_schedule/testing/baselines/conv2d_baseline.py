@@ -130,17 +130,16 @@ def tvm_generic(N, H, W, C, kernel_size, K, stride=1, padding=0, dilation=1, gro
             tuner_obj = GridSearchTuner(task)
         else:
             raise ValueError("Invalid tuner: " + tuner)
-
         # do tuning
         n_trial = trials
         length = len(task.config_space)
         print("config space length=", length)
-        # tuner_obj.tune(n_trial=min(n_trial, length),
-        #                early_stopping=early_stopping,
-        #                measure_option=measure_option,
-        #                callbacks=[
-        #                    autotvm.callback.progress_bar(n_trial, prefix=prefix),
-        #                    autotvm.callback.log_to_file(log_filename)])
+        tuner_obj.tune(n_trial=min(n_trial, length),
+                       early_stopping=early_stopping,
+                       measure_option=measure_option,
+                       callbacks=[
+                           autotvm.callback.progress_bar(n_trial, prefix=prefix),
+                           autotvm.callback.log_to_file(log_filename)])
     
     if not os.path.exists(log_filename):
         raise RuntimeError("the log file {} doesn't exists".format(log_filename))
@@ -265,7 +264,7 @@ def conv2d_nchw(N, H, W, CO, CI, KH, KW, stride, padding, dilation):
     kernel = tvm.placeholder((CO, CI, KH, KW), name='kernel')
     conv = topi.nn.conv2d_nchw(data, kernel, stride, padding, dilation=dilation, out_dtype='float32')
     s = tvm.create_schedule([conv.op])
-
+    
     cfg = autotvm.get_config()
 
     ##### space definition begin #####
@@ -352,7 +351,7 @@ def tvm_opt_cuda(name, trials=100, timeout=4, tune=True):
 def tvm_opt_llvm(name, trials=100, timeout=4, tune=True):
     def _inner(N, H, W, C, kernel_size, K, stride=1, padding=0, dilation=1, groups=1, number=100, dev=0):
         return run(name, N, H, W, K, C, kernel_size, kernel_size, stride, padding, dilation, 
-            trials=trials, timeout=timeout, number=number, target="llvm", dev=dev, tuen=tune)
+            trials=trials, timeout=timeout, number=number, target="llvm", dev=dev, tune=tune)
     return _inner
 
 

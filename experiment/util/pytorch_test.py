@@ -21,6 +21,28 @@ def pytorch_cpu(setup_func, stmt_func, number=100):
 
 def pytorch_gpu(setup_func, stmt_func, number=100):
 
+    torch.backends.cudnn.enabled = False
+    setup_func()
+    stmt_func()
+    torch.cuda.synchronize()
+    run_time = 0.0
+
+    for _ in range(number):
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+
+        stmt_func()
+
+        end.record()
+        torch.cuda.synchronize()
+        run_time += start.elapsed_time(end)
+
+    return run_time / number
+
+def pytorch_cudnn(setup_func, stmt_func, number=100):
+
+    torch.backends.cudnn.enabled = True
     setup_func()
     stmt_func()
     torch.cuda.synchronize()
@@ -42,11 +64,12 @@ def pytorch_gpu(setup_func, stmt_func, number=100):
 
 func_dict = {
     "llvm": pytorch_cpu,
-    "cuda": pytorch_gpu
+    "gpu": pytorch_gpu,
+    "cudnn": pytorch_cudnn,
 }
 
 def test_pytorch(name, pytorch_func, shapes, dev=0):
-    for target in ("llvm", "cuda"):
+    for target in ("llvm", "gpu", "cudnn"):
         for shape in shapes:
             setup_func, stmt_func = pytorch_func(shape, target, dev)
             cost = func_dict[target](setup_func, stmt_func, number=10)
