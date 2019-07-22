@@ -371,6 +371,7 @@ if __name__ == "__main__":
     parser.add_argument("--timeout", help="timeout of baseline", type=int, default=4)
     parser.add_argument("--trials", type=int, default=100)
     parser.add_argument("--tune", action="store_true")
+    parser.add_argument("--batch", type=int, default=1, help="Specify the batch size of the shape")
 
     args = parser.parse_args()
     shapes = shape_dict[args.shapes]
@@ -408,6 +409,7 @@ if __name__ == "__main__":
         count = i + args.from_ 
         print("layer", count, shape)
         batch, in_channel, height, width, out_channel, _, k_h, k_w, _, stride, padding, dilation, groups = shape
+        batch = args.batch
         cost = baseline(batch, height, width, in_channel, k_h, out_channel, stride=stride, padding=padding, dilation=dilation, groups=groups, number=args.number, dev=args.device)
         print("Use %f(ms)" % cost)
         print()
