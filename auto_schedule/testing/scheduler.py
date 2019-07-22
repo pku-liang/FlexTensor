@@ -323,7 +323,7 @@ class Scheduler(object):
         if use_model:
             self.walker_group.load_or_create_model()
         # warm up
-        warm_up_epoches = self.warm_up_epoch
+        warm_up_epoches = min(self.warm_up_epoch, math.ceil(self.trial / self.warm_up_number))
         warm_up_trials = self.warm_up_number
         self._warm_up(warm_up_epoches, warm_up_trials, configs, type_keys, use_model=use_model)
         
@@ -420,7 +420,10 @@ class Scheduler(object):
                     next_configs = [self.walker_group.to_config(indices) for indices in indices_lst]
                     # use serialized evaluation
                     old_parallel = self.parallel
-                    self.parallel = 1
+                    if self.task.target == "cuda":
+                        self.parallel = 1
+                    else:
+                        self.parallel = min(self.parallel, os.cpu_count())
                     results = self.parallel_evaluate(configs, next_configs, number=self.number)
                     # recover parallel number
                     self.parallel = old_parallel
@@ -697,7 +700,7 @@ class OpScheduler(Scheduler):
 
     @staticmethod
     def generate_op_schedule(target, config):
-        def _cuda_schedule_split_fuse(s, op):
+        def _cuda_schedule_split_fuse(s, op, op_state):
             # assert_print(op in s)
 
             # always cache write here
@@ -836,7 +839,7 @@ class OpScheduler(Scheduler):
                 s[op].pragma(kernel_scope, 'auto_unroll_max_step', step)
                 s[op].pragma(kernel_scope, 'unroll_explicit', explicit)
         
-        def _cuda_schedule_fuse_split(s, op):
+        def _cuda_schedule_fuse_split(s, op, op_state):
             # assert_print(op in s)
 
             # always cache write here
@@ -1072,8 +1075,11 @@ class OpScheduler(Scheduler):
                 s[op].pragma(kernel_scope, 'auto_unroll_max_step', step)
                 s[op].pragma(kernel_scope, 'unroll_explicit', explicit)
         
-        def _cuda_schedule_split_reorder_fuse(s, op):
+        def _cuda_schedule_split_reorder_fuse(s, op, op_state):
             # assert_print(op in s)
+
+            loop_lst = []
+            loop_idx = []
 
             # always cache write here
             if op.num_outputs > 1:
@@ -1134,6 +1140,7 @@ class OpScheduler(Scheduler):
             fused_part_extents = []
             fused_part_idx = []
             if "fuse" in config and len(config["fuse"]) > 0:
+                base_id = 0
                 for part, extents in zip(reorder_parts, reorder_part_extents):
                     tmp_part = []
                     tmp_extents = []
@@ -1158,10 +1165,21 @@ class OpScheduler(Scheduler):
                     fused_parts.append(tmp_part)
                     fused_part_extents.append(tmp_extents)
                     fused_part_idx.append(tmp_idx)
+
+                    loop_lst.extend(tmp_part)
+                    loop_idx.extend([x + base_id for x in tmp_idx])
+                    base_id += len(tmp_part)
             else:
                 fused_parts = reorder_parts
                 fused_part_extents = reorder_part_extents
                 fused_part_idx = [list(range(len(x))) for x in reorder_parts]
+
+                loop_lst = reorder_lst
+                loop_idx = list(range(len(reorder_lst)))
+
+            # record op state
+            op_state.loop_lst = loop_lst
+            op_state.loop_idx = loop_idx
       
             # always bind here
             # - prepare thread axis
@@ -1335,7 +1353,7 @@ class OpScheduler(Scheduler):
                 s[op].pragma(kernel_scope, 'auto_unroll_max_step', step)
                 s[op].pragma(kernel_scope, 'unroll_explicit', explicit)
 
-        def _cpu_schedule_split_fuse(s, op):
+        def _cpu_schedule_split_fuse(s, op, op_state):
             # always cache write here
             if op.num_outputs > 1:
                 raise RuntimeWarning("Too many outputs in one operation!")
@@ -1448,6 +1466,195 @@ class OpScheduler(Scheduler):
             
             # always vectorize here
             # s[write_cache].vectorize(s[write_cache].op.axis[-1])
+        
+        def _cpu_schedule_split_reorder_fuse(s, op, op_state):
+            # assert_print(op in s)
+
+            loop_idx = []
+            loop_lst = []
+
+            # always cache write here
+            if op.num_outputs > 1:
+                raise RuntimeWarning("Too many outputs in one operation!")
+            write_cache = s.cache_write(op.output(0), "local")
+
+            # spatial split
+            spatial_axes = [axis for axis in s[op].op.axis]
+            assert len(spatial_axes) > 0, "empty spatial axes"     # must be non-empty
+            n = spatial_axes[0]
+            kernel_scope, n = s[op].split(n, nparts=1)
+            spatial_axes[0] = n
+
+            splited_spatial_axes = []
+            splited_spatial_extents = []
+            if "spatial" in config and len(config["spatial"]) > 0:
+                # to align each axis
+                assert len(config["spatial"]) == len(spatial_axes), "align failed"
+                for axis, nparts in zip(spatial_axes, config["spatial"]):
+                    tmp_buffer = []
+                    tmp_extents = []
+                    for count in range(len(nparts) - 1):
+                        outer, axis = s[op].split(axis, nparts=nparts[count])
+                        tmp_buffer.append(outer)
+                        tmp_extents.append(nparts[count])
+                    tmp_buffer.append(axis)
+                    tmp_extents.append(nparts[-1])
+                    splited_spatial_axes.append(tmp_buffer)
+                    splited_spatial_extents.append(tmp_extents)
+            else:
+                for axis in spatial_axes:
+                    splited_spatial_axes.append([axis])
+                    splited_spatial_extents.append([axis.dom.extent.value])
+
+            # always reorder here
+            reorder_lst = []
+            reorder_parts = []
+            reorder_part_extents = []
+            for count in range(len(splited_spatial_axes[0])):
+                tmp_buffer = [x[count] for x in splited_spatial_axes]
+                tmp_extents = [x[count] for x in splited_spatial_extents]
+                reorder_lst.extend(tmp_buffer)
+                reorder_parts.append(tmp_buffer)
+                reorder_part_extents.append(tmp_extents)
+            s[op].reorder(*reorder_lst)
+
+            # handle fuse request
+            fused_parts = []
+            fused_part_extents = []
+            fused_part_idx = []
+            if "fuse" in config and len(config["fuse"]) > 0:
+                base_id = 0
+                for part, extents in zip(reorder_parts, reorder_part_extents):
+                    tmp_part = []
+                    tmp_extents = []
+                    tmp_idx = []
+                    idx = 0
+                    beg = 0
+                    for end in config["fuse"][0]:
+                        if end - beg > 1:
+                            fuse_lst = part[beg:end]
+                            fused = s[op].fuse(*fuse_lst)
+                            tmp_part.append(fused)
+                            extent = reduce(lambda x, y: x * y, extents[beg:end], 1)
+                            tmp_idx.extend([idx] * (end - beg))
+                            idx += 1
+                            tmp_extents.append(extent)
+                        elif end - beg == 1:
+                            tmp_part.append(part[beg])
+                            tmp_extents.append(extents[beg])
+                            tmp_idx.append(idx)
+                            idx += 1
+                        beg = end
+                    fused_parts.append(tmp_part)
+                    fused_part_extents.append(tmp_extents)
+                    fused_part_idx.append(tmp_idx)
+
+                    # for op state
+                    loop_lst.extend(tmp_part)
+                    loop_idx.extend([x + base_id for x in tmp_idx])
+                    base_id += len(tmp_part)
+            else:
+                fused_parts = reorder_parts
+                fused_part_extents = reorder_part_extents
+                fused_part_idx = [list(range(len(x))) for x in reorder_parts]
+
+                # for op state
+                loop_lst = reorder_lst
+                loop_idx = list(range(len(reorder_lst)))
+
+            # record op state
+            op_state.loop_lst = loop_lst
+            op_state.loop_idx = loop_idx
+
+            # parallel
+            fused = s[op].fuse(*fused_parts[0])
+            s[op].parallel(fused)
+     
+            # compute at
+            num_parts = len(fused_parts)
+            if num_parts == 1:
+                local_pos = fused
+            elif num_parts == 2:
+                local_pos = fused_parts[num_parts-1][0]
+            else:
+                local_pos = fused_parts[num_parts-2][-1]
+
+            if "local_pos" in config and len(config["local_pos"]) > 0:
+                local_at_part = config["local_pos"][0][0]
+                local_at_idx = config["local_pos"][0][1]
+                # index changed because of fusion
+                cur_idx = fused_part_idx[local_at_part][local_at_idx]
+                local_pos = fused_parts[local_at_part][cur_idx]
+
+            # always compute at here
+            s[write_cache].compute_at(s[op], local_pos)
+
+            # reduce_split
+            reduced_axes = s[write_cache].op.reduce_axis
+            splited_reduced_axes = []
+            if "reduce" in config and len(config["reduce"]) > 0:
+                # to align each axis
+                assert_print(len(config["reduce"]) == len(reduced_axes), "align reduce failed")
+                for axis, nparts in zip(reduced_axes, config["reduce"]):
+                    tmp_buffer = []
+                    for count in range(len(nparts) - 1):
+                        outer, axis = s[write_cache].split(axis, nparts=nparts[count])
+                        tmp_buffer.append(outer)
+                    tmp_buffer.append(axis)
+                    splited_reduced_axes.append(tmp_buffer)
+            else:
+                for axis in reduced_axes:
+                    splited_reduced_axes.append([axis])
+
+            # if has reduce axes
+            if len(splited_reduced_axes) > 0:
+                # always reorder here
+                reduced_nonfuse_lsts = []
+                reorder_lst = []
+                length = len(splited_reduced_axes[0])
+                # leave the last part
+                for count in range(length - 1):
+                    tmp_buffer = [x[count] for x in splited_reduced_axes]
+                    reduced_nonfuse_lsts.append(tmp_buffer)
+                    reorder_lst.extend(tmp_buffer)
+                # the last part
+                last_part = [x[length - 1] for x in splited_reduced_axes]
+                spatial_remainder = s[write_cache].op.axis
+                # change the order of reduce axes and spatial axes
+                if "reorder" in config and len(config["reorder"]) > 0:
+                    pos = config["reorder"][0][0]
+                    assert pos < len(spatial_remainder)
+                    tmp_buffer = []
+                    count = len(spatial_remainder) - 1
+                    while count > pos:
+                        tmp_buffer.append(spatial_remainder[count])
+                        count -= 1
+                    p = pos
+                    q = len(last_part) - 1
+                    while p >= 0 and q >= 0:
+                        tmp_buffer.append(spatial_remainder[p])
+                        tmp_buffer.append(last_part[q])
+                        p -= 1
+                        q -= 1
+                    while p >= 0:
+                        tmp_buffer.append(spatial_remainder[p])
+                        p -= 1
+                    while q >= 0:
+                        tmp_buffer.append(last_part[q])
+                        q -= 1
+                    tmp_buffer = list(reversed(tmp_buffer))
+                    reorder_lst.extend(tmp_buffer)
+                else:
+                    reorder_lst.extend(last_part)
+                    reorder_lst.extend(spatial_remainder)
+                s[write_cache].reorder(*reorder_lst)
+            
+            # unroll
+            if "unroll" in config and len(config["unroll"]) > 0:
+                step = config["unroll"][0][0]
+                explicit = config["unroll"][0][1]
+                s[op].pragma(kernel_scope, 'auto_unroll_max_step', step)
+                s[op].pragma(kernel_scope, 'unroll_explicit', explicit)
 
         if target == "cuda":
             # if hint == "split_fuse":
@@ -1460,7 +1667,7 @@ class OpScheduler(Scheduler):
             #     raise RuntimeError("Unknown hint: %s" % hint)
             return _cuda_schedule_split_reorder_fuse
         elif target == "llvm":
-            return _cpu_schedule_split_fuse
+            return _cpu_schedule_split_reorder_fuse
         else:
             raise RuntimeError("Currently no support for target %s"%target)  
 
@@ -1485,16 +1692,40 @@ class GraphScheduler(Scheduler):
         return self._parallel_evaluate(configs, graph_configs, mode="graph", number=number)
     
     @staticmethod
-    def generate_graph_schedule(config):
-        def _common_schedule(s, op_lst, op_states):
+    def generate_graph_schedule(config, phase="inline"):
+        def _inline_schedule(s, op_lst, op_states):
             if "inline" in config and len(config["inline"]) > 0:
                 entity = config["inline"][0]
                 for count in range(len(op_lst)):
                     if entity[count]:
                         s[op_lst[count]].compute_inline()
                         op_states[count].inline = True
-        
-        return _common_schedule
+
+        def _at_schedule(s, op_lst, op_states):
+            return
+            if "merge" in config and len(config["merge"]) > 0:
+                entity = config["merge"][0]
+                for count in range(len(op_lst)):
+                    if entity[count] >= 0:
+                        num_consumers = len(op_states[count].consumer_lst)
+                        if num_consumers != 1 or op_states[count].inline:
+                            continue
+                        else:
+                            consumer_id = op_states[count].consumer_lst[0]
+                            consumer_state = op_states[consumer_id]
+                            if consumer_state.inline:
+                                continue    # do not compute at inlined ops
+                            consumer_loop_idx = consumer_state.loop_idx
+                            at_pos = consumer_state.loop_lst[consumer_loop_idx[entity[count]]]
+                            s[op_lst[count]].compute_at(s[op_lst[consumer_id]], at_pos)
+                            op_states[count].compute_at = True
+
+        if phase == "inline":
+            return _inline_schedule
+        elif phase == "at":
+            return _at_schedule
+        else:
+            raise RuntimeError("Currently no support for phase %s" %phase)
         
 
 
@@ -1538,6 +1769,10 @@ class Result(object):
 class OpState(object):
     def __init__(self):
         self.inline = False
+        self.loop_lst = []
+        self.loop_idx = []
+        self.compute_at = False
+        self.consumer_lst = []
 
 
 class RpcInfo(object):
@@ -1559,6 +1794,14 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
     ops, bufs = func(*args)
     # sort the ops, so that we can distinguish each op
     op_lst, down_graph = flatten_graph(ops)
+    # state of ops
+    op_states = [OpState() for op in op_lst]
+    for count_op, op in enumerate(op_lst):
+        consumer_lst = []
+        for count_output in range(op.num_outputs):
+            if op.output(count_output) in down_graph:
+                consumer_lst.extend(down_graph[op.output(count_output)])
+        op_states[count_op].consumer_lst = list(set(consumer_lst))
 
     if "trials" in kwargs:
         assert_print(len(kwargs["trials"]) == len(op_lst), str(len(op_lst)))
@@ -1583,8 +1826,9 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
     # first generate graph space
     graph_space = generate_space_inter_op(op_lst, down_graph, force_inline=force_inline)
 
-    tmp = len(graph_space)
-    print("graph space size", tmp)
+    graph_space_size = len(graph_space)
+    print("graph space size", graph_space_size)
+    total_size = graph_space_size
 
     ##################################################
     # intra operations schedule decisionss
@@ -1601,7 +1845,7 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
             space = generate_space_intra_op(op, down_graph, slevel=slevel, rlevel=rlevel)
         else:
             raise RuntimeError("Currently no support for target %s"%task.target)
-        tmp *= len(space)
+        total_size *= len(space)
         print("op", pos, "space size:", len(space))
         op_space_lst.append(space)
         op_scheduler = OpScheduler(
@@ -1622,16 +1866,15 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
         if force_inline and graph_space.subspaces["inline"].able_inline(pos):
             op_config = {}
         else:
-            op_config = None
-            # op_config = op_scheduler.schedule(
-            #     configs, 
-            #     method=method, 
-            #     use_model=use_model, 
-            #     perf_path=perf_path,
-            #     )
+            op_config = op_scheduler.schedule(
+                configs, 
+                method=method, 
+                use_model=use_model, 
+                perf_path=perf_path,
+                )
         configs.op_config_lst.append(op_config)
     
-    print("space size", tmp)
+    print("space size", total_size)
 
     #################################################
     # inter operations schedule decisions 
@@ -1646,8 +1889,7 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
         rpc_info=rpc_info
         )
     use_model = False if graph_perf_model_path is None else True
-    # graph_config = graph_scheduler.schedule(configs, method=method, use_model=use_model, perf_path=graph_perf_model_path)
-    graph_config = None
+    graph_config = graph_scheduler.schedule(configs, method=method, use_model=use_model, perf_path=graph_perf_model_path)
     #################################################
     # combine the configs
     configs = Config(configs.op_config_lst, graph_config)
@@ -1655,15 +1897,18 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
     #################################################
     # final schedule
     s = tvm.create_schedule(ops)
-    op_states = [OpState() for op in op_lst]
     # perform inter operator schedule
-    graph_template = GraphScheduler.generate_graph_schedule(configs.graph_config)
+    graph_template = GraphScheduler.generate_graph_schedule(configs.graph_config, phase="inline")
     graph_template(s, op_lst, op_states)
     # perform intra-operator schedule
-    for op, op_state, op_config in zip(op_lst, op_states, configs.op_config_lst):
+    for count_op, (op, op_state, op_config) in enumerate(zip(op_lst, op_states, configs.op_config_lst)):
         if not op_state.inline:
             op_template = OpScheduler.generate_op_schedule(task.target, op_config)
-            op_template(s, op)
+            op_template(s, op, op_states[count_op])
+    # perform inter operations schedule again for compute at
+    if graph_config is not None:
+        graph_template = GraphScheduler.generate_graph_schedule(graph_config, phase="at")
+        graph_template(s, op_lst, op_states)
 
     return s, bufs, configs
     
@@ -1679,7 +1924,14 @@ def schedule_with_config(task_key, configs, op_pos=None):
     ops, bufs = func(*args)
     # sort the ops, so that we can distinguish each op
     op_lst, down_graph = flatten_graph(ops)
+    # state of ops
     op_states = [OpState() for op in op_lst]
+    for count_op, op in enumerate(op_lst):
+        consumer_lst = []
+        for count_output in range(op.num_outputs):
+            if op.output(count_output) in down_graph:
+                consumer_lst.extend(down_graph[op.output(count_output)])
+        op_states[count_op].consumer_lst = list(set(consumer_lst))
 
     op_config_lst = configs.op_config_lst
 
@@ -1694,10 +1946,10 @@ def schedule_with_config(task_key, configs, op_pos=None):
         s = tvm.create_schedule(ops)
 
     ###################################################
-    # perform inter operations schedule first
+    # perform inter operations schedule first for inline
     graph_config = configs.graph_config
     if graph_config is not None:
-        graph_template = GraphScheduler.generate_graph_schedule(graph_config)
+        graph_template = GraphScheduler.generate_graph_schedule(graph_config, phase="inline")
         graph_template(s, op_lst, op_states)
 
     ###################################################
@@ -1708,7 +1960,13 @@ def schedule_with_config(task_key, configs, op_pos=None):
             op = op_lst[i]
             config = op_config_lst[i]
             template = OpScheduler.generate_op_schedule(task.target, config)
-            template(s, op)   
+            template(s, op, op_states[i])   
+
+    ###################################################
+    # perform inter operations schedule again for compute at
+    if graph_config is not None:
+        graph_template = GraphScheduler.generate_graph_schedule(graph_config, phase="at")
+        graph_template(s, op_lst, op_states)
 
     return s, bufs
 
