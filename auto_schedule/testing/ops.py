@@ -765,7 +765,6 @@ def conv2d_nhwc(inputs, weight, bias=None, stride=1, padding=0, dilation=1, grou
     rc = tvm.reduce_axis((0, channel_per_group))
     rh = tvm.reduce_axis((0, k_h))
     rw = tvm.reduce_axis((0, k_w))
-    print((out_h, out_w))
 
     padded = zero_pad2d(inputs, padding=padding)
     output = tvm.compute(
@@ -1471,16 +1470,16 @@ def PixelCNN(Input, Kernel, mask_type, bias=None, dilation=1, stride=1, padding=
 
     if mask_type == 'A':
         Mask = tvm.compute(Kernel.shape, 
-                           lambda b, o, h, w : tvm.if_then_else(tvm.expr.Or(tvm.expr.And(h == kernelHeight // 2, w >= kernelWidth // 2), h > kernelHeight // 2), Kernel[b, o, h, w], 0.0), 
+                           lambda b, o, h, w : tvm.if_then_else(tvm.expr.Or(tvm.expr.And(h == kernelHeight // 2, w >= kernelWidth // 2), h > kernelHeight // 2), 0.0, Kernel[b, o, h, w]), 
                            name='MaskA')
     else:
         Mask = tvm.compute(Kernel.shape, 
-                           lambda b, o, h, w : tvm.if_then_else(tvm.expr.Or(tvm.expr.And(h == kernelHeight // 2, w > kernelWidth // 2), h > kernelHeight // 2), Kernel[b, o, h, w], 0.0), 
+                           lambda b, o, h, w : tvm.if_then_else(tvm.expr.Or(tvm.expr.And(h == kernelHeight // 2, w > kernelWidth // 2), h > kernelHeight // 2), 0.0, Kernel[b, o, h, w]), 
                            name='MaskB')
     
     Output = conv2d_nhwc(Input, Mask, bias, stride=stride, padding=padding, dilation=dilation)
 
-    return Output
+    return Mask, Output
 
 
 def GatedPixelCNN(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector=None, bias=None, dilation=1, stride=1, padding=0):

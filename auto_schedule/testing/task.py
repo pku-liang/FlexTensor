@@ -159,8 +159,8 @@ def shiftconv2d(N, H, W, C, kernel_size, dialtion=1, stride=1):
 def pixelcnn(N, H, W, C, OutC, kernel_height, kernel_width, mask_type, bias=None, stride=1, padding=0, dilation=1, groups=1):
     Input = tvm.placeholder((N, H, W, C))
     Kernel = tvm.placeholder((OutC, C, kernel_height, kernel_width))
-    Output = op_pixel_cnn(Input, Kernel, mask_type, bias=bias, dilation=dilation, stride=stride, padding=padding)
-    return [Output.op], [Input, Kernel, Output]
+    Mask, Output = op_pixel_cnn(Input, Kernel, mask_type, bias=bias, dilation=dilation, stride=stride, padding=padding)
+    return [Mask.op, Output.op], [Input, Kernel, Mask, Output]
 
 def gatedpixelcnn(N, H, W, C, OutC, kernel_size, ClassVector=None, bias=None, stride=1, padding=0, dilation=1, groups=1):
     Input = tvm.placeholder((N, H, W, C))

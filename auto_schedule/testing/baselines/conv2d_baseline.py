@@ -298,6 +298,7 @@ def run(name, N, H, W, CO, CI, KH, KW, stride, pad, dilation, trials=100, timeou
     # see many error reports. As long as you can see non-zero GFLOPS, it is okay.
     tuner = autotvm.tuner.XGBTuner(task)
     beg = time.time()
+    print("Tune: ", tune)
     if tune:
         tuner.tune(n_trial=trials,
                 measure_option=measure_option,
@@ -354,7 +355,7 @@ def tvm_opt_cuda(name, trials=100, timeout=4, tune=True):
 def tvm_opt_llvm(name, trials=100, timeout=4, tune=True):
     def _inner(N, H, W, C, kernel_size, K, stride=1, padding=0, dilation=1, groups=1, number=100, dev=0):
         return run(name, N, H, W, K, C, kernel_size, kernel_size, stride, padding, dilation, 
-            trials=trials, timeout=timeout, number=number, target="llvm", dev=dev, tuen=tune)
+            trials=trials, timeout=timeout, number=number, target="llvm", dev=dev, tune=tune)
     return _inner
 
 
@@ -380,6 +381,12 @@ if __name__ == "__main__":
     else:
         end = args.to
     shapes = shapes[args.from_:end]
+    print("Changing batch size to ", args.batch)
+    for i in range(len(shapes)):
+        shapes[i] = list(shapes[i])
+        shapes[i][0] = args.batch
+        shapes[i] = tuple(shapes[i])
+
     if args.type == "pytorch":
         if args.target == "cuda":
             baseline = pytorch_cuda
