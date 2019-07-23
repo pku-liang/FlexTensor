@@ -19,6 +19,7 @@ from auto_schedule.testing.configs.grouped_config import grouped_shapes
 from auto_schedule.testing.configs.dilation_config import dilation_shapes
 from auto_schedule.testing.configs.block_circulant_matrix_config import block_circulant_matrix_shapes
 from auto_schedule.testing.configs.PixelCNN_config import PixelCNN_shape
+from auto_schedule.testing.configs.gated_pixelcnn_config import gated_pixelcnn_shape
 
 TASK_TABLE = {}
 
@@ -171,7 +172,7 @@ def gatedpixelcnn(N, H, W, C, OutC, kernel_size, ClassVector=None, bias=None, st
     if ClassVector is not None:
         ClassVector = tvm.placeholder((N, 2 * OutC, 1, 1))
     GateV, Output = op_gated_pixel_cnn(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector, bias=bias, dilation=dilation, stride=stride, padding=padding)
-    return [Output.op], [Input, KernelV, KernelV2H, KernelH, KernelHOut, Output]
+    return [GateV.op, Output.op], [Input, KernelV, KernelV2H, KernelH, KernelHOut, GateV, Output]
 
 
 register_task(Task("conv2d", "1x1-packed", conv2d_1x1_packed, (256, 256, 14, 14, 512, 1), "cuda", 0))
@@ -449,8 +450,7 @@ for shape in PixelCNN_shape:
         register_task(Task("pixelcnn", "pixelcnn", pixelcnn, shape, "llvm", j))
         register_task(Task("pixelcnn", "pixelcnn", pixelcnn, shape, "cuda", j))
 
-"""for shape in GatedPixelCNN_shape:
-    N, H, W, C, K, OutC = shape
+for shape in gated_pixelcnn_shape:
     for j in range(4):
-        register_task(Task("gatedpixelcnn", "gatedpixelcnn", gatedpixelcnn, (N, H, W, C, K, OutC), "llvm", j))
-        register_task(Task("gatedpixelcnn", "gatedpixelcnn", gatedpixelcnn, (N, H, W, C, K, OutC), "cuda", j))"""
+        register_task(Task("gatedpixelcnn", "gatedpixelcnn", gatedpixelcnn, shape, "llvm", j))
+        register_task(Task("gatedpixelcnn", "gatedpixelcnn", gatedpixelcnn, shape, "cuda", j))
