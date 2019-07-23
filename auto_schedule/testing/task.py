@@ -18,6 +18,8 @@ from auto_schedule.testing.configs.depthwise_config import depthwise_shapes
 from auto_schedule.testing.configs.grouped_config import grouped_shapes
 from auto_schedule.testing.configs.dilation_config import dilation_shapes
 from auto_schedule.testing.configs.block_circulant_matrix_config import block_circulant_matrix_shapes
+from auto_schedule.testing.configs.maxunpooling1d_config import maxunpooling1d_shape
+from auto_schedule.testing.configs.maxunpooling2d_config import maxunpooling2d_shape
 from auto_schedule.testing.configs.PixelCNN_config import PixelCNN_shape
 from auto_schedule.testing.configs.gated_pixelcnn_config import gated_pixelcnn_shape
 
@@ -443,6 +445,16 @@ for shape in block_circulant_matrix_shapes:
     for j in range(4):
         for platform in ('llvm', 'cuda'):
             register_task(Task('block_circulant_matrix', 'block_circulant_matrix', block_circulant_matrix, (ROW, COL, FFT), platform, j))
+
+for shape in maxunpooling1d_shape:
+    for j in range(4):
+        register_task(Task("maxunpooling1d", "maxunpooling1d", maxunpooling1d, shape, "llvm", j))
+        register_task(Task("maxunpooling1d", "maxunpooling1d", maxunpooling1d, shape, "cuda", j))
+
+for shape in maxunpooling2d_shape:
+    for j in range(4):
+        register_task(Task("maxunpooling2d", "maxunpooling2d", maxunpooling2d, shape, "llvm", j))
+        register_task(Task("maxunpooling2d", "maxunpooling2d", maxunpooling2d, shape, "cuda", j))
 
 for shape in PixelCNN_shape:
     # batch, H, W, in_C, out_C, KH, KW, mask_type, bias, dilation, stride, padding
