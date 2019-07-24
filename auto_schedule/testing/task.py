@@ -18,7 +18,10 @@ from auto_schedule.testing.configs.depthwise_config import depthwise_shapes
 from auto_schedule.testing.configs.grouped_config import grouped_shapes
 from auto_schedule.testing.configs.dilation_config import dilation_shapes
 from auto_schedule.testing.configs.block_circulant_matrix_config import block_circulant_matrix_shapes
+from auto_schedule.testing.configs.maxunpooling1d_config import maxunpooling1d_shape
+from auto_schedule.testing.configs.maxunpooling2d_config import maxunpooling2d_shape
 from auto_schedule.testing.configs.PixelCNN_config import PixelCNN_shape
+from auto_schedule.testing.configs.gated_pixelcnn_config import gated_pixelcnn_shape
 
 TASK_TABLE = {}
 
@@ -159,8 +162,8 @@ def shiftconv2d(N, H, W, C, kernel_size, dialtion=1, stride=1):
 def pixelcnn(N, H, W, C, OutC, kernel_height, kernel_width, mask_type, bias=None, stride=1, padding=0, dilation=1, groups=1):
     Input = tvm.placeholder((N, H, W, C))
     Kernel = tvm.placeholder((OutC, C, kernel_height, kernel_width))
-    Output = op_pixel_cnn(Input, Kernel, mask_type, bias=bias, dilation=dilation, stride=stride, padding=padding)
-    return [Output.op], [Input, Kernel, Output]
+    Mask, Output = op_pixel_cnn(Input, Kernel, mask_type, bias=bias, dilation=dilation, stride=stride, padding=padding)
+    return [Mask.op, Output.op], [Input, Kernel, Mask, Output]
 
 def gatedpixelcnn(N, H, W, C, OutC, kernel_size, ClassVector=None, bias=None, stride=1, padding=0, dilation=1, groups=1):
     Input = tvm.placeholder((N, H, W, C))
@@ -171,7 +174,7 @@ def gatedpixelcnn(N, H, W, C, OutC, kernel_size, ClassVector=None, bias=None, st
     if ClassVector is not None:
         ClassVector = tvm.placeholder((N, 2 * OutC, 1, 1))
     GateV, Output = op_gated_pixel_cnn(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector, bias=bias, dilation=dilation, stride=stride, padding=padding)
-    return [Output.op], [Input, KernelV, KernelV2H, KernelH, KernelHOut, Output]
+    return [GateV.op, Output.op], [Input, KernelV, KernelV2H, KernelH, KernelHOut, GateV, Output]
 
 
 register_task(Task("conv2d", "1x1-packed", conv2d_1x1_packed, (256, 256, 14, 14, 512, 1), "cuda", 0))
@@ -443,14 +446,23 @@ for shape in block_circulant_matrix_shapes:
         for platform in ('llvm', 'cuda'):
             register_task(Task('block_circulant_matrix', 'block_circulant_matrix', block_circulant_matrix, (ROW, COL, FFT), platform, j))
 
+for shape in maxunpooling1d_shape:
+    for j in range(4):
+        register_task(Task("maxunpooling1d", "maxunpooling1d", maxunpooling1d, shape, "llvm", j))
+        register_task(Task("maxunpooling1d", "maxunpooling1d", maxunpooling1d, shape, "cuda", j))
+
+for shape in maxunpooling2d_shape:
+    for j in range(4):
+        register_task(Task("maxunpooling2d", "maxunpooling2d", maxunpooling2d, shape, "llvm", j))
+        register_task(Task("maxunpooling2d", "maxunpooling2d", maxunpooling2d, shape, "cuda", j))
+
 for shape in PixelCNN_shape:
     # batch, H, W, in_C, out_C, KH, KW, mask_type, bias, dilation, stride, padding
     for j in range(4):
         register_task(Task("pixelcnn", "pixelcnn", pixelcnn, shape, "llvm", j))
         register_task(Task("pixelcnn", "pixelcnn", pixelcnn, shape, "cuda", j))
 
-"""for shape in GatedPixelCNN_shape:
-    N, H, W, C, K, OutC = shape
+for shape in gated_pixelcnn_shape:
     for j in range(4):
-        register_task(Task("gatedpixelcnn", "gatedpixelcnn", gatedpixelcnn, (N, H, W, C, K, OutC), "llvm", j))
-        register_task(Task("gatedpixelcnn", "gatedpixelcnn", gatedpixelcnn, (N, H, W, C, K, OutC), "cuda", j))"""
+        register_task(Task("gatedpixelcnn", "gatedpixelcnn", gatedpixelcnn, shape, "llvm", j))
+        register_task(Task("gatedpixelcnn", "gatedpixelcnn", gatedpixelcnn, shape, "cuda", j))

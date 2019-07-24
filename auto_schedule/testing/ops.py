@@ -759,13 +759,11 @@ def conv2d_nhwc(inputs, weight, bias=None, stride=1, padding=0, dilation=1, grou
     assert_print(isinstance(stride, tuple) and len(stride) == 2)
     assert_print(isinstance(padding, tuple) and len(padding) == 2)
     assert_print(isinstance(dilation, tuple) and len(dilation) == 2)
-
     out_h = (in_h + 2 * padding[0] - dilation[0] * (k_h - 1) - 1) // stride[0] + 1
     out_w = (in_w + 2 * padding[1] - dilation[1] * (k_w - 1) - 1) // stride[1] + 1
     rc = tvm.reduce_axis((0, channel_per_group))
     rh = tvm.reduce_axis((0, k_h))
     rw = tvm.reduce_axis((0, k_w))
-    print((out_h, out_w))
 
     padded = zero_pad2d(inputs, padding=padding)
     output = tvm.compute(
@@ -1471,16 +1469,16 @@ def PixelCNN(Input, Kernel, mask_type, bias=None, dilation=1, stride=1, padding=
 
     if mask_type == 'A':
         Mask = tvm.compute(Kernel.shape, 
-                           lambda b, o, h, w : tvm.if_then_else(tvm.expr.Or(tvm.expr.And(h == kernelHeight // 2, w >= kernelWidth // 2), h > kernelHeight // 2), Kernel[b, o, h, w], 0.0), 
+                           lambda b, o, h, w : tvm.if_then_else(tvm.expr.Or(tvm.expr.And(h == kernelHeight // 2, w >= kernelWidth // 2), h > kernelHeight // 2), 0.0, Kernel[b, o, h, w]), 
                            name='MaskA')
     else:
         Mask = tvm.compute(Kernel.shape, 
-                           lambda b, o, h, w : tvm.if_then_else(tvm.expr.Or(tvm.expr.And(h == kernelHeight // 2, w > kernelWidth // 2), h > kernelHeight // 2), Kernel[b, o, h, w], 0.0), 
+                           lambda b, o, h, w : tvm.if_then_else(tvm.expr.Or(tvm.expr.And(h == kernelHeight // 2, w > kernelWidth // 2), h > kernelHeight // 2), 0.0, Kernel[b, o, h, w]), 
                            name='MaskB')
     
     Output = conv2d_nhwc(Input, Mask, bias, stride=stride, padding=padding, dilation=dilation)
 
-    return Output
+    return Mask, Output
 
 
 def GatedPixelCNN(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector=None, bias=None, dilation=1, stride=1, padding=0):
@@ -1516,16 +1514,15 @@ def GatedPixelCNN(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector=No
     Output: tvm.tensor.Tensor
         4-D with shape [batch_size, out_height, out_width, out_channels]
     """
-
     batch, inputHeight, inputWidth, in_channels = Input.shape
     out_channels, in_channels, kernelHeight, kernelWidth = KernelV.shape
     out_channels /= 2
 
     assert kernelHeight.value == kernelWidth.value
 
-    ConvV = PixelCNN(Input, KernelV, mask_type='B', bias=bias, dilation=dilation, stride=stride, padding=padding)
-    Vertical2HorizonTal = conv2d_nhwc(ConvV, KernelV2H, bias=bias, stride=1, padding=0, dilation=1)
-    ConvH = PixelCNN(Input, KernelH, mask_type='B', bias=bias, dilation=dilation, stride=stride, padding=(0, padding))
+    ConvV = PixelCNN(Input, KernelV, mask_type='B', bias=bias, dilation=(dilation, dilation), stride=(stride, stride), padding=(padding, padding))[-1]
+    Vertical2HorizonTal = conv2d_nhwc(ConvV, KernelV2H, bias=bias, stride=(1, 1), padding=(0, 0), dilation=(1, 1))
+    ConvH = PixelCNN(Input, KernelH, mask_type='B', bias=bias, dilation=(dilation, dilation), stride=(stride, stride), padding=(0, padding))[-1]
     CombineFeature = tvm.compute(ConvH.shape, 
                                  lambda b, h, w, c : ConvH[b, h, w, c] + Vertical2HorizonTal[b, h, w, c], 
                                  name='CombineFeature')
@@ -1545,7 +1542,6 @@ def GatedPixelCNN(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector=No
                          lambda b, h, w, c : ActivationV[b, h, w, c] * ActivationV[b, h, w, c + out_channels], 
                          name='GateV')
     
-
     ActivationH = tvm.compute(CombineFeature.shape, 
                               lambda b, h, w, o : tvm.if_then_else(o < out_channels, 
                                                                    tvm.tanh(CombineFeature[b, h, w, o]), 
@@ -1554,7 +1550,7 @@ def GatedPixelCNN(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector=No
     GateH = tvm.compute((batch, ActivationH.shape[1], ActivationH.shape[2], out_channels), 
                          lambda b, h, w, c : ActivationH[b, h, w, c] * ActivationH[b, h, w, c + out_channels], 
                          name='GateH')
-    ConvGateH = conv2d_nhwc(GateH, KernelHOut, bias=bias, stride=stride, padding=padding, dilation=dilation)
+    ConvGateH = conv2d_nhwc(GateH, KernelHOut, bias=bias, dilation=(dilation, dilation), stride=(stride, stride), padding=(padding, padding))
     Output = tvm.compute(ConvGateH.shape, 
                          lambda b, h, w, o : ConvGateH[b, h, w, o] + Input[b, h, w, o], 
                          name='Output')
