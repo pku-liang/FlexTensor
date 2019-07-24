@@ -9,7 +9,7 @@ if __name__ == '__main__':
     name = "group_conv2d_batch1"
 
     def trans(shape):
-        N, C, H, W, K, _, Hk, _, _, stride, padding, dilation, groups = shape
+        N, C, H, W, K, Hk, _, stride, padding, dilation, groups = shape
         return (N, C, H, W, K, Hk, stride, padding, dilation, groups)
 
     main(name, conv2d_schedule_dispatcher, map(trans, shapes), conv2d_evaluate)
