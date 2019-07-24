@@ -5,14 +5,13 @@ import numpy as np
 import torch
 from torch.autograd import Variable
 import math
-from auto_schedule.config import UNSURE
 
 
 def to_int(expr):
     try:
         res = int(expr)
-    except Exception:
-        res = UNSURE
+    except Exception as e:
+        raise RuntimeError("fail to convert to int: %s" % str(e))
     return res
 
 
@@ -269,6 +268,7 @@ def test_allclose(value, target, rtol=1e-5, print_diff=False):
         passed = 0
         if print_diff:
             print(target - value)
+            print("Max diff:", np.max(np.fabs(target - value)))
     return passed
 
 

@@ -2,9 +2,9 @@ import time
 import tvm 
 import torch
 import numpy as np
-from auto_schedule.testing.conv_config import all_conv_shapes
+from auto_schedule.configs.conv2d_config import all_conv_shapes
 from auto_schedule.utils import to_tuple
-from auto_schedule.testing.ops import conv2d_nchw
+from auto_schedule.nn import conv2d_nchw
 
 
 def evaluate(s, bufs, target, dev_id, number=10):
