@@ -37,10 +37,11 @@ yolo_shapes_b1 = [
 
 
 yolo_shapes_b8 = [copy_change_batch(8, x) for x in yolo_shapes_b1]
+yolo_shapes_b16 = [copy_change_batch(16, x) for x in yolo_shapes_b1]
 yolo_shapes_b64 = [copy_change_batch(64, x) for x in yolo_shapes_b1]
 
 
-yolo_shapes = yolo_shapes_b8
+yolo_shapes = yolo_shapes_b16
 
 
 mobilev2_shapes_b1 = [
