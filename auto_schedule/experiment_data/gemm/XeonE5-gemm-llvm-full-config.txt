@@ -1,6 +1,0 @@
-gemm_gemm_(32, 32, 32)_llvm(3):[[{"spatial": [[1, 1, 32, 1], [1, 2, 1, 16]], "reduce": [[2, 8, 2]], "inline": [], "unroll": [[0, 1]]}], {"spatial": [], "reduce": [], "inline": [[0]], "unroll": []}]
-gemm_gemm_(64, 64, 64)_llvm(3):[[{"spatial": [[8, 8, 1, 1], [2, 2, 1, 16]], "reduce": [[16, 2, 2]], "inline": [], "unroll": [[1, 0]]}], {"spatial": [], "reduce": [], "inline": [[0]], "unroll": []}]
-gemm_gemm_(128, 128, 128)_llvm(3):[[{"spatial": [[32, 2, 2, 1], [4, 2, 1, 16]], "reduce": [[64, 2, 1]], "inline": [], "unroll": [[0, 1]]}], {"spatial": [], "reduce": [], "inline": [[0]], "unroll": []}]
-gemm_gemm_(256, 256, 256)_llvm(3):[[{"spatial": [[16, 2, 1, 8], [8, 2, 2, 8]], "reduce": [[16, 2, 8]], "inline": [], "unroll": [[1, 1]]}], {"spatial": [], "reduce": [], "inline": [[0]], "unroll": []}]
-gemm_gemm_(512, 512, 512)_llvm(3):[[{"spatial": [[16, 1, 1, 32], [4, 4, 1, 32]], "reduce": [[32, 2, 8]], "inline": [], "unroll": [[1, 1]]}], {"spatial": [], "reduce": [], "inline": [[0]], "unroll": []}]
-gemm_gemm_(1024, 1024, 1024)_llvm(3):[[{"spatial": [[8, 1, 2, 64], [8, 4, 1, 32]], "reduce": [[8, 4, 32]], "inline": [], "unroll": [[512, 0]]}], {"spatial": [], "reduce": [], "inline": [[0]], "unroll": []}]

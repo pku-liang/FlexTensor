@@ -1,6 +1,0 @@
-gemv_gemv_(128, 128)_cuda(0):[[{"reduce": [[1, 1, 128]], "inline": [], "unroll": [[512, 0]], "spatial": [[16, 1, 8, 1]]}], {"reduce": [], "inline": [[0]], "unroll": [], "spatial": []}]
-gemv_gemv_(256, 256)_cuda(0):[[{"reduce": [[4, 1, 64]], "inline": [], "unroll": [[512, 0]], "spatial": [[16, 1, 16, 1]]}], {"reduce": [], "inline": [[0]], "unroll": [], "spatial": []}]
-gemv_gemv_(512, 512)_cuda(0):[[{"reduce": [[2, 4, 64]], "inline": [], "unroll": [[1500, 0]], "spatial": [[128, 1, 4, 1]]}], {"reduce": [], "inline": [[0]], "unroll": [], "spatial": []}]
-gemv_gemv_(1024, 1024)_cuda(0):[[{"reduce": [[4, 2, 128]], "inline": [], "unroll": [[0, 1]], "spatial": [[128, 1, 8, 1]]}], {"reduce": [], "inline": [[0]], "unroll": [], "spatial": []}]
-gemv_gemv_(2048, 2048)_cuda(0):[[{"reduce": [[1, 128, 16]], "inline": [], "unroll": [[512, 1]], "spatial": [[256, 1, 8, 1]]}], {"reduce": [], "inline": [[0]], "unroll": [], "spatial": []}]
-gemv_gemv_(4096, 4096)_cuda(0):[[{"reduce": [[1, 256, 16]], "inline": [], "unroll": [[1500, 1]], "spatial": [[256, 1, 16, 1]]}], {"reduce": [], "inline": [[0]], "unroll": [], "spatial": []}]

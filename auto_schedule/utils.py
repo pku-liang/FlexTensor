@@ -5,14 +5,13 @@ import numpy as np
 import torch
 from torch.autograd import Variable
 import math
-from auto_schedule.config import UNSURE
 
 
 def to_int(expr):
     try:
         res = int(expr)
-    except Exception:
-        res = UNSURE
+    except Exception as e:
+        raise RuntimeError("fail to convert to int: %s" % str(e))
     return res
 
 

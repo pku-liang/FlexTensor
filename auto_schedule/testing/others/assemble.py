@@ -1,3 +1,6 @@
+'''
+This is used to assemble results from experiments
+'''
 import os
 
 

@@ -1,7 +1,0 @@
-gemm_gemm_(32, 32, 32)_cuda(0):[[{"spatial": [[4, 2, 4, 1], [2, 1, 16, 1]], "reduce": [[1, 1, 32]], "unroll": [[1500, 1]], "inline": []}], {"spatial": [], "reduce": [], "unroll": [], "inline": [[0]]}]
-gemm_gemm_(64, 64, 64)_cuda(0):[[{"spatial": [[4, 1, 16, 1], [4, 1, 16, 1]], "reduce": [[2, 1, 32]], "unroll": [[1, 0]], "inline": []}], {"spatial": [], "reduce": [], "unroll": [], "inline": [[0]]}]
-gemm_gemm_(128, 128, 128)_cuda(0):[[{"spatial": [[8, 1, 8, 2], [4, 1, 32, 1]], "reduce": [[4, 1, 32]], "unroll": [[512, 0]], "inline": []}], {"spatial": [], "reduce": [], "unroll": [], "inline": [[0]]}]
-gemm_gemm_(256, 256, 256)_cuda(0):[[{"spatial": [[8, 1, 8, 4], [8, 1, 16, 2]], "reduce": [[8, 1, 32]], "unroll": [[512, 1]], "inline": []}], {"spatial": [], "reduce": [], "unroll": [], "inline": [[0]]}]
-gemm_gemm_(512, 512, 512)_cuda(0):[[{"spatial": [[16, 4, 4, 2], [8, 2, 32, 1]], "reduce": [[32, 2, 8]], "unroll": [[1500, 1]], "inline": []}], {"spatial": [], "reduce": [], "unroll": [], "inline": [[0]]}]
-gemm_gemm_(1024, 1024, 1024)_cuda(0):[[{"spatial": [[8, 4, 16, 2], [16, 4, 8, 2]], "reduce": [[4, 64, 4]], "unroll": [[0, 1]], "inline": []}], {"spatial": [], "reduce": [], "unroll": [], "inline": [[0]]}]
-gemm_gemm_(2048, 2048, 2048)_cuda(0):[[{"spatial": [[32, 4, 16, 1], [16, 4, 8, 4]], "reduce": [[8, 64, 4]], "unroll": [[0, 0]], "inline": []}], {"spatial": [], "reduce": [], "unroll": [], "inline": [[0]]}]

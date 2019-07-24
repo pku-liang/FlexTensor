@@ -12,7 +12,7 @@ import sys
 import numpy as np
 
 import tvm
-from auto_schedule.testing.ops import conv2d_nchw
+from auto_schedule.nn import conv2d_nchw
 
 from tvm import autotvm
 
