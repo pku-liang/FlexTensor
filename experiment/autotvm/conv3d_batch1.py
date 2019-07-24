@@ -1,7 +1,6 @@
 from experiment.util.autotvm_schedule import conv3d_schedule_dispatcher, conv3d_evaluate
 from experiment.util.autotvm_test import main
 from experiment.shape import conv3d_batch1_shapes as shapes
-from auto_schedule.testing.task import conv2d
 import tvm
 from tvm import autotvm
 import topi
