@@ -2,7 +2,7 @@ import tvm
 from tvm import autotvm
 import topi
 import topi.testing as testing
-import auto_schedule.testing.task as task
+import auto_schedule.task as task
 import numpy as np
 
 
