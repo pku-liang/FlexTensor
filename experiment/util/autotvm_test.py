@@ -62,7 +62,7 @@ def main(name, schedule_dispatcher, shapes, eval_func):
             print("Optimize use {} s".format(end - beg))
 
         dispatch_context = autotvm.apply_history_best(logfile)
-        best_config = dispatch_context.query(task.target, task.workload)
+        best_config = dispatch_context.query(task.target, task.workload)    
         print("Best config: {}".format(best_config))
 
         with tvm.target.create(target):

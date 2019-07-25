@@ -1,5 +1,4 @@
 from experiment.util.pytorch_test import test_pytorch
-from experiment.util.autotvm_test import run
 from experiment.shape import conv2d_yolo_batch128_shapes as shapes
 import torch
 import tvm
