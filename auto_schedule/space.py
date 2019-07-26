@@ -212,14 +212,15 @@ class ReorderSpace(SubSpace):
 
 
 class UnrollSpace(SubSpace):
-    def __init__(self, steps):
+    def __init__(self, steps, explicit=False):
         super(UnrollSpace, self).__init__()
         self.dim = 2
         self.static_entities = []
         self.steps = steps
+        explicits = [1] if explicit else [0, 1]
         for step in steps:
-            for explicit in [0, 1]:
-                self.static_entities.append([step, explicit])
+            for _explicit in explicits:
+                self.static_entities.append([step, _explicit])
         self.size = len(self.static_entities)
         self.num_direction = 2
         self.directions = [(-1,), (1,)]
@@ -368,11 +369,12 @@ def generate_reorder_space(num_spatial_axis):
     return ReorderSpace(num_spatial_axis)
 
 
-def generate_unroll_space():
-    return UnrollSpace([0, 1, 512, 1500])
+def generate_unroll_space(explicit=False):
+    return UnrollSpace([0, 1, 512, 1500], explicit=explicit)
 
 
-def generate_space_intra_op(op, down_graph, slevel=4, rlevel=3, groups=3, split_policy="off"):
+def generate_space_intra_op(op, down_graph, slevel=4, rlevel=3, groups=3, split_policy="off", 
+                            unroll_policy="off", fuse_policy="fuse_spatial", reorder_policy="last"):
     spatial_axis_names = [x.var.name for x in op.axis]
     spatial_axis_extents = [x.dom.extent.value for x in op.axis]
     reduced_axis_names = [x.var.name for x in op.reduce_axis]
@@ -383,8 +385,9 @@ def generate_space_intra_op(op, down_graph, slevel=4, rlevel=3, groups=3, split_
     schedule_space = Space()
 
     # - fuse space
-    fuse_space = generate_fuse_space(spatial_axis_names, groups)
-    schedule_space.add_subspace("fuse_spatial", fuse_space, "fuse")
+    if fuse_policy == "fuse_spatial":
+        fuse_space = generate_fuse_space(spatial_axis_names, groups)
+        schedule_space.add_subspace("fuse_spatial", fuse_space, "fuse")
 
     # - split space
     for i, (name, extent) in enumerate(zip(spatial_axis_names, spatial_axis_extents)):
@@ -395,11 +398,12 @@ def generate_space_intra_op(op, down_graph, slevel=4, rlevel=3, groups=3, split_
         schedule_space.add_subspace("split_{}_{}".format(name, i), split_space, "reduce")
 
     # - reorder space
-    reorder_space = generate_reorder_space(groups)
-    schedule_space.add_subspace("reorder", reorder_space, "reorder")
+    if reorder_policy == "last":
+        reorder_space = generate_reorder_space(groups)
+        schedule_space.add_subspace("reorder", reorder_space, "reorder")
 
     # -unroll space
-    unroll_space = generate_unroll_space()
+    unroll_space = generate_unroll_space(explicit=(unroll_policy == "explicit"))
     schedule_space.add_subspace("unroll", unroll_space, "unroll")
     # - other spaces can be added
 
@@ -415,8 +419,8 @@ def generate_space_inter_op(op_lst, down_graph, force_inline=False, force_merge=
     inline_space = generate_inline_space(op_lst, down_graph, force_inline=force_inline)
     schedule_space.add_subspace("inline", inline_space, "inline")
     # - merge space
-    merge_space = generate_merge_space(op_lst, down_graph, force_merge=force_merge)
-    schedule_space.add_subspace("merge", merge_space, "merge")
+    # merge_space = generate_merge_space(op_lst, down_graph, force_merge=force_merge)
+    # schedule_space.add_subspace("merge", merge_space, "merge")
     # - other spaces can be added
 
     return schedule_space
