@@ -1667,7 +1667,7 @@ class OpScheduler(Scheduler):
             #     raise RuntimeError("Unknown hint: %s" % hint)
             return _cuda_schedule_split_reorder_fuse
         elif target == "llvm":
-            return _cpu_schedule_split_reorder_fuse
+            return _cpu_schedule_split_fuse
         else:
             raise RuntimeError("Currently no support for target %s"%target)  
 
@@ -1842,7 +1842,9 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
         if task.target == "cuda":
             space = generate_space_intra_op(op, down_graph, slevel=slevel, groups=3)
         elif task.target == "llvm":
-            space = generate_space_intra_op(op, down_graph, slevel=slevel, rlevel=rlevel)
+            space = generate_space_intra_op(op, down_graph, slevel=slevel, rlevel=rlevel, 
+                                            unroll_policy="explicit", fuse_policy="off"
+                                            reorder_policy="off")
         else:
             raise RuntimeError("Currently no support for target %s"%task.target)
         total_size *= len(space)
