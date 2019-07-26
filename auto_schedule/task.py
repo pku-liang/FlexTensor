@@ -70,10 +70,10 @@ def depthwise_conv2d(N, C, H, W, K, kernel_size, stride=1, padding=0, dilation=1
     return [Ouput.op], [Img, W, Ouput]
 
 
-def conv_transpose2d(N, C, H, W, K, kernel_size, stride=1, padding=0, dilation=1, groups=1):
+def conv_transpose2d(N, C, H, W, K, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1):
     Inputs = tvm.placeholder((N, C, H, W))
     W = tvm.placeholder((C, K//groups, kernel_size, kernel_size))
-    Output = conv_transpose2d_nchw(Inputs, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
+    Output = conv_transpose2d_nchw(Inputs, W, stride=stride, padding=padding, output_padding=output_padding, dilation=dilation, groups=groups)
     return [Output.op], [Inputs, W, Output]
 
 
