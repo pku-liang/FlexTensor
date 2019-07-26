@@ -392,7 +392,7 @@ for shape in dilation_shapes:
                 j
             ))
 
-for shape in conv3d_shapes:
+for shape in conv3d_shapes[0:8]:
     batch, in_channel, D, H, W, out_channel, _, k, _, stride, padding, dilation, groups = shape
     rin_channel = out_channel
     rout_channel = in_channel
