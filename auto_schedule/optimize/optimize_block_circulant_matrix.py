@@ -102,9 +102,13 @@ if __name__ == "__main__":
                         type=str, default="searching")
     parser.add_argument("--slevel", type=int, default=4)
     parser.add_argument("--rlevel", type=int, default=3)
+    parser.add_argument("--length", action="store_true")
     args = parser.parse_args()
 
     shapes = block_circulant_matrix_shapes
+    if args.length:
+        print(len(shapes))
+        exit(0)
     if args.to < 0:
         end = len(shapes)
     else:

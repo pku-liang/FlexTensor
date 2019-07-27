@@ -155,8 +155,13 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--target_host", type=str, default="llvm")
     parser.add_argument("--port", type=int, default=9090)
+    parser.add_argument("--length", action="store_true")
     args = parser.parse_args()
     shapes = gemm_shapes
+    if args.length:
+        print(len(shapes))
+        exit(0)
+
     rpc_info = RpcInfo(args.host, args.port, args.target_host)
     if args.to < 0:
         end = len(shapes)

@@ -10,11 +10,10 @@ run() {
 
     logfile=${file%.*}_${target}
     python3 ${file} --target ${target} --device ${device} --timeout ${timeout} --parallel ${parallel} -f ${from} -t ${to} --log ${logfile}_schedule.log >& ${logfile}_${from}.log
-    echo $?
 }
 
 todo_files=(
-optimize_bilinear.py
+# optimize_bilinear.py
 optimize_block_circulant_matrix.py
 # optimize_conv1d.py
 # optimize_conv2d_1x1_packed.py
@@ -39,12 +38,12 @@ optimize_unpooling2d.py
 
 
 set -x
-
+device=${1:-0}
 for file in ${todo_files}; do
-    idx=0
-    while ((`run $file $idx cuda 1` == 0)); do 
-        idx=$((idx+1))
-    done    
+    read cnt <<<$(python3 $file --length)
+    for ((i = 0; i < cnt; ++i)); do
+        run $file $i cuda $device
+    done
 done
 
 set +x

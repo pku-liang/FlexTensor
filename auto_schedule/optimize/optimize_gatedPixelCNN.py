@@ -164,9 +164,14 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=9090)
     parser.add_argument("--force_inline", action="store_true")
     # parser.add_argument("--op_hint", type=str, default="split_fuse")
+    parser.add_argument("--length", action="store_true")
     args = parser.parse_args()
     rpc_info = RpcInfo(args.host, args.port, target_host=args.target_host)
     shapes = gated_pixelcnn_shape
+    if args.length:
+        print(len(shapes))
+        exit(0)
+
     if args.to < 0:
         end = len(shapes)
     else:
