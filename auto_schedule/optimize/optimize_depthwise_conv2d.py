@@ -86,7 +86,7 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
             "conv2d",
             "depthwise", 
             None, 
-           (batch, in_channel, H, W, out_channel, k, stride, padding, dilation, in_channel),
+           (batch, in_channel, H, W, out_channel, k, stride, padding, dilation),
             target, 
             dev_id
             )
