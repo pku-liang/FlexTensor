@@ -1843,7 +1843,7 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
             space = generate_space_intra_op(op, down_graph, slevel=slevel, groups=3)
         elif task.target == "llvm":
             space = generate_space_intra_op(op, down_graph, slevel=slevel, rlevel=rlevel, 
-                                            unroll_policy="explicit", fuse_policy="off"
+                                            unroll_policy="explicit", fuse_policy="off",
                                             reorder_policy="off")
         else:
             raise RuntimeError("Currently no support for target %s"%task.target)

@@ -162,7 +162,7 @@ def try_yolo_conv(batch_size, config):
     arg_bufs = [inputs, weight, outputs]
     stmt = tvm.lower(s, arg_bufs, simple_mode=True)
     # print(stmt)
-    dev_id = 3
+    dev_id = 0
     ctx = tvm.nd.context("cuda", dev_id)
     max_dims = ctx.max_thread_dimensions
     kwargs = {
@@ -187,13 +187,15 @@ def try_yolo_conv(batch_size, config):
 if __name__ == "__main__":
     import random
     config = Config()
-    k_split_lst = list(filter(lambda x: x[1] == 4 and x[3] == 2, any_factor_split(512, 4)))
-    print(k_split_lst)
-    print(len(k_split_lst))
+    # k_split_lst = list(filter(lambda x: x[1] == 4 and x[3] == 2, any_factor_split(512, 4)))
+    # print(k_split_lst)
+    # print(len(k_split_lst))
+    rc_split_lst = list(filter(lambda x: x[1] == 1, any_factor_split(1024, 3)))
     flop = 14 * 14 * 512 * (1024 + 1023)
     record = []
-    for ele in k_split_lst:
-        config.k_factors = ele
+    for ele in rc_split_lst:
+        # config.k_factors = ele
+        config.rc_factors = ele
         time_cost = try_yolo_conv(1, config)
         # time_cost = random.random()
         # if random.random() > 0.5:

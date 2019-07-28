@@ -134,13 +134,15 @@ def try_yolo_conv(batch_size, config):
 if __name__ == "__main__":
     import random
     config = Config()
-    k_split_lst = list(filter(lambda x: x[1] == 4 and x[3] == 2, any_factor_split(512, 4)))
-    print(k_split_lst)
-    print(len(k_split_lst))
+    # k_split_lst = list(filter(lambda x: x[1] == 4 and x[3] == 2, any_factor_split(512, 4)))
+    # print(k_split_lst)
+    # print(len(k_split_lst))
+    rc_split_lst = list(filter(lambda x: x[1] == 1, any_factor_split(1024, 3)))
     flop = 14 * 14 * 512 * (1024 + 1023)
     record = []
-    for ele in k_split_lst:
-        config.k_factors = ele
+    for ele in rc_split_lst:
+        # config.k_factors = ele
+        config.rc_factors = ele
         time_cost = try_yolo_conv(1, config)
         record.append((ele, flop / (time_cost / 1e3) / 1e9))
     for ele in record:
