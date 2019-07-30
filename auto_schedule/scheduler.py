@@ -5,14 +5,20 @@ import shutil
 import math
 import tvm
 import numpy as np
-import torch.multiprocessing as _multi
-multi = _multi.get_context("fork")
+try:
+    import torch.multiprocessing as _multi
+except ImportError:
+    import multiprocessing as _multi
+multi = _multi.get_context("spawn")
 from tvm import rpc
 from collections import deque, namedtuple
 from queue import Empty
 from functools import reduce
 from auto_schedule.task import TASK_TABLE
-from auto_schedule.model import WalkerGroup
+try:
+    from auto_schedule.model import WalkerGroup
+except ImportError:
+    print("[Warning] Import model module failed, please check if PyTorch is installed.")
 from auto_schedule.space import generate_space_inter_op, generate_space_intra_op
 from auto_schedule.utils import assert_print, to_tuple
 try:

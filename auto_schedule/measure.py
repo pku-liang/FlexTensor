@@ -3,7 +3,10 @@ import signal
 import psutil
 import time
 import numpy as np
-import torch.multiprocessing as multi
+try:
+    import torch.multiprocessing as multi
+except ImportError:
+    import multiprocessing as multi
 from auto_schedule.utils import to_tuple
 
 

@@ -2,8 +2,6 @@ import os
 import time
 import tvm
 import numpy as np
-import torch
-from torch.autograd import Variable
 import math
 
 
@@ -125,6 +123,7 @@ def two_factor_split(value):
 
 
 def dev(input):
+    import torch
     m = torch.mean(input, dim=-1)
     return torch.pow(torch.sum(torch.pow(input - m, 2)), 0.5)
 
@@ -181,6 +180,8 @@ def permute(lst):
 
 
 def gumbel_softmax(logits):
+    import torch
+    from torch.autograd import Variable
     epsilon = 1e-20
     G = torch.rand_like(logits)
     y = logits + -Variable(torch.log(-torch.log(G + epsilon) + epsilon))
@@ -193,6 +194,7 @@ def gumbel_softmax(logits):
 
 
 def parted_linear(x, left, right):
+    import torch
     if left > right:
         tmp = left
         left = right
@@ -278,6 +280,7 @@ def assert_print(bool_stmt, false_str=""):
 
 
 def free_cuda():
+    import torch
     ret = []
     if torch.cuda.is_available():
         filename = "auto_schedule_check_cuda_free_memory_{}".format(time.time())
