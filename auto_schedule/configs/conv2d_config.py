@@ -8,6 +8,7 @@ def copy_change_batch(batch, x):
 
 
 yolo_shapes_b1 = [
+    # batch, in_channel, height, width, out_channel, _, k_h, k_w, _, stride, padding, dilation, groups = shape
     # yolo
     (1, 3, 448, 448, 64, 3, 7, 7, 1, 2, 3, 1, 1),  # conv1  0
     (1, 64, 112, 112, 192, 64, 3, 3, 1, 1, 1, 1, 1),  # conv2   1
@@ -38,7 +39,9 @@ yolo_shapes_b1 = [
 
 yolo_shapes_b8 = [copy_change_batch(8, x) for x in yolo_shapes_b1]
 yolo_shapes_b16 = [copy_change_batch(16, x) for x in yolo_shapes_b1]
+yolo_shapes_b32 = [copy_change_batch(32, x) for x in yolo_shapes_b1]
 yolo_shapes_b64 = [copy_change_batch(64, x) for x in yolo_shapes_b1]
+yolo_shapes_b128 = [copy_change_batch(128, x) for x in yolo_shapes_b1]
 
 
 yolo_shapes = yolo_shapes_b16
