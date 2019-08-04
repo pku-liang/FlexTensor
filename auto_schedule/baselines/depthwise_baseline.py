@@ -68,7 +68,8 @@ if __name__ == "__main__":
     for i, shape in enumerate(shapes):
         count = i + args.from_ 
         print("layer", count)
-        batch, in_channel, H, W, out_channel, k, _, stride, padding, dilation = shape
+        batch, in_channel, H, W, factor, k, _, stride, padding, dilation = shape
+        out_channel = in_channel * factor
         cost = baseline(batch, H, W, in_channel, k, out_channel, stride=stride, padding=padding, dilation=dilation, groups=in_channel, number=args.number, dev=args.device)
         print("Use %f(ms)" % cost)
     print("Done!")

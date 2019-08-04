@@ -1,13 +1,15 @@
 """
-High performance schedule for conv2d_nchw
-Target NVIDIA GPU P100
+Test different schedule on conv2d_nchw
+Target NVIDIA GPU
 
 ====================================
 **Author**: `Size Zheng`
 """
 import tvm 
 from auto_schedule.measure import _evaluate
-from auto_schedule.nn import YoloConvLayer17
+from auto_schedule.nn import conv2d_nchw
+from auto_schedule.configs.conv2d_config import yolo_shapes_b8
+from auto_schedule.utils import any_factor_split
 
 
 def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
@@ -23,7 +25,14 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
     # read_local_inputs = s.cache_read(read_share_inputs, "local", [write_cache])
 
     # tunable parameters
-    b_factors = [2, 4, 1, 1]
+    # b_factors = [2, 4, 1, 1]
+    # k_factors = [8, 4, 8, 2]
+    # p_factors = [7, 1, 2, 1]
+    # q_factors = [1, 1, 14, 1]
+    # rc_factors = [1, 32, 32]         
+    # ry_factors = [1, 1, 1]
+    # rx_factors = [1, 1, 1]
+    b_factors = [2, 2, 2, 1]
     k_factors = [8, 4, 8, 2]
     p_factors = [7, 1, 2, 1]
     q_factors = [1, 1, 14, 1]
@@ -47,6 +56,19 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
 
     kernel_scope, b = s[outputs].split(b, nparts=1)
 
+    # bk = s[outputs].fuse(b, k)
+    # bko, bki = s[outputs].split(bk, nparts=b_factors[0] * k_factors[0])
+    # po, pi = s[outputs].split(p, nparts=p_factors[0])
+    # qo, qi = s[outputs].split(q, nparts=q_factors[0])
+
+    # vbko, bki = s[outputs].split(bki, nparts=b_factors[1] * k_factors[1])
+    # vpo, pi = s[outputs].split(pi, nparts=p_factors[1])
+    # vqo, qi = s[outputs].split(qi, nparts=q_factors[1])
+
+    # tbko, bki = s[outputs].split(bki, nparts=b_factors[2] * k_factors[2])
+    # tpo, pi = s[outputs].split(pi, nparts=p_factors[2])
+    # tqo, qi = s[outputs].split(qi, nparts=q_factors[2])
+
     bo, bi = s[outputs].split(b, nparts=b_factors[0])
     ko, ki = s[outputs].split(k, nparts=k_factors[0])
     po, pi = s[outputs].split(p, nparts=p_factors[0])
@@ -64,6 +86,7 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
 
     # reorder
     s[outputs].reorder(po, bo, ko, qo, vqo, vbo, vko, vpo, tbo, tko, tpo, tqo, bi, ki, pi, qi)
+    # s[outputs].reorder(po, bko, qo, vqo, vbko, vpo, tbko, tpo, tqo, bki, pi, qi)
 
     # fuse
     bko = s[outputs].fuse(bo, ko)
@@ -72,12 +95,12 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
     bki = s[outputs].fuse(bi, ki)
 
     # bind
-    s[outputs].bind(bko, by)
-    s[outputs].bind(po, bz)
+    s[outputs].bind(bko, bz)
+    s[outputs].bind(po, by)
     s[outputs].bind(qo, bx)
-    s[outputs].bind(vbko, vx)
+    s[outputs].bind(vbko, vz)
     s[outputs].bind(vpo, vy)
-    s[outputs].bind(vqo, vz)
+    s[outputs].bind(vqo, vx)
     s[outputs].bind(tbko, tz)
     s[outputs].bind(tpo, ty)
     s[outputs].bind(tqo, tx)
@@ -113,42 +136,27 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
         s[cache].bind(bindy, ty)
         s[cache].bind(bindz, tz)
     
-    s[outputs].pragma(kernel_scope, 'auto_unroll_max_step', 0)
-    s[outputs].pragma(kernel_scope, 'unroll_explicit', 0)
+    s[outputs].pragma(kernel_scope, 'auto_unroll_max_step', 1500)
+    s[outputs].pragma(kernel_scope, 'unroll_explicit', 1)
 
     s[padded].compute_inline()
 
 
-def schedule_yolo_conv_opencl(s, outputs, inputs, weight):
-    # inline the padding operation
-    padded = outputs.op.input_tensors[0]
 
-    # prepare thread_axis
-    bx = tvm.thread_axis("blockIdx.x")
-
-    # split the spatial axes
-    b, k, p, q = s[outputs].op.axis
-
-    bo, bi = s[outputs].split(b, nparts=1)
-    s[outputs].bind(bo, bx)
-
-    s[padded].compute_inline()
-
-
-def try_yolo_conv_cuda(batch_size=1):
+def try_yolo_conv(config):
     # get the compute
-    yolo_conv = YoloConvLayer17()
-    input_shape = yolo_conv.get_intput_shape()
-    inputs = tvm.placeholder((batch_size, *input_shape), dtype="float32")
-    weight = yolo_conv.get_weight()
-    outputs = yolo_conv(inputs)
+    # (1, 3, 448, 448, 64, 3, 7, 7, 1, 2, 3, 1, 1)
+    batch, CI, H, W, CO, _, kh, kw, _, st, pad, dilation, group = config
+    inputs = tvm.placeholder((batch, CI, H, W), dtype="float32")
+    weight = tvm.placeholder((CO, CI, kh, kw), dtype="float32")
+    outputs = conv2d_nchw(inputs, weight, stride=st, padding=pad, dilation=dilation, groups=group)
     
     s = tvm.create_schedule(outputs.op)
     schedule_yolo_conv_cuda(s, outputs, inputs, weight)
 
     arg_bufs = [inputs, weight, outputs]
     stmt = tvm.lower(s, arg_bufs, simple_mode=True)
-    print(stmt)
+    # print(stmt)
     dev_id = 3
     ctx = tvm.nd.context("cuda", dev_id)
     max_dims = ctx.max_thread_dimensions
@@ -160,28 +168,21 @@ def try_yolo_conv_cuda(batch_size=1):
         "max_thread_z": max_dims[2]
     }
     verify = tvm.ir_pass.VerifyGPUCode(stmt, kwargs)
-    print(verify)
-    time_cost = _evaluate(s, arg_bufs, "cuda", dev_id, 10)
-    print("Yolo conv17 use", time_cost, "ms")
-
-
-def try_yolo_conv_opencl(batch_size=1):
-    # get the compute
-    yolo_conv = YoloConvLayer17()
-    input_shape = yolo_conv.get_intput_shape()
-    inputs = tvm.placeholder((batch_size, *input_shape), dtype="float32")
-    weight = yolo_conv.get_weight()
-    outputs = yolo_conv(inputs)
-    
-    s = tvm.create_schedule(outputs.op)
-    schedule_yolo_conv_cuda(s, outputs, inputs, weight)
-
-    arg_bufs = [inputs, weight, outputs]
-    stmt = tvm.lower(s, arg_bufs, simple_mode=True)
-    # print(stmt)
-    func = tvm.build(s, arg_bufs, "opencl")
-    print(func.imported_modules[0].get_source())
+    print("config is:\n %s" % (str(config)))
+    if verify:
+        print("Valid kernel")
+        time_cost = _evaluate(s, arg_bufs, "cuda", dev_id, 10)
+        print("Yolo conv use", time_cost, "ms\n")
+    else:
+        print("Invalid kernel")
+        time_cost = float("inf")
+    return time_cost
 
 
 if __name__ == "__main__":
-    try_yolo_conv_opencl(batch_size=8)
+    res = []
+    for config in yolo_shapes_b8[10:11]:
+        cost = try_yolo_conv(config)
+        res.append(cost)
+    for ele in res:
+        print(ele)

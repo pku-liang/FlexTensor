@@ -9,7 +9,7 @@ try:
     import torch.multiprocessing as _multi
 except ImportError:
     import multiprocessing as _multi
-multi = _multi.get_context("spawn")
+multi = _multi.get_context("fork")
 from tvm import rpc
 from collections import deque, namedtuple
 from queue import Empty
