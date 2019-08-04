@@ -19,7 +19,7 @@ def pytorch_cpu(B, C, H, W, kernel_size, stride, padding, number=10, dev=0):
     begin_time = time.time()
     unpool = torch.nn.MaxUnpool2d(kernel_size, stride=stride, padding=padding)
     for i in range(number):
-        output = unpool(Input, indices)
+        output = unpool(Input, indices, output_size=(H, W))
     end_time = time.time()
 
     # ms
@@ -34,7 +34,7 @@ def pytorch_cuda(B, C, H, W, kernel_size, stride, padding, number=10, dev=0):
     begin_time = time.time()
     unpool = torch.nn.MaxUnpool2d(kernel_size, stride=stride, padding=padding).cuda("cuda:" + str(dev))
     for i in range(number):
-        output = unpool(Input, indices)
+        output = unpool(Input, indices, output_size=(H, W))
     end_time = time.time()
 
     # ms
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     """warm up"""
     cost = pytorch_cpu(*shapes[0])
     cost = pytorch_cuda(*shapes[0])
-    cost = tvm_unpool2d_cpu(*shapes[0])
+    # cost = tvm_unpool2d_cpu(*shapes[0])
     # cost = tvm_unpool2d_cuda(*shapes[0])
 
     for shape in shapes:
@@ -112,8 +112,8 @@ if __name__ == "__main__":
         print("Pytorch cost on cpu: {}ms".format(cost))
         cost = pytorch_cuda(*shape)
         print("Pytorch cost on cuda: {}ms".format(cost))
-        cost = tvm_unpool2d_cpu(*shape)
-        print("Tvm cost on cpu: {}ms".format(cost))
+        # cost = tvm_unpool2d_cpu(*shape)
+        # print("Tvm cost on cpu: {}ms".format(cost))
         
     print("Done!")
 
