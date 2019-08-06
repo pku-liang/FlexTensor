@@ -174,7 +174,7 @@ def try_yolo_conv_opencl(batch_size=1):
     outputs = yolo_conv(inputs)
     
     s = tvm.create_schedule(outputs.op)
-    schedule_yolo_conv_cuda(s, outputs, inputs, weight)
+    schedule_yolo_conv_opencl(s, outputs, inputs, weight)
 
     arg_bufs = [inputs, weight, outputs]
     stmt = tvm.lower(s, arg_bufs, simple_mode=True)
