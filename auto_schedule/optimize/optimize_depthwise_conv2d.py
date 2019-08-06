@@ -81,13 +81,12 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
     for i, shape in enumerate(shapes):
         print("Optimize depthwise conv2d shape {}".format(shape), flush=True)
         batch, in_channel, H, W, factor, k, _, stride, padding, dilation = shape
-        out_channel = in_channel * factor
         # create an empty task but has the correct key we want
         task = Task(
             "conv2d",
             "depthwise", 
             None, 
-           (batch, in_channel, H, W, out_channel, k, stride, padding, dilation, in_channel),
+           (batch, in_channel, H, W, factor, k, stride, padding, dilation),
             target, 
             dev_id
             )

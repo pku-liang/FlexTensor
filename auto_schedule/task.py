@@ -63,9 +63,9 @@ def conv2d(N, C, H, W, K, kernel_size, stride=1, padding=0, dilation=1, groups=1
     return [Output.op], [Img, W, Output]
 
 
-def depthwise_conv2d(N, C, H, W, K, kernel_size, stride=1, padding=0, dilation=1):
+def depthwise_conv2d(N, C, H, W, factor, kernel_size, stride=1, padding=0, dilation=1):
     Img = tvm.placeholder((N, C, H, W))
-    W = tvm.placeholder((C, K, kernel_size, kernel_size))
+    W = tvm.placeholder((C, factor, kernel_size, kernel_size))
     Ouput = depthwise_conv2d_nchw(Img, W, stride=stride, padding=padding, dilation=dilation)
     return [Ouput.op], [Img, W, Ouput]
 
@@ -307,7 +307,7 @@ for shape in depthwise_shapes:
                 "conv2d", 
                 "depthwise", 
                 depthwise_conv2d, 
-                (batch, in_channel, H, W, factor, k, stride, padding, dilation, in_channel), 
+                (batch, in_channel, H, W, factor, k, stride, padding, dilation), 
                 "llvm", 
                 j
                 ))
@@ -316,7 +316,7 @@ for shape in depthwise_shapes:
                 "conv2d", 
                 "depthwise", 
                 depthwise_conv2d, 
-                (batch, in_channel, H, W, factor, k, stride, padding, dilation, in_channel), 
+                (batch, in_channel, H, W, factor, k, stride, padding, dilation), 
                 "cuda", 
                 j
                 ))
