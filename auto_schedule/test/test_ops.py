@@ -162,6 +162,8 @@ def test_depthwise_conv2d_nchw():
         inputs_torch, weight_torch, bias_torch, stride=2, padding=1, dilation=2, groups=6)
 
     tvm_ctx = tvm.context("llvm", 0)
+    # for depthwise
+    weight_np = np.reshape(weight_np, [6, 3, 3, 3])# np.ones([6, 3, 3, 3]).astype(np.float32)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     weight_tvm = tvm.nd.array(weight_np, tvm_ctx)
     bias_tvm = tvm.nd.array(bias_np, tvm_ctx)
@@ -475,6 +477,7 @@ def test():
     test_variance()
     test_batch_norm()
     test_block_circulant_matrix()
+    test_depthwise_conv2d_nchw()
 
 
 if __name__ == "__main__":
