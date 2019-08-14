@@ -11,7 +11,7 @@ from auto_schedule.task import Task, TASK_TABLE
 from auto_schedule.scheduler import schedule, schedule_with_config
 from auto_schedule.measure import _evaluate
 from auto_schedule.utils import to_tuple
-from auto_schedule.configs.shift_conv2d_config import *
+from auto_schedule.configs.shift_conv2d_config import shift_conv2d_shapes as shapes
 
 LOCAL_RPC = False
 LIB_DIR = "."
@@ -166,7 +166,7 @@ if __name__ == "__main__":
     # parser.add_argument("--op_hint", type=str, default="split_fuse")
     args = parser.parse_args()
     rpc_info = RpcInfo(args.host, args.port, target_host=args.target_host)
-    shapes = shape_dict[args.shapes]
+
     if args.to < 0:
         end = len(shapes)
     else:
@@ -175,7 +175,7 @@ if __name__ == "__main__":
     if args.log != "":
         with open(args.log, "a") as flog:
             ret = optimize(
-                args.shapes, args.from_, 
+                args.from_, 
                 shapes[args.from_:end], 
                 target=args.target, 
                 dev_id=args.device, 
@@ -190,7 +190,6 @@ if __name__ == "__main__":
                 )
     else:
         ret = optimize(
-            args.shapes, 
             args.from_, 
             shapes[args.from_:end], 
             target=args.target, 
