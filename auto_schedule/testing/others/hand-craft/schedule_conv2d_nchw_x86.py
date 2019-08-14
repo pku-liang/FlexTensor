@@ -11,10 +11,8 @@ from auto_schedule.nn import SqueezeNetFire8
 
 
 def schedule_yolo_conv_x86(s, outputs, inputs, weight):
-    return 
     # inline the padding operation
     padded = outputs.op.input_tensors[0]
-    
 
     # create cache
     write_cache = s.cache_write(outputs, "local")
@@ -59,6 +57,7 @@ def schedule_yolo_conv_x86(s, outputs, inputs, weight):
 
     # split reduce axes
     wb, wk, wp, wq = s[write_cache].op.axis
+    print(s[write_cache].op.reduce_axis)
     rc, ry, rx = s[write_cache].op.reduce_axis
     rco, rci = s[write_cache].split(rc, nparts=rc_factors[0])
     rcm, rci = s[write_cache].split(rci, nparts=rc_factors[1])
@@ -87,7 +86,7 @@ def try_yolo_conv(batch_size=1):
     bias = yolo_conv.get_bias()
     
     s = tvm.create_schedule(outputs.op)
-    # schedule_yolo_conv_x86(s, outputs, inputs, weight)
+    schedule_yolo_conv_x86(s, outputs, inputs, weight)
 
     arg_bufs = [inputs, weight, bias, outputs]
     stmt = tvm.lower(s, arg_bufs, simple_mode=True)

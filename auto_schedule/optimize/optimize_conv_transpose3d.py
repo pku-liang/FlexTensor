@@ -41,7 +41,8 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
             op_stop=30, 
             method=method, 
             use_model=use_model,
-            parallel=parallel
+            parallel=parallel,
+            trials=[trials//10, trials//10, trials]
             )
         end = time.time()
         # print(tvm.lower(s, bufs, simple_mode=True))

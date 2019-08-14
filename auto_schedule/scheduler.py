@@ -1471,7 +1471,7 @@ class OpScheduler(Scheduler):
                 s[op].pragma(kernel_scope, 'auto_unroll_max_step', step)
             
             # always vectorize here
-            # s[write_cache].vectorize(s[write_cache].op.axis[-1])
+            s[write_cache].vectorize(s[write_cache].op.axis[-1])
         
         def _cpu_schedule_split_reorder_fuse(s, op, op_state):
             # assert_print(op in s)
