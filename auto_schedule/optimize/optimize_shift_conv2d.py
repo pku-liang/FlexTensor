@@ -11,7 +11,7 @@ from auto_schedule.task import Task, TASK_TABLE
 from auto_schedule.scheduler import schedule, schedule_with_config
 from auto_schedule.measure import _evaluate
 from auto_schedule.utils import to_tuple
-from auto_schedule.configs.shift_conv2d_config import shift_conv2d_shapes as shapes
+from auto_schedule.configs.shift_conv2d_config import shift_conv2d_shape as shapes
 
 LOCAL_RPC = False
 LIB_DIR = "."
