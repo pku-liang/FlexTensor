@@ -22,6 +22,7 @@ from auto_schedule.configs.maxunpooling1d_config import maxunpooling1d_shape
 from auto_schedule.configs.maxunpooling2d_config import maxunpooling2d_shape
 from auto_schedule.configs.PixelCNN_config import PixelCNN_shape
 from auto_schedule.configs.gated_pixelcnn_config import gated_pixelcnn_shape
+from auto_schedule.configs.shift_conv2d_config import shift_conv2d_shape
 
 TASK_TABLE = {}
 
@@ -156,8 +157,7 @@ def shiftconv2d(N, H, W, C, kernel_size, dialtion=1, stride=1):
     Input = tvm.placeholder((N, H, W, C))
     Kernel = tvm.placeholder((C, kernel_size, kernel_size))
     PInput, kernelIndex, Output = op_shift_conv2d(Input, Kernel, dilation, stride)
-    print(kernelIndex)
-    return [PInput.op, kernelIndex.op, Output.op], [Input, Kernel, PInput, kernelIndex, Output]
+    return [PInput.op, kernelIndex.op, Output.op], [Input, Kernel, Output]
 
 def pixelcnn(N, H, W, C, OutC, kernel_height, kernel_width, mask_type, bias=None, stride=1, padding=0, dilation=1, groups=1):
     Input = tvm.placeholder((N, H, W, C))
@@ -466,3 +466,8 @@ for shape in gated_pixelcnn_shape:
     for j in range(4):
         register_task(Task("gatedpixelcnn", "gatedpixelcnn", gatedpixelcnn, shape, "llvm", j))
         register_task(Task("gatedpixelcnn", "gatedpixelcnn", gatedpixelcnn, shape, "cuda", j))
+
+for shape in shift_conv2d_shape:
+    for j in range(4):
+        register_task(Task("shift_conv2d", "shift_conv2d", shiftconv2d, shape, "llvm", j))
+        register_task(Task("shift_conv2d", "shift_conv2d", shiftconv2d, shape, "cuda", j))
