@@ -79,13 +79,13 @@ def optimize(from_, shapes, target="llvm", dev_id=0, trials=100, timeout=4.0,
     ret = dict()
     for i, shape in enumerate(shapes):
         print("Optimize shift convolution layer {} shape {}".format(i + 1 + from_, shape), flush=True)
-        batch, in_channel, height, width, out_channel, _, k_h, k_w, _, stride, padding, dilation, groups = shape
+        N, H, W, C, kernel_size, dilation = shape
         # create an empty task but has the correct key we want
         task = Task(
             "shift_conv2d",
-            prefix + str(i + from_), 
+            "shift_conv2d", 
             None, 
-            (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation, groups), 
+            (N, H, W, C, kernel_size, dilation), 
             target, 
             dev_id
             )
