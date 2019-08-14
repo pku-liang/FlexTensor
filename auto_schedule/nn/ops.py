@@ -1390,7 +1390,7 @@ def MaxUnpooling2d(Input, Indices, kernel_size, stride, padding, output_size=Non
                           name='output')
     return Output
 
-def ShiftConv2d_nhwc(Input, Kernel, dilation, stride):
+def _ShiftConv2d_nhwc(Input, Kernel, dilation, stride):
     """
     Shift Convolution Operator
 
@@ -1439,7 +1439,69 @@ def ShiftConv2d_nhwc(Input, Kernel, dilation, stride):
                                                    w * stride[1] + (kernelIndex[o] % kernelWidth) * dilation[1], 
                                                 o],
                      name="Output")
-    return PInput, kernelIndex, Output
+    # return PInput, kernelIndex, Output
+    return Output
+
+
+def ShiftConv2d_nhwc(Input, KernelIndex, KernelShape, dilation, stride):
+    """
+    Shift Convolution Operator
+
+    Parameters
+    ----------
+    Input: tvm.tensor.Tensor
+        4-D with shape [batch_size, input_height, input_width, channels]
+    KernelIndex: tvm.tensor.Tensor
+        1-D with shape [channels] integers ranging in [0, kernel_height * kernel_width)
+    KernelShape: int or tuple, specify kernel height and width
+    dilation: int or tuple
+    stride: int or tuple
+
+    Returns
+    -------
+    Output: tvm.tensor.Tensor
+        4-D with shape [batch_size, out_height, out_width, channels]
+    """
+
+    batch, inputHeight, inputWidth, channels = Input.shape
+    # channels_, kernelHeight, kernelWidth = Kernel.shape
+    channels_ = KernelIndex.shape[0]
+    if isinstance(KernelShape, int):
+        kernelHeight, kernelWidth = KernelShape, KernelShape
+    else:
+        assert isinstance(KernelShape, tuple) and len(KernelShape) == 2 and isinstance(KernelShape[0], int)
+        kernelHeight, kernelWidth = KernelShape
+
+    assert channels.value == channels_.value
+
+    if type(dilation) == int:
+        dilation = (dilation, dilation)
+    if type(stride) == int:
+        stride = (stride, stride)
+    
+    assert len(dilation) == 2
+    assert len(stride) == 2
+
+    padding = [((stride[0] - 1) * inputHeight - stride[0] + dilation[0] * (kernelHeight - 1) + 1) / 2, 
+                ((stride[1] - 1) * inputWidth - stride[1] + dilation[1] * (kernelWidth - 1) + 1) / 2]
+
+    outHeight = (inputHeight + 2 * padding[0]- dilation[0] * (kernelHeight - 1) - 1) // stride[0] + 1
+    outWidth = (inputWidth + 2 * padding[1] - dilation[1] * (kernelWidth - 1) - 1) // stride[1] + 1
+
+    PInput = topi.nn.pad(Input, (0, padding[0], padding[1], 0),
+                            (0, padding[0], padding[1], 0), name="PInput")
+
+    # argmax(data, axis=None, keepdims=False): topi argmax function
+    # kernelIndex = topi.argmax(Kernel, axis=(1, 2))
+
+    Output = tvm.compute((batch, outHeight, outWidth, channels),
+                     lambda n, h, w, o : PInput[n, h * stride[0] + (KernelIndex[o] // kernelHeight) * dilation[0], 
+                                                   w * stride[1] + (KernelIndex[o] % kernelWidth) * dilation[1], 
+                                                o],
+                     name="Output")
+    # return PInput, kernelIndex, Output
+    return Output
+
 
 def PixelCNN(Input, Kernel, mask_type, bias=None, dilation=1, stride=1, padding=0):
     """

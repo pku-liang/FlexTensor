@@ -14,19 +14,20 @@ torch.backends.cudnn.enabled = False
 
 def tvm_shift_conv2d_cpu(B, H, W, C, kernel_size, dilation, stride=1, number=100, dev=0):
     Input = torch.rand([B, H, W, C], dtype=torch.float32)
-    Kernel = torch.zeros([C, kernel_size, kernel_size], dtype=torch.float32)
+    Kernel = torch.rand([C, kernel_size, kernel_size], dtype=torch.float32)
+    KernelIndex = torch.argmax(Kernel.reshape([C, -1]), dim=1)
     indexH = random.randint(0 ,kernel_size - 1)
     indexW = random.randint(0 ,kernel_size - 1)
     Kernel[:, indexH, indexW] = 0
 
-    s, bufs = shiftconv2d(B, H, W, C, kernel_size, dilation, stride)
-    s =  tvm.create_schedule(s)
+    output, bufs = shiftconv2d(B, H, W, C, kernel_size, dilation, stride)
+    s =  tvm.create_schedule(output)
     ctx = tvm.cpu(dev)
     # print(tvm.lower(s, bufs, simple_mode=True))
     f = tvm.build(s, bufs, 'llvm')
 
     im = tvm.nd.array(Input.numpy().astype(np.float32), ctx)
-    fi = tvm.nd.array(Kernel.numpy().astype(np.float32), ctx)
+    fi = tvm.nd.array(KernelIndex.numpy().astype(np.int32), ctx)
     
     paddings = [math.ceil(((stride - 1) * H - stride + dilation * (kernel_size - 1)) / 2), 
                 math.ceil(((stride - 1) * W - stride + dilation * (kernel_size - 1)) / 2)]

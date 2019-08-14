@@ -155,9 +155,11 @@ def maxunpooling2d(N, C, H, W, kernel_size, stride=1, padding=0):
 
 def shiftconv2d(N, H, W, C, kernel_size, dialtion=1, stride=1):
     Input = tvm.placeholder((N, H, W, C))
-    Kernel = tvm.placeholder((C, kernel_size, kernel_size))
-    PInput, kernelIndex, Output = op_shift_conv2d(Input, Kernel, dilation, stride)
-    return [PInput.op, kernelIndex.op, Output.op], [Input, Kernel, Output]
+    KernelIndex = tvm.placeholder((C, ), dtype="int32")
+    # PInput, kernelIndex, Output = op_shift_conv2d(Input, Kernel, dilation, stride)
+    # return [PInput.op, kernelIndex.op, Output.op], [Input, Kernel, Output]
+    Output = op_shift_conv2d(Input, KernelIndex, kernel_size, dilation, stride)
+    return [Output.op], [Input, KernelIndex, Output]
 
 def pixelcnn(N, H, W, C, OutC, kernel_height, kernel_width, mask_type, bias=None, stride=1, padding=0, dilation=1, groups=1):
     Input = tvm.placeholder((N, H, W, C))

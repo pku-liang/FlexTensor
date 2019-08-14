@@ -74,7 +74,6 @@ def verify_code(stmt, target, dev_id):
 
 
 def build_func(func_name, task_key, configs, op_pos=None, rpc_info=None):
-    # print("check 3.3.1-build")
     if rpc_info is not None and rpc_info.target_host is not None:
         target_host = rpc_info.target_host
     else:
@@ -90,13 +89,11 @@ def build_func(func_name, task_key, configs, op_pos=None, rpc_info=None):
     else:
         func = tvm.build(s, bufs, target=task.target)
     func.export_library(os.path.join(LIB_DIR, func_name))
-    result = ([to_tuple(x.shape) for x in bufs], bufs[0].dtype)
-    # print("check 3.3.2-build")
+    result = ([to_tuple(x.shape) for x in bufs], [buf.dtype for buf in bufs])
     return result
 
 
 def eval_func(func_file, bufs_shape, dtype, target, number=100, dev_id=0, rpc_info=None):
-    # print("check 3.3.1")
     if rpc_info is not None:
         host = rpc_info.host
         port = rpc_info.port
@@ -116,33 +113,23 @@ def eval_func(func_file, bufs_shape, dtype, target, number=100, dev_id=0, rpc_in
         ctx = remote.context(target, dev_id)
     else:
         ctx = tvm.context(target, dev_id)
-    # print("check 3.3.2")
     tvm_arys = []
-    for shape in bufs_shape:
+    for i, shape in enumerate(bufs_shape):
         shape = to_tuple(shape)
-        tmp = np.random.uniform(-10, 10, size=shape).astype(dtype)
+        tmp = np.random.uniform(-10, 10, size=shape).astype(dtype[i])
         tmp = tvm.nd.array(tmp, ctx)
         tvm_arys.append(tmp)
-    # print("check 3.3.3")
     try:
         if use_rpc:
-            # print("check 3.3.4a")
             remote.upload(os.path.join(LIB_DIR, func_file))
             func = remote.load_module(func_file)
-            # print("check 3.3.5a")
         else:
-            # print("check 3.3.4b")
             func = tvm.module.load(os.path.join(LIB_DIR, func_file))
-            # print("check 3.3.5b")
         evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
-        # print("check 3.3.6")
         time_cost = evaluator(*tvm_arys).mean * 1e3
-        # print("check 3.3.7")
     finally:
-        # print("check 3.3.8")
         while len(tvm_arys) > 0:
             del tvm_arys[-1]
-        # print("check 3.3.9")
     return time_cost
 
 
@@ -162,43 +149,25 @@ def kill_child_processes(parent_pid, sig=signal.SIGTERM):
 
 def exec_func(func, queue, args, kwargs):
     try:
-        # print("check 3.3.0.0.1")
         res = func(*args, **kwargs)
-        # print("check 3.3.0.0.2")
     except Exception as e:
-        # print("check 3.3.0.0.3")
         res = RuntimeError(str(e))
-        # print("check 3.3.0.0.4")
     queue.put(res)
-    # print("check 3.3.0.0.5")
 
 
 def parallel_execute(func, timeout, *args, **kwargs):
-    # print("check 3.1")
     q = multi.Queue()
-    # print("check 3.2")
     p = multi.Process(
         target=call_with_timeout, 
         args=(func, q, timeout, args, kwargs))
-    # print("check 3.3")
     p.start()
-    # print("check 3.4")
     return Result(p, q)
 
 
 def call_with_timeout(func, queue, timeout, args, kwargs):
     q = multi.Queue()
     p = multi.Process(target=exec_func, args=(func, q, args, kwargs))
-    # print("check 3.3.0.1")        
-    # print("check 3.3.0.2")
     p.start()
-    # print("check 3.3.0.3")
-    # beg = time.time()
-    # while time.time() - beg < timeout:
-    #     if p.is_alive():
-    #         time.sleep(.1)
-    #     else:
-    #         break
     try:
         res = q.get(block=True, timeout=timeout)
     except Empty:
@@ -206,18 +175,6 @@ def call_with_timeout(func, queue, timeout, args, kwargs):
     except Exception as e:
         print("Exception in process {}: {}".format(os.getpid(), str(e)))
         res = e
-    # p.join(timeout=timeout)
-
-    # print("check 3.3.0.4")
-    # # print("check queue", queue.empty())
-    # queue.put(multi.TimeoutError()) 
-    # print("check 3.3.0.5")
-    # kill_child_processes(p.pid)
-    # print("check 3.3.0.6")
-    # p.terminate()
-    # print("check 3.3.0.7")
-    # p.join()   
-    # print("check 3.3.0.8")
     kill_child_processes(p.pid)
     p.terminate()
     p.join()
@@ -710,8 +667,8 @@ class OpScheduler(Scheduler):
             # assert_print(op in s)
 
             # always cache write here
-            if op.num_outputs > 1:
-                raise RuntimeWarning("Too many outputs in one operation!")
+            # if op.num_outputs > 1:
+            #     raise RuntimeWarning("Too many outputs in one operation!")
             write_cache = s.cache_write(op.output(0), "local")
 
             # always cache read here
@@ -849,8 +806,8 @@ class OpScheduler(Scheduler):
             # assert_print(op in s)
 
             # always cache write here
-            if op.num_outputs > 1:
-                raise RuntimeWarning("Too many outputs in one operation!")
+            # if op.num_outputs > 1:
+            #     raise RuntimeWarning("Too many outputs in one operation!")
             write_cache = s.cache_write(op.output(0), "local")
 
             # always cache read here
@@ -1088,10 +1045,9 @@ class OpScheduler(Scheduler):
             loop_idx = []
 
             # always cache write here
-            if op.num_outputs > 1:
-                raise RuntimeWarning("Too many outputs in one operation!")
+            # if op.num_outputs > 1:
+            #     raise RuntimeWarning("Too many outputs in one operation!")
             write_cache = s.cache_write(op.output(0), "local")
-
             # always cache read here
             read_cache_share_lst = []
             # read_cache_local_lst = []
@@ -1107,7 +1063,6 @@ class OpScheduler(Scheduler):
             n = spatial_axes[0]
             kernel_scope, n = s[op].split(n, nparts=1)
             spatial_axes[0] = n
-
             splited_spatial_axes = []
             splited_spatial_extents = []
             if "spatial" in config and len(config["spatial"]) > 0:
@@ -1140,7 +1095,6 @@ class OpScheduler(Scheduler):
                 reorder_parts.append(tmp_buffer)
                 reorder_part_extents.append(tmp_extents)
             s[op].reorder(*reorder_lst)
-
             # handle fuse request
             fused_parts = []
             fused_part_extents = []
@@ -1182,7 +1136,6 @@ class OpScheduler(Scheduler):
 
                 loop_lst = reorder_lst
                 loop_idx = list(range(len(reorder_lst)))
-
             # record op state
             op_state.loop_lst = loop_lst
             op_state.loop_idx = loop_idx
@@ -1230,7 +1183,6 @@ class OpScheduler(Scheduler):
                     for i, axis in enumerate(option[0][:len(candidate)]):
                         s[op].bind(axis, candidate[i])
                         extents[i] = option[1][i]
-                    
             # compute at
             if "local_pos" in config and len(config["local_pos"]) > 0:
                 local_at_part = config["local_pos"][0][0]
@@ -1361,8 +1313,8 @@ class OpScheduler(Scheduler):
 
         def _cpu_schedule_split_fuse(s, op, op_state):
             # always cache write here
-            if op.num_outputs > 1:
-                raise RuntimeWarning("Too many outputs in one operation!")
+            # if op.num_outputs > 1:
+            #     raise RuntimeWarning("Too many outputs in one operation!")
             write_cache = s.cache_write(op.output(0), "global")
 
             # spatial split
@@ -1480,8 +1432,8 @@ class OpScheduler(Scheduler):
             loop_lst = []
 
             # always cache write here
-            if op.num_outputs > 1:
-                raise RuntimeWarning("Too many outputs in one operation!")
+            # if op.num_outputs > 1:
+            #     raise RuntimeWarning("Too many outputs in one operation!")
             write_cache = s.cache_write(op.output(0), "local")
 
             # spatial split
