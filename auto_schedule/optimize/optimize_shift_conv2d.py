@@ -98,7 +98,7 @@ def optimize(from_, shapes, target="llvm", dev_id=0, trials=100, timeout=4.0,
             parallel=parallel, 
             method=method,
             use_model=use_model,
-            trials=[trials//10, trials],
+            # trials=[trials//10, trials],
             force_inline=force_inline,
             rpc_info=rpc_info,
             )
