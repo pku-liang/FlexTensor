@@ -98,7 +98,7 @@ def optimize(from_, shapes, target="llvm", dev_id=0, trials=100, timeout=4.0,
             parallel=parallel, 
             method=method,
             use_model=use_model,
-            # trials=[trials//10, trials],
+            trials=[trials//10, trials],
             force_inline=force_inline,
             rpc_info=rpc_info,
             )
@@ -171,9 +171,32 @@ if __name__ == "__main__":
         end = len(shapes)
     else:
         end = args.to
-    
-    if args.log != "":
-        with open(args.log, "a") as flog:
+
+    if args.test != "":
+        with open(args.test, "r") as fin:
+            for line in fin:
+                name, string = line.split(":", 1)
+                obj = json.loads(string)
+                configs = Config(obj[0], obj[1])
+                test(name, configs, dev_id=args.device, rpc_info=rpc_info)
+    else:    
+        if args.log != "":
+            with open(args.log, "a") as flog:
+                ret = optimize(
+                    args.from_, 
+                    shapes[args.from_:end], 
+                    target=args.target, 
+                    dev_id=args.device, 
+                    timeout=args.timeout, 
+                    trials=args.trials, 
+                    parallel=args.parallel,
+                    method=args.method,
+                    use_model=args.use_model,
+                    rpc_info=rpc_info,
+                    force_inline=args.force_inline,
+                    logfile=flog,
+                    )
+        else:
             ret = optimize(
                 args.from_, 
                 shapes[args.from_:end], 
@@ -186,27 +209,6 @@ if __name__ == "__main__":
                 use_model=args.use_model,
                 rpc_info=rpc_info,
                 force_inline=args.force_inline,
-                logfile=flog,
+                logfile=sys.stdout,
                 )
-    else:
-        ret = optimize(
-            args.from_, 
-            shapes[args.from_:end], 
-            target=args.target, 
-            dev_id=args.device, 
-            timeout=args.timeout, 
-            trials=args.trials, 
-            parallel=args.parallel,
-            method=args.method,
-            use_model=args.use_model,
-            rpc_info=rpc_info,
-            force_inline=args.force_inline,
-            logfile=sys.stdout,
-            )
-    if args.test != "":
-        with open(args.test, "r") as fin:
-            for line in fin:
-                name, string = line.split(":", 1)
-                obj = json.loads(string)
-                configs = Config(obj[0], obj[1])
-                test(name, configs, dev_id=args.device, rpc_info=rpc_info)
+    

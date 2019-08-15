@@ -116,7 +116,7 @@ def eval_func(func_file, bufs_shape, dtype, target, number=100, dev_id=0, rpc_in
     tvm_arys = []
     for i, shape in enumerate(bufs_shape):
         shape = to_tuple(shape)
-        tmp = np.random.uniform(-10, 10, size=shape).astype(dtype[i])
+        tmp = np.random.uniform(0, 1, size=shape).astype(dtype[i])
         tmp = tvm.nd.array(tmp, ctx)
         tvm_arys.append(tmp)
     try:
