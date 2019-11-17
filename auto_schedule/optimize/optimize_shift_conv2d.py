@@ -6,7 +6,7 @@ import json
 import tvm 
 import numpy as np
 from tvm import rpc
-from auto_schedule.scheduler import Config, RpcInfo
+from auto_schedule.utils import Config, RpcInfo
 from auto_schedule.task import Task, TASK_TABLE
 from auto_schedule.scheduler import schedule, schedule_with_config
 from auto_schedule.measure import _evaluate

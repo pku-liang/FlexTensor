@@ -11,7 +11,7 @@ except ImportError:
     import multiprocessing as _multi
 multi = _multi.get_context("fork")
 from tvm import rpc
-from collections import deque, namedtuple
+from collections import deque
 from queue import Empty
 from functools import reduce
 from auto_schedule.task import TASK_TABLE
@@ -20,7 +20,7 @@ try:
 except ImportError:
     print("[Warning] Import model module failed, please check if PyTorch is installed.")
 from auto_schedule.space import generate_space_inter_op, generate_space_intra_op
-from auto_schedule.utils import assert_print, to_tuple
+from auto_schedule.utils import assert_print, to_tuple, Config, RpcInfo
 try:
     import psutil
 except ImportError:
@@ -196,10 +196,6 @@ def find_idle_device(target):
         return find_idle_gpu()
     else:
         raise RuntimeError("Currently no support for target %s"%target)
-
-
-class Config(namedtuple("Config", ("op_config_lst", "graph_config"))):
-    pass
 
 
 class Scheduler(object):
@@ -1733,13 +1729,6 @@ class OpState(object):
         self.consumer_lst = []
 
 
-class RpcInfo(object):
-    def __init__(self, host, port, target_host=None):
-        self.host = host
-        self.port = port
-        self.target_host = target_host
-
-
 def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=15, graph_stop=5, 
         number=10, timeout=5.0, parallel=8, method="searching", **kwargs):
     """Schedule a task
@@ -1930,3 +1919,36 @@ def schedule_with_config(task_key, configs, op_pos=None):
 
     return s, bufs
 
+
+def schedule_ops_with_config(s, op_lst, configs, target):
+    """
+    Schedule op list with given configs
+    This assumes a previous graph optimizaton
+    so there is no need to retrieve graph list 
+    nor perform compute_at
+    """
+    # state of ops
+    op_states = [OpState() for op in op_lst]
+
+    op_config_lst = configs.op_config_lst
+
+    loop_length = len(op_config_lst)
+
+    ###################################################
+    # perform inter operations schedule first for inline
+    graph_config = configs.graph_config
+    if graph_config is not None:
+        graph_template = GraphScheduler.generate_graph_schedule(graph_config, phase="inline")
+        graph_template(s, op_lst, op_states)
+
+    ###################################################
+    # perform intra operations schedule    
+    for i in range(loop_length):
+        # mask inlined ops
+        if not op_states[i].inline:
+            op = op_lst[i]
+            config = op_config_lst[i]
+            template = OpScheduler.generate_op_schedule(target, config)
+            template(s, op, op_states[i])   
+
+    return s

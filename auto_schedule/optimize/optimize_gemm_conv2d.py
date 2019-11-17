@@ -6,7 +6,7 @@ import json
 import tvm 
 import torch
 
-from auto_schedule.scheduler import Config
+from auto_schedule.utils import Config
 from auto_schedule.task import Task, TASK_TABLE
 from auto_schedule.scheduler import schedule, schedule_with_config
 from auto_schedule.measure import _evaluate

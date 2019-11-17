@@ -3,6 +3,17 @@ import time
 import tvm
 import numpy as np
 import math
+from collections import namedtuple
+
+
+class Config(namedtuple("Config", ("op_config_lst", "graph_config"))):
+    pass
+
+class RpcInfo(object):
+    def __init__(self, host, port, target_host=None):
+        self.host = host
+        self.port = port
+        self.target_host = target_host
 
 
 def to_int(expr):

@@ -6,6 +6,14 @@ def copy_change_batch(batch, x):
     ret = (batch,) + ret
     return ret
 
+overfeat_shapes = [
+    (1, 3, 192, 192, 96, 3, 11, 11, 1, 4, 5, 1, 1),
+    (1, 96, 24, 24, 256, 96, 5, 5, 1, 1, 2, 1, 1),
+    (1, 256, 12, 12, 512, 256, 3, 3, 1, 1, 1, 1, 1),
+    (1, 512, 12, 12, 1024, 512, 3, 3, 1, 1, 1, 1, 1),
+    (1, 1024, 12, 12, 1024, 1024, 3, 3, 1, 1, 1, 1, 1)
+]
+
 
 yolo_shapes_b1 = [
     # batch, in_channel, height, width, out_channel, _, k_h, k_w, _, stride, padding, dilation, groups = shape

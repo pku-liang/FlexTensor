@@ -8,7 +8,7 @@ from auto_schedule.nn import conv2d_nchw, gemm as op_gemm, conv1d as op_conv1d, 
 
 from auto_schedule.configs.conv1d_config import conv1d_shapes
 from auto_schedule.configs.conv2d_config import yolo_shapes, res_shapes, google_shapes, squeeze_shapes, \
-    vgg_16_shapes, test_conv_shapes, yolo_shapes_b8, mobilev2_shapes
+    vgg_16_shapes, test_conv_shapes, yolo_shapes_b8, mobilev2_shapes, overfeat_shapes
 from auto_schedule.configs.conv3d_config import conv3d_shapes
 from auto_schedule.configs.gemv_config import gemv_shapes
 from auto_schedule.configs.gemm_config import gemm_shapes, test_gemm_shapes
@@ -29,7 +29,7 @@ TASK_TABLE = {}
 
 class Task(object):
     def __init__(self, category, name, func, args, target, dev_id=0):
-        self.key = "{}_{}_{}_{}({})".format(category, name, args, target, dev_id)
+        self.key = "{}_{}_{}_{}({})".format(category, name, args, target, dev_id)#
         self.func = func
         self.args = args
         self.target = target
@@ -39,7 +39,7 @@ class Task(object):
 
 def register_task(task, override=False):
     if task.key in TASK_TABLE and not override:
-        raise RuntimeError("Same task occurs again")
+        print("[Warning]: Same task occurs again %s" % task.key)
     TASK_TABLE[task.key] = task
 
 
@@ -179,7 +179,7 @@ def gatedpixelcnn(N, H, W, C, OutC, kernel_size, ClassVector=None, bias=None, st
     return [GateV.op, Output.op], [Input, KernelV, KernelV2H, KernelH, KernelHOut, GateV, Output]
 
 
-register_task(Task("conv2d", "1x1-packed", conv2d_1x1_packed, (256, 256, 14, 14, 512, 1), "cuda", 0))
+# register_task(Task("conv2d", "1x1-packed", conv2d_1x1_packed, (256, 256, 14, 14, 512, 1), "cuda", 0))
 
 
 for shape in conv1d_shapes:
@@ -234,10 +234,11 @@ conv2d_shape_dict = {
     "vgg-16": vgg_16_shapes,
     "test": test_conv_shapes,
     "yolo_b8": yolo_shapes_b8,
-    "mobile_v2": mobilev2_shapes
+    "mobile_v2": mobilev2_shapes,
+    "overfeat": overfeat_shapes
 }
 
-for name in ["yolo", "google", "res", "squeeze", "vgg-16", "test", "yolo_b8", "mobile_v2"]:
+for name in ["yolo", "google", "res", "squeeze", "vgg-16", "test", "yolo_b8", "mobile_v2", "overfeat"]:
     shapes = conv2d_shape_dict[name]
     for i, shape in enumerate(shapes):
         batch, in_channel, height, width, out_channel, _, k_h, k_w, _, stride, padding, dilation, groups = shape
@@ -297,6 +298,25 @@ for name in ["yolo", "google", "res", "squeeze", "vgg-16", "test", "yolo_b8", "m
                     name + str(i), 
                     conv_transpose2d, 
                     (batch, rin_channel, rheight, rwidth, rout_channel, k_h, stride, padding, dilation, groups), 
+                    "cuda", 
+                    j
+                    ))
+            # register common conv2d
+            register_task(
+                Task(
+                    "conv2d",
+                    "conv2d", 
+                    conv2d, 
+                    (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation, groups), 
+                    "llvm", 
+                    j
+                    ))
+            register_task(
+                Task(
+                    "conv2d",
+                    "conv2d", 
+                    conv2d, 
+                    (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation, groups), 
                     "cuda", 
                     j
                     ))
