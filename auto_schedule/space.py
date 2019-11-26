@@ -47,7 +47,7 @@ class Space(object):
     def __init__(self):
         self.subspaces = {}
         self.types = {}
-        self.valid_type_keys = ["fuse", "spatial", "reduce", "reorder", "inline", "unroll", "merge"]
+        self.valid_type_keys = ["fuse", "spatial", "reduce", "reorder", "inline", "unroll", "merge", "special"]
         for type_key in self.valid_type_keys:
             self.types[type_key] = []
         self.dim = 0
@@ -83,7 +83,7 @@ class Space(object):
 
 
 DirectedSubSpaceTypeKeys = ["spatial", "reduce"]
-UndirectedSubSpaceTypeKeys = ["fuse", "reorder", "unroll", "inline", "merge"]
+UndirectedSubSpaceTypeKeys = ["fuse", "reorder", "unroll", "inline", "merge", "special"]
 
 
 class SubSpace(object):
@@ -344,6 +344,27 @@ class MergeSpce(SubSpace):
         return pos in self.able_merge_list
 
 
+class EnumSpace(SubSpace):
+    def __init__(self, knobs):
+        self.dim = 2
+        self.static_entities = knobs
+        self.size = len(self.static_entities)
+        self.num_direction = 2
+        self.directions = [(-1,), (1,)]
+
+    def next_entity(self, pos, d):
+        # d is tuple
+        if len(d) == 1:
+            pos = (pos + d[0]) % self.size
+            return pos
+        else:
+            raise RuntimeError(
+                "Not support for direction more than one dim: {}".format(d))
+
+    def get_direction(self, num):
+        return self.directions[num % self.num_direction]
+
+
 def generate_inline_space(op_lst, down_graph, force_inline=False):
     inline_op_pos = []
     for i, op in enumerate(op_lst):
@@ -405,12 +426,13 @@ def generate_space_intra_op(op, down_graph, slevel=4, rlevel=3, groups=3, split_
     # -unroll space
     unroll_space = generate_unroll_space(explicit=(unroll_policy == "explicit"))
     schedule_space.add_subspace("unroll", unroll_space, "unroll")
-    # - other spaces can be added
+    
+    # - other special spaces can be added   
 
     return schedule_space
 
 
-def generate_space_inter_op(op_lst, down_graph, force_inline=False, force_merge=False):
+def generate_space_inter_op(op_lst, down_graph, force_inline=False, force_merge=False, special_space=None):
 
     ##############################################################
     # generate space:
@@ -421,6 +443,10 @@ def generate_space_inter_op(op_lst, down_graph, force_inline=False, force_merge=
     # - merge space
     # merge_space = generate_merge_space(op_lst, down_graph, force_merge=force_merge)
     # schedule_space.add_subspace("merge", merge_space, "merge")
-    # - other spaces can be added
+    
+    # - other special spaces can be added   
+    special_space = {} if special_space is None else special_space
+    for key, sspace in special_space.items():
+        schedule_space.add_subspace(key, sspace, "special")
 
     return schedule_space

@@ -72,28 +72,205 @@ class YoloConvLayer1(Conv2dLayer):
         return (3, 448, 448)
 
 
-class YoloConvLayer17(Conv2dLayer):
-    """YOLO convolution Layer 1
+class YoloConvLayer2(Conv2dLayer):
+    """YOLO convolution Layer 2
     configuration:
     | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
-    | conv1 |   x   |   1024  |  14 |  14 |     512     |  1  |  1  |    0    |    1   |
+    | conv2 |   x   |    64   | 112 | 112 |     192      |  3  |  3  |    1    |    1   |
     """
     def __init__(self):
-        super(YoloConvLayer17, self).__init__(1024, 512, 1, False, 0, 1, 1, 1)
+        super(YoloConvLayer2, self).__init__(64, 192, 3, False, 1, 1, 1, 1) 
+        # in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1
+
+    @staticmethod
+    def get_intput_shape():
+        return (64, 112, 112)
+
+
+class YoloConvLayer3(Conv2dLayer):
+    """YOLO convolution Layer 3
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv3 |   x   |   192   |  56 |  56 |    128      |  1  |  1  |    0    |    1   |
+    """
+    def __init__(self):
+        super(YoloConvLayer3, self).__init__(192, 128, 1, False, 0, 1, 1, 1) 
+        # in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1
+
+    @staticmethod
+    def get_intput_shape():
+        return (192, 56, 56)
+
+
+class YoloConvLayer4(Conv2dLayer):
+    """YOLO convolution Layer 4
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv4 |   x   |   128   |  56 |  56 |    256      |  3  |  3  |    1    |    1   |
+    """
+    def __init__(self):
+        super(YoloConvLayer4, self).__init__(128, 256, 3, False, 1, 1, 1, 1) 
+        # in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1
+
+    @staticmethod
+    def get_intput_shape():
+        return (128, 56, 56)
+
+
+class YoloConvLayer5(Conv2dLayer):
+    """YOLO convolution Layer 5
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv5 |   x   |   256   |  56 |  56 |    256      |  1  |  1  |    0    |    1   |
+    """
+    def __init__(self):
+        super(YoloConvLayer5, self).__init__(256, 256, 1, False, 0, 1, 1, 1) 
+        # in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1
+
+    @staticmethod
+    def get_intput_shape():
+        return (256, 56, 56)
+
+
+class YoloConvLayer6(Conv2dLayer):
+    """YOLO convolution Layer 6
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv1 |   x   |   256   |  56 |  56 |    512      |  3  |  3  |    1    |    1   |
+    """
+    def __init__(self):
+        super(YoloConvLayer6, self).__init__(256, 512, 3, False, 1, 1, 1, 1) 
+        # in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1
+
+    @staticmethod
+    def get_intput_shape():
+        return (256, 56, 56)
+
+
+class YoloConvLayer7(Conv2dLayer):
+    """YOLO convolution Layer 7
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv7 |   x   |   512   |  28 |  28 |    256      |  1  |  1  |    0    |    1   |
+    """
+    def __init__(self):
+        super(YoloConvLayer7, self).__init__(512, 256, 1, False, 0, 1, 1, 1) 
+        # in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1
+
+    @staticmethod
+    def get_intput_shape():
+        return (512, 28, 28)
+
+
+class YoloConvLayer8(Conv2dLayer):
+    """YOLO convolution Layer 8
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv8 |   x   |   256   |  28 |  28 |    512      |  3  |  3  |    1    |    1   |
+    """
+    def __init__(self):
+        super(YoloConvLayer8, self).__init__(256, 512, 3, False, 1, 1, 1, 1) 
+        # in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1
+
+    @staticmethod
+    def get_intput_shape():
+        return (256, 28, 28)
+
+
+class YoloConvLayer9(Conv2dLayer):
+    """YOLO convolution Layer 9
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv9 |   x   |   512   |  28 |  28 |    512      |  1  |  1  |    0    |    1   |
+    """
+    def __init__(self):
+        super(YoloConvLayer9, self).__init__(512, 512, 1, False, 0, 1, 1, 1) 
+        # in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1
+
+    @staticmethod
+    def get_intput_shape():
+        return (512, 28, 28)
+
+
+class YoloConvLayer10(Conv2dLayer):
+    """YOLO convolution Layer 10
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv10|   x   |   512   |  28 |  28 |    1024     |  3  |  3  |    1    |    1   |
+    """
+    def __init__(self):
+        super(YoloConvLayer10, self).__init__(512, 1024, 3, False, 1, 1, 1, 1) 
+        # in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1
+
+    @staticmethod
+    def get_intput_shape():
+        return (512, 28, 28)
+
+
+class YoloConvLayer11(Conv2dLayer):
+    """YOLO convolution Layer 11
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv11|   x   |   1024  |  14 |  14 |     512     |  1  |  1  |    0    |    1   |
+    """
+    def __init__(self):
+        super(YoloConvLayer11, self).__init__(1024, 512, 1, False, 0, 1, 1, 1)
 
     @staticmethod
     def get_intput_shape():
         return (1024, 14, 14)
 
 
-class YoloConvLayer24(Conv2dLayer):
-    """YOLO convolution Layer 1
+class YoloConvLayer12(Conv2dLayer):
+    """YOLO convolution Layer 12
     configuration:
     | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
-    | conv1 |   x   |  1024   |  7  |  7  |     1024    |  3  |  3  |    1    |    1   |
+    | conv12|   x   |    512  |  14 |  14 |     1024    |  3  |  3  |    1    |    1   |
     """
     def __init__(self):
-        super(YoloConvLayer24, self).__init__(1024, 1024, 3, False, 1, 1, 1, 1)
+        super(YoloConvLayer12, self).__init__(512, 1024, 3, False, 1, 1, 1, 1)
+
+    @staticmethod
+    def get_intput_shape():
+        return (512, 14, 14)
+
+
+class YoloConvLayer13(Conv2dLayer):
+    """YOLO convolution Layer 13
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv13|   x   |   1024  |  14 |  14 |     1024    |  3  |  3  |    1    |    1   |
+    """
+    def __init__(self):
+        super(YoloConvLayer13, self).__init__(1024, 1024, 3, False, 1, 1, 1, 1)
+
+    @staticmethod
+    def get_intput_shape():
+        return (1024, 14, 14)
+
+
+class YoloConvLayer14(Conv2dLayer):
+    """YOLO convolution Layer 14
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv14|   x   |   1024  |  14 |  14 |     1024    |  3  |  3  |    1    |    2   |
+    """
+    def __init__(self):
+        super(YoloConvLayer14, self).__init__(1024, 1024, 3, False, 1, 2, 1, 1)
+
+    @staticmethod
+    def get_intput_shape():
+        return (1024, 14, 14)
+
+
+class YoloConvLayer15(Conv2dLayer):
+    """YOLO convolution Layer 15
+    configuration:
+    | name  | batch | channel |  H  |  W  | out_channel | k_h | k_w | padding | stride | 
+    | conv15|   x   |  1024   |  7  |  7  |     1024    |  3  |  3  |    1    |    1   |
+    """
+    def __init__(self):
+        super(YoloConvLayer15, self).__init__(1024, 1024, 3, False, 1, 1, 1, 1)
 
     @staticmethod
     def get_intput_shape():

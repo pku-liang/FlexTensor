@@ -1,13 +1,13 @@
 """
 High performance schedule for conv2d_nchw
-Target x86 CPU
+Target X86 CPU
 
 ====================================
 **Author**: `Size Zheng`
 """
 import tvm 
 from auto_schedule.measure import _evaluate
-from auto_schedule.nn import SqueezeNetFire8
+from auto_schedule.nn import *
 
 
 def schedule_yolo_conv_x86(s, outputs, inputs, weight):
@@ -19,12 +19,12 @@ def schedule_yolo_conv_x86(s, outputs, inputs, weight):
 
     # tunable parameters
     b_factors = [1, 1, 1]
-    k_factors = [64, 1, 1]
-    p_factors = [7, 1, 64]
-    q_factors = [14, 1, 32]
-    rc_factors = [1, 1, 3]         # outer-->inner
-    ry_factors = [1, 1, 7]
-    rx_factors = [1, 1, 7]
+    k_factors = [8, 2, 32]
+    p_factors = [14, 2, 2]
+    q_factors = [2, 1, 28]
+    rc_factors = [32, 4, 2]         # outer-->inner
+    ry_factors = [1, 3, 1]
+    rx_factors = [3, 1, 1]
 
     # split the spatial axes
     b, k, p, q = s[outputs].op.axis
@@ -57,7 +57,7 @@ def schedule_yolo_conv_x86(s, outputs, inputs, weight):
 
     # split reduce axes
     wb, wk, wp, wq = s[write_cache].op.axis
-    print(s[write_cache].op.reduce_axis)
+    # print(s[write_cache].op.reduce_axis)
     rc, ry, rx = s[write_cache].op.reduce_axis
     rco, rci = s[write_cache].split(rc, nparts=rc_factors[0])
     rcm, rci = s[write_cache].split(rci, nparts=rc_factors[1])
@@ -71,14 +71,14 @@ def schedule_yolo_conv_x86(s, outputs, inputs, weight):
 
     
     s[outputs].pragma(outer, 'auto_unroll_max_step', 1500)
-    # s[write_cache].vectorize(s[write_cache].op.axis[-1])
+    s[write_cache].vectorize(s[write_cache].op.axis[-1])
 
     s[padded].compute_inline()
 
 
 def try_yolo_conv(batch_size=1):
     # get the compute
-    yolo_conv = SqueezeNetFire8()
+    yolo_conv = YoloConvLayer6()
     input_shape = yolo_conv.get_intput_shape()
     inputs = tvm.placeholder((batch_size, *input_shape), dtype="float32")
     weight = yolo_conv.get_weight()
@@ -88,12 +88,15 @@ def try_yolo_conv(batch_size=1):
     s = tvm.create_schedule(outputs.op)
     schedule_yolo_conv_x86(s, outputs, inputs, weight)
 
-    arg_bufs = [inputs, weight, bias, outputs]
+    if bias is None:
+        arg_bufs = [inputs, weight, outputs]
+    else:
+        arg_bufs = [inputs, weight, bias, outputs]
     stmt = tvm.lower(s, arg_bufs, simple_mode=True)
     print(stmt)
     dev_id = 1
-    time_cost = _evaluate(s, arg_bufs, "llvm", dev_id, 10)
-    print("Yolo conv24 use", time_cost, "ms")
+    time_cost = _evaluate(s, arg_bufs, "llvm", dev_id, 100)
+    print("Yolo conv6 use", time_cost, "ms")
 
 
 if __name__ == "__main__":

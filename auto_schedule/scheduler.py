@@ -73,13 +73,13 @@ def verify_code(stmt, target, dev_id):
         return True
 
 
-def build_func(func_name, task_key, configs, op_pos=None, rpc_info=None):
+def build_func(func_name, task_key, configs, op_pos=None, rpc_info=None, rewrite=False):
     if rpc_info is not None and rpc_info.target_host is not None:
         target_host = rpc_info.target_host
     else:
         target_host = None
     task = TASK_TABLE[task_key]
-    s, bufs = schedule_with_config(task_key, configs, op_pos=op_pos)
+    s, bufs = schedule_with_config(task_key, configs, op_pos=op_pos, rewrite=rewrite)
     stmt = tvm.lower(s, bufs, simple_mode=True)
     valid = verify_code(stmt, task.target, task.dev_id)
     if not valid:
@@ -199,7 +199,7 @@ def find_idle_device(target):
 
 
 class Scheduler(object):
-    def __init__(self, name, task_key, space, parallel=2, timeout=4.0, trial=100, number=10, early_stop=30, rpc_info=None):
+    def __init__(self, name, task_key, space, parallel=2, timeout=4.0, trial=100, number=10, early_stop=30, rpc_info=None, rewrite=False):
         self.task_key = task_key
         self.space = space
         self.parallel = max(parallel, 1)    # at least 1
@@ -210,6 +210,7 @@ class Scheduler(object):
         self.task = TASK_TABLE[self.task_key]
         self.walker_group = WalkerGroup(self.task.category + "_" + name, self.space)
         self.rpc_info = rpc_info
+        self.rewrite = rewrite
 
         self.re_evalutate_number = 10
         self.warm_up_epoch = 20
@@ -412,8 +413,8 @@ class Scheduler(object):
         if use_model:
             self.walker_group.load_or_create_model()
         # warm up
-        warm_up_epoches = self.trial // self.parallel
-        warm_up_trials = self.parallel
+        warm_up_epoches = 10
+        warm_up_trials = 20
         self._warm_up(warm_up_epoches, warm_up_trials, configs, type_keys, use_model=use_model)
 
         # record best
@@ -424,8 +425,8 @@ class Scheduler(object):
         value_early_stop = best_value
         early_stop_count = 0
         # determine start points
-        cur_lst = self.walker_group.topk(4, modify=True, with_value=True)
-        part = math.ceil(self.trial / 20)
+        cur_lst = self.walker_group.topk(self.parallel, modify=True, with_value=True)
+        part = math.ceil(self.trial / 5)
         for trial in range(self.trial):
             from_lst, next_points, action_lst = self.walker_group.walk(cur_lst, trial)
             if use_model:
@@ -464,7 +465,7 @@ class Scheduler(object):
                 break
             # reload next points
             retired_indices.extend(cur_lst)
-            cur_lst = self.walker_group.topk(4, modify=True, with_value=True)    
+            cur_lst = self.walker_group.topk(self.parallel, modify=True, with_value=True)    
             if (trial + 1) % part == 0:
                 self.walker_group.train_walkers()
                 if not use_model:
@@ -476,6 +477,7 @@ class Scheduler(object):
                     for indices, value in retired_indices[-self.parallel:-1]:
                         self.walker_group.record(indices, value, random_reject=False)
                     indices_lst = self.walker_group.topk(self.parallel, modify=True)
+                    print("check next indices:", indices_lst)
                     next_configs = [self.walker_group.to_config(indices) for indices in indices_lst]
                     results = self.parallel_evaluate(configs, next_configs, number=self.number)
                     self.walker_group.add_perf_data(indices_lst, results)
@@ -535,6 +537,7 @@ class Scheduler(object):
                     build_config, 
                     op_pos,
                     rpc_info=self.rpc_info,
+                    rewrite=self.rewrite
                     )
                 build_res_lst.append(res)
 
@@ -631,8 +634,8 @@ class Scheduler(object):
 
 
 class OpScheduler(Scheduler):
-    def __init__(self, task_key, op_pos, space, decay=0.7, parallel=1, timeout=4.0, trial=100, number=10, early_stop=30, rpc_info=None):
-        super(OpScheduler, self).__init__("op" + str(op_pos), task_key, space, parallel, timeout, trial, number, early_stop, rpc_info)
+    def __init__(self, task_key, op_pos, space, decay=0.7, parallel=1, timeout=4.0, trial=100, number=10, early_stop=30, rpc_info=None, rewrite=False):
+        super(OpScheduler, self).__init__("op" + str(op_pos), task_key, space, parallel, timeout, trial, number, early_stop, rpc_info, rewrite=rewrite)
         self.op_pos = op_pos
 
     def schedule(self, configs, method="searching", use_model=False, perf_path=None):
@@ -1626,9 +1629,47 @@ class OpScheduler(Scheduler):
             raise RuntimeError("Currently no support for target %s"%target)  
 
 
+class Rewriter(object):
+    def __init__(self, configs):
+        self.graph_config= configs.graph_config
+        self.op_config_lst = configs.op_config_lst
+
+    def rewrite(self, task):
+        """
+        this is a hard code manner,
+        we don't know how to generalize this change
+        because it even need compute rewrite and schedule rewrite
+        """
+        assert task.target == "llvm", "Only rewrite for CPU"
+        assert task.category == "conv2d"
+        # schedule rewrite
+        import copy
+        new_graph_config = copy.deepcopy(self.graph_config)
+        new_op_config_lst = copy.deepcopy(self.op_config_lst)
+        # must compute inline as original config may split channel differently
+        new_graph_config["inline"] = [[1, 0]]
+        # fetch conv config
+        conv_config = self.op_config_lst[1]
+        new_config = new_op_config_lst[1]
+        # change out_channel config
+        vlen1 = conv_config["reduce"][0][-1]
+        vlen2 = conv_config["spatial"][1][-1]
+        new_config["spatial"].append([1] * len(new_config["spatial"][0]))
+        new_config["spatial"][-1][-1] = vlen2
+        new_config["spatial"][1][-1] = 1
+        new_config["reduce"][0][-1] = 1
+        new_config["reduce"].insert(1, [1] * len(new_config["reduce"][0]))
+        new_config["reduce"][1][-1] = vlen1
+        # compute rewrite
+        from auto_schedule.task import conv2d_nchwc_layout
+        kwargs = {"vlen1": vlen1, "vlen2": vlen2}
+        ops, bufs = conv2d_nchwc_layout(*task.args, **kwargs)
+        return ops, bufs, new_graph_config, new_op_config_lst
+
+
 class GraphScheduler(Scheduler):
-    def __init__(self, task_key, space, decay=0.7, parallel=10, timeout=4.0, trial=100, number=10, early_stop=30, rpc_info=None):
-        super(GraphScheduler, self).__init__("graph", task_key, space, parallel, timeout, trial, number, early_stop, rpc_info)
+    def __init__(self, task_key, space, decay=0.7, parallel=10, timeout=4.0, trial=100, number=10, early_stop=30, rpc_info=None, rewrite=False):
+        super(GraphScheduler, self).__init__("graph", task_key, space, parallel, timeout, trial, number, early_stop, rpc_info, rewrite=rewrite)
 
     def schedule(self, configs, method="searching", use_model=False, perf_path=None):
         if perf_path is not None:
@@ -1766,12 +1807,18 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
     force_inline = False
     if "force_inline" in kwargs:
         force_inline = kwargs["force_inline"]
+    if "rewrite" in kwargs:
+        rewrite = True
+        # must force_inline
+        force_inline = True
+    else:
+        rewrite = False
     rpc_info = None
     if "rpc_info" in kwargs:
         rpc_info = kwargs["rpc_info"]
     ##################################################
     # first generate graph space
-    graph_space = generate_space_inter_op(op_lst, down_graph, force_inline=force_inline)
+    graph_space = generate_space_inter_op(op_lst, down_graph, force_inline=force_inline, special_space=task.special_space)
 
     graph_space_size = len(graph_space)
     print("graph space size", graph_space_size)
@@ -1806,7 +1853,8 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
             trial=force_trials[pos], 
             number=number, 
             early_stop=op_stop,
-            rpc_info=rpc_info
+            rpc_info=rpc_info,
+            rewrite=rewrite
             )
         # print("###########################################")
         # print("Scheduling", op)
@@ -1835,7 +1883,8 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
         trial=graph_trial, 
         number=number, 
         early_stop=graph_stop,
-        rpc_info=rpc_info
+        rpc_info=rpc_info,
+        rewrite=rewrite
         )
     use_model = False if graph_perf_model_path is None else True
     graph_config = graph_scheduler.schedule(configs, method=method, use_model=use_model, perf_path=graph_perf_model_path)
@@ -1845,32 +1894,38 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
     
     #################################################
     # final schedule
-    s = tvm.create_schedule(ops)
-    # perform inter operator schedule
-    graph_template = GraphScheduler.generate_graph_schedule(configs.graph_config, phase="inline")
-    graph_template(s, op_lst, op_states)
-    # perform intra-operator schedule
-    for count_op, (op, op_state, op_config) in enumerate(zip(op_lst, op_states, configs.op_config_lst)):
-        if not op_state.inline:
-            op_template = OpScheduler.generate_op_schedule(task.target, op_config)
-            op_template(s, op, op_states[count_op])
-    # perform inter operations schedule again for compute at
-    if graph_config is not None:
-        graph_template = GraphScheduler.generate_graph_schedule(graph_config, phase="at")
-        graph_template(s, op_lst, op_states)
+    # s = tvm.create_schedule(ops)
+    # # perform inter operator schedule
+    # graph_template = GraphScheduler.generate_graph_schedule(configs.graph_config, phase="inline")
+    # graph_template(s, op_lst, op_states)
+    # # perform intra-operator schedule
+    # for count_op, (op, op_state, op_config) in enumerate(zip(op_lst, op_states, configs.op_config_lst)):
+    #     if not op_state.inline:
+    #         op_template = OpScheduler.generate_op_schedule(task.target, op_config)
+    #         op_template(s, op, op_states[count_op])
+    # # perform inter operations schedule again for compute at
+    # if graph_config is not None:
+    #     graph_template = GraphScheduler.generate_graph_schedule(graph_config, phase="at")
+    #     graph_template(s, op_lst, op_states)
+    s, bufs = schedule_with_config(task_key, configs, rewrite=rewrite)
 
     return s, bufs, configs
     
 
-def schedule_with_config(task_key, configs, op_pos=None):
+def schedule_with_config(task_key, configs, op_pos=None, rewrite=False):
     """Schedule a task with given configs
 
     perform sequential schedule
     """
     task = TASK_TABLE[task_key]
-    func = task.func
-    args = task.args
-    ops, bufs = func(*args)
+    rewriter = Rewriter(configs)
+    if rewrite:
+        ops, bufs, new_graph_config, new_op_config_lst = rewriter.rewrite(task)
+        configs = Config(new_op_config_lst, new_graph_config)
+    else:
+        func = task.func
+        args = task.args
+        ops, bufs = func(*args)
     # sort the ops, so that we can distinguish each op
     op_lst, down_graph = flatten_graph(ops)
     # state of ops

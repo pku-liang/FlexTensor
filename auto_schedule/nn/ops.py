@@ -117,6 +117,43 @@ def zero_pad2d(inputs, padding=0):
         )
 
 
+def zero_pad2d_nchwc(inputs, padding=0):
+    """Zero padding for 2d tensor of NCHWc layout
+
+    Args:
+    -----------------------------
+    inputs : tvm.tensor.Tensor
+        shape [batch, channel_chunk, height, width, channel_block]
+    padding: (optional:0) int or tuple
+        expected: (h_pad_up, h_pad_down, w_pad_up, w_pad_down)
+    -----------------------------
+
+    Returns:
+    -----------------------------
+    tvm.tensor.Tensor
+        shape [batch, channel_chunk, padded_height, padded_width, channel_block]
+    -----------------------------
+    """
+    padding = (padding, padding, padding, padding) if isinstance(padding, (int, tvm.expr.IntImm)) else padding
+    assert isinstance(padding, tuple), "type(padding)={}".format(type(padding))
+    if len(padding) == 2:
+        padding = (padding[0], padding[0], padding[1], padding[1])
+    assert_print(len(padding) == 4)
+
+    padding_zero = 0.0 if "float" in inputs.dtype else 0
+
+    batch_size, in_channel_chunk, height, width, in_channel_block = inputs.shape
+    return tvm.compute(
+        (batch_size, in_channel_chunk, height + padding[0] + padding[1], width + padding[2] + padding[3], in_channel_block),
+        lambda b, c_c, h, w, c_b: tvm.if_then_else(
+                            tvm.all(h >= padding[0], h < height + padding[0], w >= padding[2], w < width + padding[2]),
+                            inputs[b, c_c, h - padding[0], w - padding[2], c_b],
+                            padding_zero
+                            ),
+        name='Padding_NCHWc'
+        )
+
+
 def zero_pad3d(inputs, padding=0):
     """Zero padding for 3d tensor
 
@@ -438,6 +475,71 @@ def conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, grou
         output = tvm.compute(
             (batch_size, out_channel, out_h, out_w),
             lambda b, c, h, w: output[b, c, h, w] + bias[c]
+        )
+    return output
+
+
+def conv2d_nchwc(inputs, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+    """Convolution 2d NCHWc layout
+
+    Args:
+    -----------------------------
+    inputs  : tvm.tensor.Tensor
+        shape [batch, channel // vlen1, height, width, vlen1]
+    weight  : tvm.tensor.Tensor
+        shape [out_channel // vlen2, channel // vlen1 // groups, kernel_height, kernel_width, vlen1, vlen2]
+    bias    : (optional:None) tvm.tensor.Tensor
+        shape [out_channel // vlen2, vlen2]
+    stride  : (optional:1) int or tuple
+
+    padding : (optional:0) int or tuple
+
+    dilation: (optional:1) int
+
+    groups  : (optional:1) int
+    -----------------------------
+
+    Returns:
+    -----------------------------
+    tvm.tensor.Tensor
+        shape [batch, out_channel // vlen2, output_height, output_width, vlen2]
+    -----------------------------
+    """
+    batch_size, in_channel_chunk, in_h, in_w, in_channel_block = inputs.shape
+    out_channel_chunk, channel_per_group_chunk, k_h, k_w, _in_channel_block, out_channel_block = weight.shape
+    assert ((channel_per_group_chunk * groups).value == in_channel_chunk.value)
+    assert _in_channel_block.value == in_channel_block.value
+    out_channel_per_group = out_channel_chunk // groups
+    assert ((out_channel_per_group * groups).value == out_channel_chunk.value)
+
+    stride = (stride, stride) if isinstance(stride, (int, tvm.expr.IntImm)) else stride
+    padding = (padding, padding) if isinstance(padding, (int, tvm.expr.IntImm)) else padding
+    dilation = (dilation, dilation) if isinstance(dilation, (int, tvm.expr.IntImm)) else dilation
+    assert (isinstance(stride, tuple) and len(stride) == 2)
+    assert (isinstance(padding, tuple) and len(padding) == 2)
+    assert (isinstance(dilation, tuple) and len(dilation) == 2)
+
+    out_h = (in_h + 2 * padding[0] - dilation[0] * (k_h - 1) - 1) // stride[0] + 1
+    out_w = (in_w + 2 * padding[1] - dilation[1] * (k_w - 1) - 1) // stride[1] + 1
+    rc_chunk = tvm.reduce_axis((0, channel_per_group_chunk), name="rc_chunk")
+    rc_block = tvm.reduce_axis((0, in_channel_block), name="rc_block")
+    rh = tvm.reduce_axis((0, k_h))
+    rw = tvm.reduce_axis((0, k_w))
+
+    padded = zero_pad2d_nchwc(inputs, padding=padding)
+    output = tvm.compute(
+        (batch_size, out_channel_chunk, out_h, out_w, out_channel_block),
+        lambda b, c_c, h, w, c_b: tvm.sum(
+            (padded[b, c_c // out_channel_per_group * channel_per_group_chunk + rc_chunk, 
+                    h * stride[0] + rh * dilation[0], w * stride[1] + rw * dilation[1], rc_block]
+            * weight[c_c, rc_chunk, rh, rw, rc_block, c_b]),
+            axis=[rc_chunk, rc_block, rw, rh]
+        )
+    )
+    if bias is not None:
+        output = tvm.compute(
+            (batch_size, out_channel_chunk, out_h, out_w, out_channel_block),
+            lambda b, c_c, h, w, c_b: output[b, c_c, h, w, c_b] + bias[c_c, c_b]
         )
     return output
 

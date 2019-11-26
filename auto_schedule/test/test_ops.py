@@ -13,6 +13,7 @@ import numpy as np
 import copy
 from auto_schedule.nn import *
 from auto_schedule.utils import test_allclose
+import pyimpl
 
 
 def test_conv1d():
@@ -463,6 +464,40 @@ def test_block_circulant_matrix():
     else:
         print("Block_circulant_matrix case failed")
 
+
+def test_conv2d_nchwc():
+    #################################
+    # test basic case
+    inputs_np = np.random.uniform(-1, 1, size=[4, 6, 8, 8, 4]).astype(np.float32) * 1000
+    weight_np = np.random.uniform(-1, 1, size=[9, 2, 3, 3, 4, 4]).astype(np.float32) * 1000
+    bias_np = np.random.uniform(-1, 1, size=[9, 4]).astype(np.float32) * 1000
+    # inputs_np = np.ones([1, 1, 3, 3, 1], dtype=np.float32)
+    # weight_np = np.ones([1, 1, 3, 3, 1, 1], dtype=np.float32)
+    # bias_np = np.zeros([1, 1], dtype=np.float32)
+
+    output_np = pyimpl.conv2d_nchwc(inputs_np, weight_np, bias_np, stride=2, padding=1, dilation=2, groups=3)
+
+    tvm_ctx = tvm.context("llvm", 0)
+    inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
+    weight_tvm = tvm.nd.array(weight_np, tvm_ctx)
+    bias_tvm = tvm.nd.array(bias_np, tvm_ctx)
+    output_tvm = tvm.nd.array(np.zeros(output_np.shape).astype(np.float32), tvm_ctx)
+    inputs_t = tvm.placeholder(inputs_np.shape, dtype="float32")
+    weight_t = tvm.placeholder(weight_np.shape, dtype="float32")
+    bias_t = tvm.placeholder(bias_np.shape, dtype="float32")
+    output_t = conv2d_nchwc(inputs_t, weight_t, bias_t, stride=2, padding=1, dilation=2, groups=3)
+    s = tvm.create_schedule(output_t.op)
+    func = tvm.build(s, [inputs_t, weight_t, bias_t, output_t], "llvm")
+    func(inputs_tvm, weight_tvm, bias_tvm, output_tvm)
+
+    passed = test_allclose(output_tvm.asnumpy(), output_np, rtol=1e-5 * 1000, print_diff=True)
+
+    if passed == 1:
+        print("Conv2d_nchwc basic case passed!")
+    else:
+        print("Conv2d_nchwc basic case failed!")
+
+
 def test():
     test_conv1d()
     test_conv_transpose1d()
@@ -478,6 +513,7 @@ def test():
     test_batch_norm()
     test_block_circulant_matrix()
     test_depthwise_conv2d_nchw()
+    test_conv2d_nchwc()
 
 
 if __name__ == "__main__":
