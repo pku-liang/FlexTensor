@@ -136,7 +136,7 @@ def optimize(prefix, from_, shapes, target="llvm", dev_id=0, trials=100, timeout
         line = task.key + ":" + string
         print(line, file=logfile, flush=True)
         s, bufs = schedule_with_config(task.key, configs)
-        time_cost = evaluate(task.key, s, bufs, target, task.dev_id, 10, rpc_info)
+        time_cost = evaluate(task.key, s, bufs, target, task.dev_id, 100, rpc_info)
         print("Use", time_cost, "ms")
         print("Cost", end - beg, "s")
         print()
@@ -150,7 +150,7 @@ def test(task_key, configs, dev_id=None, rpc_info=None):
     # func = tvm.build(s, bufs, "cuda")
     # print(func.imported_modules[0].get_source())
     dev_id = dev_id if dev_id is not None else task.dev_id
-    time_cost = evaluate(task_key, s, bufs, task.target, dev_id, 10, rpc_info)
+    time_cost = evaluate(task_key, s, bufs, task.target, dev_id, 200, rpc_info)
     print(task_key, "use", time_cost, "ms")
     print()
 
@@ -224,8 +224,11 @@ if __name__ == "__main__":
                 )
     if args.test != "":
         with open(args.test, "r") as fin:
+            counter = 0
             for line in fin:
-                name, string = line.split(":", 1)
-                obj = json.loads(string)
-                configs = Config(obj[0], obj[1])
-                test(name, configs, dev_id=args.device, rpc_info=rpc_info)
+                if counter >= args.from_ and counter < args.to:
+                    name, string = line.split(":", 1)
+                    obj = json.loads(string)
+                    configs = Config(obj[0], obj[1])
+                    test(name, configs, dev_id=args.device, rpc_info=rpc_info)
+                counter += 1
