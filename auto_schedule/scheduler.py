@@ -383,7 +383,7 @@ class Scheduler(object):
                     if self.task.target == "cuda":
                         self.parallel = 1
                     else:
-                        self.parallel = min(self.parallel, os.cpu_count())
+                        self.parallel = 1 # min(self.parallel, os.cpu_count())
                     results = self.parallel_evaluate(configs, next_configs, number=self.number)
                     # recover parallel number
                     self.parallel = old_parallel
@@ -1613,6 +1613,214 @@ class OpScheduler(Scheduler):
                 s[op].pragma(kernel_scope, 'auto_unroll_max_step', step)
                 s[op].pragma(kernel_scope, 'unroll_explicit', explicit)
 
+        def _cpu_schedule_simple(s, op, op_state):
+            # always cache write here
+            # if op.num_outputs > 1:
+            #     raise RuntimeWarning("Too many outputs in one operation!")
+            write_cache = s.cache_write(op.output(0), "global")
+
+            # spatial split
+            spatial_axes = s[op].op.axis
+            splited_spatial_axes = []
+            if "spatial" in config and len(config["spatial"]) > 0:
+                # to align each axis
+                assert_print(len(config["spatial"]) == len(spatial_axes), "align failed")
+                for axis, nparts in zip(spatial_axes, config["spatial"]):
+                    nfactors = [1]
+                    count = len(nparts) - 1
+                    while count >= 0:
+                        nfactors.append(nparts[count] * nfactors[-1])
+                        count -= 1
+                    tmp_buffer = []
+                    num_factors = len(nfactors)
+                    for i in range(num_factors - 2):
+                        factor = nfactors[num_factors - 2 - i]
+                        part = nparts[i]
+                        if factor == 1:
+                            tmp_buffer.append(axis)
+                            axis = None
+                        elif part == 1:
+                            tmp_buffer.append(None)
+                        else:
+                            outer, axis = s[op].split(axis, factor=factor)
+                            tmp_buffer.append(outer)
+                    tmp_buffer.append(axis)
+                    splited_spatial_axes.append(tmp_buffer)
+            else:
+                for axis in spatial_axes:
+                    splited_spatial_axes.append([axis])
+            assert_print(len(splited_spatial_axes) > 0, "empty spatial axes")     # must be non-empty
+
+            # always reorder and fuse here
+            # this part actually suppose there is "spatial" in config
+            # which is avoidable
+            spatial_fuse_lsts = []
+            spatial_fuse_extents = []
+            reorder_lst = []
+            fused_spatial_axes = []
+            spatial_split_num_parts = len(splited_spatial_axes[0])
+            for count in range(spatial_split_num_parts):
+                tmp_buffer = [x[count] for x in splited_spatial_axes]
+                tmp_extent = reduce(lambda a, b: a * b, [x[count] for x in config["spatial"]])
+                spatial_fuse_lsts.append(tmp_buffer)
+                spatial_fuse_extents.append(tmp_extent)
+                reorder_lst.extend(tmp_buffer)
+            reorder_lst_without_none = list(filter(lambda x: x is not None, reorder_lst))
+            # print("reorder op", reorder_lst_without_none)
+            s[op].reorder(*reorder_lst_without_none)
+            for fuse_lst in spatial_fuse_lsts[:1]:
+                tmp_buffer = list(filter(lambda x: x is not None, fuse_lst))
+                # print("fuse op", tmp_buffer)
+                fused = s[op].fuse(*tmp_buffer)
+                fused_spatial_axes.append(fused)
+            kernel_scope = fused_spatial_axes[0]
+            if len(spatial_fuse_lsts) > 1:
+                count = 0
+                while config["spatial"][count][1] == 1:
+                    count += 1
+                next_pos_for_comptue_at = spatial_fuse_lsts[1][count]
+            else:
+                next_pos_for_comptue_at = kernel_scope 
+            
+            # always parallel here
+            s[op].parallel(kernel_scope)
+
+            # vectorize
+            if len(spatial_fuse_lsts) == 2:
+                count = len(spatial_fuse_lsts[1]) - 1
+                while count >= 1:
+                    if spatial_fuse_lsts[1][count] is not None and config["spatial"][1][count] > 1:
+                        # print("vectorize op", spatial_fuse_lsts[1][count])
+                        s[op].vectorize(spatial_fuse_lsts[1][count])
+                        break
+                    count -= 1
+            elif len(spatial_fuse_lsts) > 2:
+                count = len(spatial_fuse_lsts[-1]) - 1
+                while count >= 0:
+                    if spatial_fuse_lsts[-1][count] is not None and config["spatial"][count][-1] > 1:
+                        # print("vectorize op", spatial_fuse_lsts[-1][count])
+                        s[op].vectorize(spatial_fuse_lsts[-1][count])
+                        break
+                    count -= 1
+
+            # always compute at here
+            # print("compute at", next_pos_for_comptue_at)
+            s[write_cache].compute_at(s[op], next_pos_for_comptue_at)
+
+            # spatial_split for write cache
+            spatial_axes = s[write_cache].op.axis
+            num_spatial_axes = len(spatial_axes)
+            splited_spatial_axes = []
+            if "spatial" in config and len(config["spatial"]) > 0:
+                # to align each axis
+                assert_print(len(config["spatial"]) == len(spatial_axes), "align failed")
+                for axis, nparts in zip(spatial_axes, config["spatial"]):
+                    nfactors = [1]
+                    count = len(nparts) - 1
+                    while count >= 0:
+                        nfactors.append(nparts[count] * nfactors[-1])
+                        count -= 1
+                    tmp_buffer = []
+                    num_factors = len(nfactors)
+                    for i in range(num_factors - 2):
+                        factor = nfactors[num_factors - 2 - i]
+                        part = nparts[i]
+                        if factor == 1:
+                            tmp_buffer.append(axis)
+                            axis = None
+                        elif part == 1:
+                            tmp_buffer.append(None)
+                        else:
+                            outer, axis = s[write_cache].split(axis, factor=factor)
+                            tmp_buffer.append(outer)
+                    tmp_buffer.append(axis)
+                    splited_spatial_axes.append(tmp_buffer)
+            else:
+                for axis in spatial_axes:
+                    splited_spatial_axes.append([axis])
+            assert_print(len(splited_spatial_axes) > 0, "empty spatial axes")     # must be non-empty
+
+            # reduce_split for write cache
+            reduced_axes = s[write_cache].op.reduce_axis
+            num_reduce_axes = len(reduced_axes)
+            splited_reduced_axes = []
+            if "reduce" in config and len(config["reduce"]) > 0:
+                # to align each axis
+                assert_print(len(config["reduce"]) == len(reduced_axes), "align reduce failed")
+                for axis, nparts in zip(reduced_axes, config["reduce"]):
+                    nfactors = [1]
+                    count = len(nparts) - 1
+                    while count >= 0:
+                        nfactors.append(nparts[count] * nfactors[-1])
+                        count -= 1
+                    tmp_buffer = []
+                    num_factors = len(nfactors)
+                    for i in range(num_factors - 2):
+                        factor = nfactors[num_factors - 2 - i]
+                        part = nparts[i]
+                        if factor == 1:
+                            tmp_buffer.append(axis)
+                            axis = None
+                        elif part == 1:
+                            tmp_buffer.append(None)
+                        else:
+                            outer, axis = s[write_cache].split(axis, factor=factor)
+                            tmp_buffer.append(outer)
+                    tmp_buffer.append(axis)
+                    splited_reduced_axes.append(tmp_buffer)
+            else:
+                for axis in reduced_axes:
+                    splited_reduced_axes.append([axis])
+
+            # for easy align
+            reduce_split_num_parts = len(splited_reduced_axes[0])
+            assert reduce_split_num_parts == spatial_split_num_parts
+
+            # reorder hybrid for spatial and reduce
+            hybrid_axes = splited_spatial_axes + splited_reduced_axes
+            hybrid_fuse_lsts = []
+            hybrid_reorder_lst = []
+            for count in range(spatial_split_num_parts):
+                tmp_buffer = [x[count] for x in hybrid_axes]
+                hybrid_fuse_lsts.append(tmp_buffer)
+                hybrid_reorder_lst.extend(tmp_buffer)
+            if len(hybrid_fuse_lsts) > 1:
+                last_parts = hybrid_reorder_lst[-num_spatial_axes-num_reduce_axes:]
+                hybrid_reorder_lst = hybrid_reorder_lst[:-num_spatial_axes-num_reduce_axes]
+                tmp_buffer = last_parts[-num_reduce_axes:]
+                tmp_buffer.extend(last_parts[:-num_reduce_axes])
+                hybrid_reorder_lst.extend(tmp_buffer)
+            hybrid_reorder_lst_without_none = list(filter(lambda x: x is not None, hybrid_reorder_lst))
+            # print("reorder cache write", hybrid_reorder_lst_without_none)
+            s[write_cache].reorder(*hybrid_reorder_lst_without_none)
+
+            # fuse without reduce axes
+            # assert len(hybrid_fuse_lsts) > 0
+            # s[write_cache].fuse(*hybrid_fuse_lsts[0][:-num_reduce_axes])
+            
+            # unroll and vectorize without reduce axes
+            if len(hybrid_fuse_lsts) > 1:
+                rcount = num_spatial_axes - 1
+                while config["spatial"][rcount][-1] == 1:
+                    rcount -= 1
+                if rcount >= 0:
+                    # print("vectorize cache write", hybrid_fuse_lsts[-1][rcount])
+                    s[write_cache].vectorize(hybrid_fuse_lsts[-1][rcount])
+                for count in range(rcount):
+                    if config["spatial"][count][-1] > 1:
+                        # print("unroll cache write", hybrid_fuse_lsts[-1][count])
+                        s[write_cache].unroll(hybrid_fuse_lsts[-1][count])
+            if len(hybrid_fuse_lsts) > 2:
+                for count in range(num_spatial_axes):
+                    if config["spatial"][count][-2] > 1:
+                        # print("unroll cache write", hybrid_fuse_lsts[-2][count])
+                        s[write_cache].unroll(hybrid_fuse_lsts[-2][count])
+                # for count in range(num_reduce_axes):
+                #     if config["reduce"][count][-2] > 1:
+                #         print("unroll cache write", hybrid_fuse_lsts[-2][count + num_spatial_axes])
+                #         s[write_cache].unroll(hybrid_fuse_lsts[-2][count + num_spatial_axes])
+                
+
         if target == "cuda":
             # if hint == "split_fuse":
             #     print(hint)
@@ -1624,7 +1832,7 @@ class OpScheduler(Scheduler):
             #     raise RuntimeError("Unknown hint: %s" % hint)
             return _cuda_schedule_split_reorder_fuse
         elif target == "llvm":
-            return _cpu_schedule_split_fuse
+            return _cpu_schedule_simple
         else:
             raise RuntimeError("Currently no support for target %s"%target)  
 
@@ -1837,7 +2045,7 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
             space = generate_space_intra_op(op, down_graph, slevel=slevel, groups=3)
         elif task.target == "llvm":
             space = generate_space_intra_op(op, down_graph, slevel=slevel, rlevel=rlevel, 
-                                            unroll_policy="explicit", fuse_policy="off",
+                                            unroll_policy="off", fuse_policy="off",
                                             reorder_policy="off")
         else:
             raise RuntimeError("Currently no support for target %s"%task.target)
