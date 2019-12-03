@@ -9,6 +9,7 @@ from collections import namedtuple
 class Config(namedtuple("Config", ("op_config_lst", "graph_config"))):
     pass
 
+
 class RpcInfo(object):
     def __init__(self, host, port, target_host=None):
         self.host = host
@@ -47,9 +48,9 @@ def int_to_lst(value, bit=32, base=10):
 
 def powerx_lst(x, left, right):
     ret = []
-    beg = left
-    while not is_power_of_x(x, beg):
-        beg += 1
+    beg = 1
+    while beg < left:
+        beg *= x
     while beg < right:
         ret.append(beg)
         beg = beg * x
@@ -72,19 +73,12 @@ def get_factor_lst(value):
 
 def split_part_names(original, parts):
     assert isinstance(original, str) and isinstance(parts, int)
-    ret = [original + "." + str(i) for i in range(parts)]
-    return ret
+    return [original + "." + str(i) for i in range(parts)]
 
 
 def str_to_tuple(s):
     assert isinstance(s, str)
-    s = s.strip()
-    s = s[1:-1]
-    s = s.split(", ")
-    ret = []
-    for v in s:
-        ret.append(int(v))
-    return tuple(ret)
+    return tuple(int(x) for x in s.strip()[1:-1].split(","))
 
 
 def any_factor_split(value, number, allow_non_divisible='off'):
@@ -102,20 +96,20 @@ def recursive_factor_split(left, cur, number, ret, policy):
     if policy == 'power2':
         f_lst = get_factor_lst(left)
         f_lst.extend(powerx_lst(2, 1, left))
-        f_lst = list(sorted(list(set(f_lst))))
+        f_lst = list(set(f_lst))
     elif policy == 'continuous':
         f_lst = list(range(1, left + 1))
     else:
         f_lst = get_factor_lst(left)
-        f_lst = list(sorted(f_lst))
+        f_lst = sorted(f_lst)
     for f in f_lst:
-        recursive_factor_split(math.ceil(left / f), cur + [f], number - 1, ret, policy)
+        recursive_factor_split(left // f, cur + [f], number - 1, ret, policy)
 
 
 def three_factor_split(value):
     assert isinstance(value, int)
     ret = []
-    for i in range(1, value+1):
+    for i in range(1, value + 1):
         if value % i == 0:
             res = value // i
             factor_lst = get_factor_lst(res)
@@ -127,7 +121,7 @@ def three_factor_split(value):
 def two_factor_split(value):
     assert isinstance(value, int)
     ret = []
-    for i in range(1, value+1):
+    for i in range(1, value + 1):
         if value % i == 0:
             ret.append((i, value // i))
     return ret
@@ -159,35 +153,14 @@ def _dfs_interleave(cur, la, lb, pa, pb, enda, endb, res):
 
 
 def interleave(la, lb):
-    enda = len(la)
-    endb = len(lb)
     res = []
-    pa, pb = 0, 0
-    cur = []
-    _dfs_interleave(cur, la, lb, pa, pb, enda, endb, res)
+    _dfs_interleave([], la, lb, 0, 0, len(la), len(lb), res)
     return res
-
-
-def _dfs_premute(cur, lst, used, length, use_num, res):
-    if use_num == length:
-        res.append(cur)
-        return
-    for i in range(length):
-        if not used[i]:
-            used[i] = True
-            _dfs_premute(cur + [lst[i]], lst, used, length, use_num + 1, res)
-            used[i] = False
-    return
 
 
 def permute(lst):
-    res = []
-    length = len(lst)
-    used = [False for i in range(length)]
-    cur = []
-    use_num = 0
-    _dfs_premute(cur, lst, used, length, use_num, res)
-    return res
+    from itertools import permutations
+    return [list(x) for x in permutations(lst, len(lst))]
 
 
 def gumbel_softmax(logits):
@@ -207,9 +180,7 @@ def gumbel_softmax(logits):
 def parted_linear(x, left, right):
     import torch
     if left > right:
-        tmp = left
-        left = right
-        right = tmp
+        left, right = right, left
     return torch.relu(right - torch.relu(right - x) - left) + left
 
 
@@ -224,9 +195,7 @@ def _dfs_gen_enum(cur, cur_len, elements, length, res):
 
 def gen_enum(elements, length):
     res = []
-    cur = []
-    cur_len = 0
-    _dfs_gen_enum(cur, cur_len, elements, length, res)
+    _dfs_gen_enum([], 0, elements, length, res)
     return res
 
 
@@ -236,10 +205,9 @@ def _dfs_gen_group(cur, elements, p, length, left_groups, res, padding):
     elif left_groups > 1:
         # _dfs_gen_group(cur, elements, p, length, left_groups-1, res)
         for i in range(p + 1, length):
-            _dfs_gen_group(cur + [i], elements, i, length, left_groups-1, res, padding)
+            _dfs_gen_group(cur + [i], elements, i, length, left_groups - 1, res, padding)
     else:
         raise RuntimeError("At least 1 group")
-            
 
 
 def gen_group(elements, most_groups=3):
@@ -253,9 +221,10 @@ def gen_group(elements, most_groups=3):
 
 
 def fact(n):
-    if n <= 0:
-        return 1
-    return n * fact(n - 1)
+    acc = 1
+    while n > 0:
+        acc, n = acc * n, n - 1
+    return acc
 
 
 def comb(m, n):
@@ -301,7 +270,6 @@ def free_cuda():
         os.remove(filename)
         return [x[1] for x in memory_gpu]
     return ret
-
 
 
 def test_three_factor_split():
