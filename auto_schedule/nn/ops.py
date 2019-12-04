@@ -457,9 +457,9 @@ def conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, grou
 
     out_h = (in_h + 2 * padding[0] - dilation[0] * (k_h - 1) - 1) // stride[0] + 1
     out_w = (in_w + 2 * padding[1] - dilation[1] * (k_w - 1) - 1) // stride[1] + 1
-    rc = tvm.reduce_axis((0, channel_per_group))
-    rh = tvm.reduce_axis((0, k_h))
-    rw = tvm.reduce_axis((0, k_w))
+    rc = tvm.reduce_axis((0, channel_per_group), name="rc")
+    rh = tvm.reduce_axis((0, k_h), name="rh")
+    rw = tvm.reduce_axis((0, k_w), name="rw")
 
     padded = zero_pad2d(inputs, padding=padding)
     output = tvm.compute(
