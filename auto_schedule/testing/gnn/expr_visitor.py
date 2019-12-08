@@ -214,7 +214,6 @@ class ExprVisitor(object):
 
     def visit_cast(self, expr):
         """
-        ['a', 'b', 'dtype']
+        ['value', 'dtype']
         """
-        self.visit(expr.a)
-        self.visit(expr.b)
+        self.visit(expr.value)

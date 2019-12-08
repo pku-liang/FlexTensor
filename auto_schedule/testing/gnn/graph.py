@@ -1,6 +1,9 @@
 from __future__ import absolute_import
 
 
+import tvm
+
+
 class GraphNode(object):
     def __init__(self):
         pass
@@ -28,6 +31,9 @@ class TensorNode(GraphEdge):
     def __eq__(self, b):
         return isinstance(b, self.__class__) and self.data == b.data
 
+    def __str__(self):
+        return str(self.data)
+
 
 class IndexNode(GraphNode):
     def __init__(self, tvm_op, axis_pos, axis_type="spatial"):
@@ -36,33 +42,41 @@ class IndexNode(GraphNode):
         self.data1 = axis_pos
         self.data2 = axis_type
 
+    def _var(self):
+        if self.data2 == "spatial":
+            return self.data0.axis[self.data1].var
+        else:
+            return self.data0.reduce_axis[self.data1].var
+
     def __hash__(self):
-        tmp = 0 if self.data2 == "spatial" else 1
-        return self.data0.__hash__() * 100 + self.data1 * 10 + tmp
+        return self._var().__hash__()
 
     def __eq__(self, b):
-        return (isinstance(b, self.__class__) and
-                ((self.data0 == b.data0) and
-                (self.data1 == b.data1) and
-                (self.data2 == b.data2)))
+        tmp = set()
+        tmp.add(self._var())
+        if isinstance(b, self.__class__):
+            return b._var() in tmp
+        elif isinstance(b, tvm.expr.Var):
+            return b in tmp
+        else:
+            return False
+
+    def __str__(self):
+        return str(self._var())
 
 
-if __name__ == "__main__":
-    import tvm
-    from auto_schedule.examples import FUNC_TABLE
-    func = FUNC_TABLE["conv3d_channel_batch"].func
-    args = FUNC_TABLE["conv3d_channel_batch"].args
-    op, bufs = func(*args)
-    tmp = {}
-    node = TensorNode(op.output(0))
-    node1 = TensorNode(op.output(0))
-    node2 = TensorNode(op.input_tensors[0])
-    node3 = IndexNode(op, 0, "spatial")
-    node4 = IndexNode(op, 1, "spatial")
-    tmp[node1] = 0
-    print(node2 in tmp)
-    print(node3 in tmp)
-    tmp[node3] = 1
-    print(node4 in tmp, node == node1)
+class ConstNode(GraphNode):
+    def __init__(self, value):
+        self.data = value
+
+    def __hash__(self):
+        return self.data.__hash__()
+
+    def __eq__(self, b):
+        return self.data == b
+
+    def __str__(self):
+        return str(self.data)
+
     
         
