@@ -48,7 +48,7 @@ class IndexRelation(object):
         self.rel_type = rel_type
 
     def __str__(self):
-        return "[index=%s, type=%s]" % (self.indedx, self.rel_type)
+        return "[index=%s, type=%s]" % (self.index, self.rel_type)
 
 
 class ConstRelation(object):
