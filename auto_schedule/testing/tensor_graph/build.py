@@ -64,6 +64,8 @@ class Add(ExprNode):
         elif isinstance(left, Var) and isinstance(right, Var):
             if left == right:
                 return Mul(left, Val(2))
+        # TODO more rules
+        return self
         
 
     def __eq__(self, b):
@@ -84,6 +86,10 @@ class Sub(ExprNode):
         self.left = left
         self.right = right
 
+    def simplify(self):
+        # TODO more rules
+        return self
+
     def __eq__(self, b):
         if not isinstance(b, self,__class__):
             return False
@@ -101,6 +107,10 @@ class Mul(ExprNode):
         super(Mul, self).__init__()
         self.left = left
         self.right = right
+
+    def simplify(self):
+        # TODO more rules
+        return self
 
     def __eq__(self, b):
         if not isinstance(b, self,__class__):
@@ -120,6 +130,10 @@ class Div(ExprNode):
         self.left = left
         self.right = right
 
+    def simplify(self):
+        # TODO more rules
+        return self
+
     def __eq__(self, b):
         if not isinstance(b, self,__class__):
             return False
@@ -137,6 +151,10 @@ class Mod(ExprNode):
         super(Mod, self).__init__()
         self.left = left
         self.right = right
+
+    def simplify(self):
+        # TODO more rules
+        return self
 
     def __eq__(self, b):
         if not isinstance(b, self,__class__):
