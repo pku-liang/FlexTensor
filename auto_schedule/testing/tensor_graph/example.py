@@ -1,4 +1,6 @@
 import tvm
+import torch
+import torch_geometric
 
 
 def gemm(A, B, transposeA=False, transposeB=False):
@@ -138,5 +140,25 @@ def conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, grou
     return output
 
 
-def graph_gemm():
+def schedule_gemm_cuda(op, config):
+    s = tvm.create_schedule(op)
+    A = op.input_tensors[0]
+    B = op.input_tensors[1]
+    i, j = s[op].op.axis
+    bi, ii = s[op].split(i, nparts=config["spatial"][0][0])
+    vi, ii = s[op].split(ii, nparts=config["spatial"][0][1])
+    ti, ii = s[op].split(ii, nparts=config["spatial"][0][2])
+    bj, jj = s[op].split(j, nparts=config["spatial"][1][0])
+    vj, jj = s[op].split(jj, nparts=config["spatial"][1][1])
+    tj, jj = s[op].split(jj, naprts=config["spatial"][1][2])
+
+    s[op].reorder(bi, bj, vi, vj, ti, tj, ii, jj)
+
+    write_cache = s.cache_write(op.output(0), "local")
+    s[write_cache].compute_at(s[op], tj)
+    AA = s.cache_read()
+
+
+
+def graph_gemm(M, N, K):
     pass
