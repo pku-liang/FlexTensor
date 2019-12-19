@@ -1,4 +1,4 @@
-gemm_shapes = [
+old_gemm_shapes = [
     (32, 32, 32),
     (64, 64, 64),
     (128, 128, 128),
@@ -7,6 +7,13 @@ gemm_shapes = [
     (1024, 1024, 1024),
     (2048, 2048, 2048)
 ]
+
+gemm_shapes = []
+for i in range(5, 11):
+    for j in range(5, 11):
+        for k in range(5, 11):
+            gemm_shapes.append([2**i, 2**k, 2**j])
+
 
 test_gemm_shapes = [
     # batch

@@ -9,7 +9,7 @@ try:
     import torch.multiprocessing as _multi
 except ImportError:
     import multiprocessing as _multi
-multi = _multi.get_context("fork")
+multi = _multi.get_context("spawn")
 from tvm import rpc
 from collections import deque
 from queue import Empty
@@ -249,7 +249,11 @@ class Scheduler(object):
                     warm_up_results = self.parallel_evaluate(configs, warm_up_configs, number=self.number)
                     # the results are really measured
                     self.walker_group.add_perf_data(warm_up_indices, warm_up_results)
-                print("warm up", warm_up_results)
+                string = "[ "
+                for res in warm_up_results:
+                    string += "%.6f " % res
+                string += "]"
+                print("warm up [%.6f] %s" % (time.time(), string))
                 for count in range(warm_up_trials):
                     if warm_up_results[count] < float("inf"):
                         self.walker_group.record(warm_up_indices[count], warm_up_results[count])                    
@@ -319,7 +323,11 @@ class Scheduler(object):
                 results = self.parallel_evaluate(configs, next_configs, number=self.number)
                 # the results are really measured
                 self.walker_group.add_perf_data(next_indices_lst, results)
-            print("tune", results)
+            string = "[ "
+            for res in results:
+                string += "%.6f " % res
+            string += "]"
+            print("tune [%.6f] %s" % (time.time(), string))
             rewards = [np.tanh(max(from_value - result, 0.0)) for result in results]
 
             is_local_minimal = True
@@ -351,7 +359,7 @@ class Scheduler(object):
             else:
                 cur_best_value = minimal[1]
                 cur_best = minimal[0]
-            print("No. %d | The best currently" % trial, cur_best_value, cur_best)
+            print("No. %d | [%.6f] The best currently %.6f" % (trial, time.time(), cur_best_value), cur_best)
             # early stop becasue of lasting empty trials
             if count_incessant_empty_trial >= self.early_stop:
                 print("Early stop after continuous no trials %d times" % (count_incessant_empty_trial))
@@ -388,7 +396,11 @@ class Scheduler(object):
                     # recover parallel number
                     self.parallel = old_parallel
                     self.walker_group.add_perf_data(indices_lst, results)
-                    print("re-evaluate", results)
+                    string = "[ "
+                    for res in results:
+                        string += "%.6f " % res
+                    string += "]"
+                    print("re-evaluate [%.6f] %s" % (time.time(), string))
                     for indices, result in zip(indices_lst, results):
                         if result < float("inf"):
                             # if inf, maybe this measure is wrong
@@ -449,7 +461,7 @@ class Scheduler(object):
             if self.walker_group.top1_value() < best_value:
                 best_value = self.walker_group.top1_value()
                 best = self.walker_group.top1()
-            print("The best currently", best_value, best)
+            print("No. %d | [%.6f] The best currently %.6f" % (trial, time.time(), best_value), best)
             # early stop
             if math.fabs(best_value - value_early_stop) < 0.02:
                 early_stop_count += 1
@@ -481,7 +493,11 @@ class Scheduler(object):
                     next_configs = [self.walker_group.to_config(indices) for indices in indices_lst]
                     results = self.parallel_evaluate(configs, next_configs, number=self.number)
                     self.walker_group.add_perf_data(indices_lst, results)
-                    print("re-evaluate", results)
+                    string = "[ "
+                    for res in results:
+                        string += "%.6f " % res
+                    string += "]"
+                    print("re-evaluate [%.6f] %s" % (time.time(), string))
                     for indices, result in zip(indices_lst, results):
                         self.walker_group.record(indices, result, random_reject=False)
                 # re-warm up

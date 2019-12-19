@@ -79,7 +79,7 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
         method="searching", use_model=False, rpc_info=None, logfile=sys.stdout):
     ret = dict()
     for i, shape in enumerate(shapes):
-        print("Optimize gemm shape {}".format(shape), flush=True)
+        print("Optimize gemm shape %s [%.6f]" % (str(shape), time.time()), flush=True)
         N, K, M = shape
         # create an empty task but has the correct key we want
         task = Task(
@@ -105,7 +105,7 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
             )
         end = time.time()
         # print(tvm.lower(s, bufs, simple_mode=True))
-        print("######################################")
+        print("###################################### [%.6f]" % time.time)
         print("op schedules:")
         for config in configs.op_config_lst:
             print("----------------------------------")
