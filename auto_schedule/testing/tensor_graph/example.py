@@ -1,4 +1,5 @@
 import tvm
+import math
 import torch
 torch.set_printoptions(threshold=100000)
 import torch_geometric
@@ -6,7 +7,7 @@ import torch_geometric
 import model
 
 from auto_schedule.scheduler import schedule_with_config_ops
-from auto_schedule.utils import any_factor_split
+from auto_schedule.utils import any_factor_split, Config
 
 
 def gemm(A, B, transposeA=False, transposeB=False):
@@ -146,9 +147,10 @@ def conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, grou
     return output
 
 
-def schedule_ops(ops, bufs, config):
-    s, bufs = schedule_with_config_ops(ops, bufs, config)
+def schedule_ops(ops, bufs, config, target="llvm"):
+    s, bufs = schedule_with_config_ops(ops, bufs, config, target=target)
     return s, bufs
+
 
 """[
     [
@@ -167,15 +169,59 @@ def schedule_ops(ops, bufs, config):
     }
    ]
 """
-def gemm_config(M, N, K, logits):
-    sy = any_factor_split(M, 4)
-    sx = any_factor_split(N, 4)
-    sk = any_factor_split(K, 4)
+def gemm_config(M, N, K, logits_dict):
+    spatial_split_parts = 4
+    reduce_split_parts = 4
+    unroll_max_factor = 10
+
+    sy = any_factor_split(M, spatial_split_parts)
+    sx = any_factor_split(N, spatial_split_parts)
+    sk = any_factor_split(K, reduce_split_parts)
     unroll = []
     for i in range(1):
-        for j in range(11):
+        for j in range(unroll_max_factor + 1):
             unroll.append([i, 2**j])
+
+    def _rational(lst, max_val):
+        return torch.FloatTensor([[y / float(max_val) for y in x] for x in lst])
+    nsy = _rational(sy, M)
+    nsx = _rational(sx, N)
+    nsk = _rational(sk, K)
     
+    n_unroll = torch.FloatTensor([[x[0] / float(2) + 0.5, math.log2(x[1]) / unroll_max_factor] for x in unroll])
+
+    # get logits
+    spatial_logits = logits_dict["spatial"]
+    reduce_logits = logits_dict["reduce"]
+    unroll_logits = logits_dict["unroll"]
+    
+    # make choice
+    cy = torch.argmax(torch.matmul(nsy, spatial_logits[0].t()))
+    cx = torch.argmax(torch.matmul(nsx, spatial_logits[1].t()))
+    ck = torch.argmax(torch.matmul(nsk, reduce_logits[0].t()))
+    cu = torch.argmax(torch.matmul(n_unroll, unroll_logits.t()))
+    
+    # print choice
+    print("Print choice")
+    print("split y =", sy[cy])
+    print("split x =", sx[cx])
+    print("split k =", sk[ck])
+    print("unroll", unroll[cu])
+
+    # make config
+    op_config = [{
+        "spatial": [sy[cy], sx[cx]],
+        "reduce": [sk[ck]],
+        "inline": [],
+        "unroll": [unroll[cu]]
+    }]
+    graph_config = {
+        "spatial": [], 
+        "reduce": [], 
+        "inline": [[0]], 
+        "unroll": []
+    }
+    return Config(op_config, graph_config)
 
 
 def graph_gemm(M, N, K):
@@ -246,14 +292,19 @@ def graph_gemm(M, N, K):
 
 if __name__ == "__main__":
     g = graph_gemm(512, 512, 512)
-    out_channels = [32, 64, 128, 256, 128, 64, 32, 16, 8, 1]
+    out_channels = [32, 64, 256, 1024, 512, 4]
     in_channel = g.in_channel
     output = g.x
     for out_channel in out_channels:
         net = model.MyConv(in_channel, out_channel, g.num_node_type, g.num_edge_type)
         output = net(output, g.node_type_index, g.edge_index, g.edge_type_index)
         in_channel = out_channel
-    print(output)
+    unroll_classifier = torch.nn.Linear(in_channel, 2)
+    unroll_output = (unroll_classifier(output[9]) + unroll_classifier(output[10]) + unroll_classifier(output[11])) / 3.0
+
+    print(unroll_output)
+
+    # show groups
     groups = list(range(g.num_nodes))
     for i in range(g.num_nodes):
         for j in range(i + 1, g.num_nodes):
@@ -268,3 +319,26 @@ if __name__ == "__main__":
             if groups[i] == id:
                 tmp.append(i)
         print("Group %d: %s" % (id, str(tmp)))
+
+    # predict
+    logits = {}
+    logits["spatial"] = [output[9], output[10]]
+    logits["reduce"] = [output[11]]
+    logits["unroll"] = unroll_output
+    
+    config = gemm_config(512, 512, 512, logits)
+
+    # compute
+    A = tvm.placeholder((512, 512))
+    B = tvm.placeholder((512, 512))
+    C = gemm(A, B)
+
+    # schedule
+    s, bufs = schedule_ops([C.op], [A, B, C], config, target="cuda")
+
+    # build
+    func = tvm.build(s, bufs, "cuda")
+    print(func.imported_modules[0].get_source())
+
+    # run
+    

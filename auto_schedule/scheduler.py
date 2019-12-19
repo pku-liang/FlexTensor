@@ -2135,11 +2135,11 @@ def schedule_with_config(task_key, configs, op_pos=None, rewrite=False):
         args = task.args
         ops, bufs = func(*args)
         
-    s, bufs = schedule_with_config_ops(ops, bufs, configs, op_pos=op_pos)
+    s, bufs = schedule_with_config_ops(ops, bufs, configs, op_pos=op_pos, target=task.target)
     return s, bufs
     
 
-def schedule_with_config_ops(ops, bufs, configs, op_pos=None):
+def schedule_with_config_ops(ops, bufs, configs, op_pos=None, target="llvm"):
     """Schedule a task with given configs
 
     perform sequential schedule
@@ -2181,7 +2181,7 @@ def schedule_with_config_ops(ops, bufs, configs, op_pos=None):
         if not op_states[i].inline:
             op = op_lst[i]
             config = op_config_lst[i]
-            template = OpScheduler.generate_op_schedule(task.target, config)
+            template = OpScheduler.generate_op_schedule(target, config)
             template(s, op, op_states[i])   
 
     ###################################################
