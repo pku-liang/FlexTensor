@@ -6,14 +6,6 @@ from torch_geometric.nn.inits import glorot, zeros
 from torch_geometric.utils import softmax
 
 
-def _softmax(src, index, num_nodes):
-    out = src
-    out = out.exp()
-    out = out / (
-        scatter_add(out, index, dim=0, dim_size=num_nodes)[index] + 1e-16)
-    return out
-
-
 class MyConv(MessagePassing):
     def __init__(self, in_channels, out_channels, num_node_type=1, num_edge_type=1, heads=1, concat=True,
                  negative_slope=0.2, dropout=0, bias=True, **kwargs):

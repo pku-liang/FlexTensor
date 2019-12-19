@@ -2118,7 +2118,7 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
     s, bufs = schedule_with_config(task_key, configs, rewrite=rewrite)
 
     return s, bufs, configs
-    
+
 
 def schedule_with_config(task_key, configs, op_pos=None, rewrite=False):
     """Schedule a task with given configs
@@ -2134,6 +2134,16 @@ def schedule_with_config(task_key, configs, op_pos=None, rewrite=False):
         func = task.func
         args = task.args
         ops, bufs = func(*args)
+        
+    s, bufs = schedule_with_config_ops(ops, bufs, configs, op_pos=op_pos)
+    return s, bufs
+    
+
+def schedule_with_config_ops(ops, bufs, configs, op_pos=None):
+    """Schedule a task with given configs
+
+    perform sequential schedule
+    """
     # sort the ops, so that we can distinguish each op
     op_lst, down_graph = flatten_graph(ops)
     # state of ops

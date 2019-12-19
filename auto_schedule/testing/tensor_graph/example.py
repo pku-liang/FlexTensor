@@ -1,8 +1,12 @@
 import tvm
 import torch
+torch.set_printoptions(threshold=100000)
 import torch_geometric
 
 import model
+
+from auto_schedule.scheduler import schedule_with_config_ops
+from auto_schedule.utils import any_factor_split
 
 
 def gemm(A, B, transposeA=False, transposeB=False):
@@ -142,24 +146,36 @@ def conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, grou
     return output
 
 
-def schedule_gemm_cuda(op, config):
-    s = tvm.create_schedule(op)
-    A = op.input_tensors[0]
-    B = op.input_tensors[1]
-    i, j = s[op].op.axis
-    bi, ii = s[op].split(i, nparts=config["spatial"][0][0])
-    vi, ii = s[op].split(ii, nparts=config["spatial"][0][1])
-    ti, ii = s[op].split(ii, nparts=config["spatial"][0][2])
-    bj, jj = s[op].split(j, nparts=config["spatial"][1][0])
-    vj, jj = s[op].split(jj, nparts=config["spatial"][1][1])
-    tj, jj = s[op].split(jj, naprts=config["spatial"][1][2])
+def schedule_ops(ops, bufs, config):
+    s, bufs = schedule_with_config_ops(ops, bufs, config)
+    return s, bufs
 
-    s[op].reorder(bi, bj, vi, vj, ti, tj, ii, jj)
-
-    write_cache = s.cache_write(op.output(0), "local")
-    s[write_cache].compute_at(s[op], tj)
-    AA = s.cache_read()
-
+"""[
+    [
+        {
+            "spatial": [[32, 2, 16, 2], [8, 4, 16, 4]], 
+            "reduce": [[2048, 1, 1]], 
+            "inline": [], 
+            "unroll": [[1, 0]]
+        }
+    ], 
+    {
+        "spatial": [], 
+        "reduce": [], 
+        "inline": [[0]], 
+        "unroll": []
+    }
+   ]
+"""
+def gemm_config(M, N, K, logits):
+    sy = any_factor_split(M, 4)
+    sx = any_factor_split(N, 4)
+    sk = any_factor_split(K, 4)
+    unroll = []
+    for i in range(1):
+        for j in range(11):
+            unroll.append([i, 2**j])
+    
 
 
 def graph_gemm(M, N, K):
@@ -204,12 +220,24 @@ def graph_gemm(M, N, K):
             [6, 9],  # write edge
             [9, 6],
             [7, 11],
-            [11, 7]
+            [11, 7],
+            [0, 0],  # self edge
+            [1, 1],
+            [2, 2],
+            [3, 3],
+            [4, 4],
+            [5, 5],
+            [6, 6],
+            [7, 7],
+            [8, 8],
+            [9, 9],
+            [10, 10],
+            [11, 11]
         ]
     ).t()
 
     node_type_index = [0, 9, 12]
-    edge_type_index = [0, 12, 20, 24]
+    edge_type_index = [0, 12, 20, 24, 36]
 
     g = model.ComputeGraph(x, edge_index, node_type_index, edge_type_index)
 
@@ -218,7 +246,25 @@ def graph_gemm(M, N, K):
 
 if __name__ == "__main__":
     g = graph_gemm(512, 512, 512)
-    out_channel = 128
-    net = model.MyConv(g.in_channel, out_channel, g.num_node_type, g.num_edge_type)
-    output = net(g.x, g.node_type_index, g.edge_index, g.edge_type_index)
+    out_channels = [32, 64, 128, 256, 128, 64, 32, 16, 8, 1]
+    in_channel = g.in_channel
+    output = g.x
+    for out_channel in out_channels:
+        net = model.MyConv(in_channel, out_channel, g.num_node_type, g.num_edge_type)
+        output = net(output, g.node_type_index, g.edge_index, g.edge_type_index)
+        in_channel = out_channel
     print(output)
+    groups = list(range(g.num_nodes))
+    for i in range(g.num_nodes):
+        for j in range(i + 1, g.num_nodes):
+            if groups[j] != j:
+                continue
+            if all(torch.abs(output[i] - output[j]) < 1e-5):
+                groups[j] = i
+    roots = set(groups)
+    for id in roots:
+        tmp = []
+        for i in range(g.num_nodes):
+            if groups[i] == id:
+                tmp.append(i)
+        print("Group %d: %s" % (id, str(tmp)))
