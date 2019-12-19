@@ -1,5 +1,6 @@
 import tvm
 import math
+import time
 import torch
 torch.set_printoptions(threshold=100000)
 import torch_geometric
@@ -7,6 +8,7 @@ import torch_geometric
 import model
 
 from auto_schedule.scheduler import schedule_with_config_ops
+from auto_schedule.measure import _evaluate
 from auto_schedule.utils import any_factor_split, Config
 
 
@@ -188,7 +190,7 @@ def gemm_config(M, N, K, logits_dict):
     nsx = _rational(sx, N)
     nsk = _rational(sk, K)
     
-    n_unroll = torch.FloatTensor([[x[0] / float(2) + 0.5, math.log2(x[1]) / unroll_max_factor] for x in unroll])
+    n_unroll = torch.FloatTensor([[x[0] / float(2) + 0.5, math.log2(x[1]) / 1] for x in unroll])
 
     # get logits
     spatial_logits = logits_dict["spatial"]
@@ -196,10 +198,15 @@ def gemm_config(M, N, K, logits_dict):
     unroll_logits = logits_dict["unroll"]
     
     # make choice
-    cy = torch.argmax(torch.matmul(nsy, spatial_logits[0].t()))
-    cx = torch.argmax(torch.matmul(nsx, spatial_logits[1].t()))
-    ck = torch.argmax(torch.matmul(nsk, reduce_logits[0].t()))
-    cu = torch.argmax(torch.matmul(n_unroll, unroll_logits.t()))
+    feature_size = len(logits_dict["spatial"][0])
+    split_classifier = model.MLP(feature_size + spatial_split_parts)
+    unroll_classifier = model.MLP(feature_size + 2)
+    cy = torch.argmax(split_classifier(torch.cat([nsy, torch.zeros([nsy.shape[0], feature_size]) + spatial_logits[0]], dim=1)))
+    cx = torch.argmax(split_classifier(torch.cat([nsx, torch.zeros([nsx.shape[0], feature_size]) + spatial_logits[1]], dim=1)))
+    ck = torch.argmax(split_classifier(torch.cat([nsk, torch.zeros([nsk.shape[0], feature_size]) + reduce_logits[0]], dim=1)))
+    cu = torch.argmax(unroll_classifier(torch.cat([n_unroll, torch.zeros([n_unroll.shape[0], feature_size]) + unroll_logits], dim=1)))
+
+    print(cy, cx, ck, cu)
     
     # print choice
     print("Print choice")
@@ -240,7 +247,7 @@ def graph_gemm(M, N, K):
             [0, N],  # 10
             [0, K]   # 11
         ]
-    )
+    ) / 1024
     edge_index = torch.LongTensor(
         [
             [0, 1],  # stride edge
@@ -291,16 +298,22 @@ def graph_gemm(M, N, K):
 
 
 if __name__ == "__main__":
-    g = graph_gemm(512, 512, 512)
-    out_channels = [32, 64, 256, 1024, 512, 4]
+    M = 512
+    N = 64
+    K = 128
+    torch.manual_seed(100000)
+    g = graph_gemm(M, N, K)
+    out_channels = [32, 64, 1024, 4]
     in_channel = g.in_channel
     output = g.x
     for out_channel in out_channels:
-        net = model.MyConv(in_channel, out_channel, g.num_node_type, g.num_edge_type)
+        net = model.MyConv(in_channel, out_channel, g.num_node_type, g.num_edge_type, heads=4)
         output = net(output, g.node_type_index, g.edge_index, g.edge_type_index)
-        in_channel = out_channel
-    unroll_classifier = torch.nn.Linear(in_channel, 2)
-    unroll_output = (unroll_classifier(output[9]) + unroll_classifier(output[10]) + unroll_classifier(output[11])) / 3.0
+        in_channel = out_channel * 4
+
+    print(output)
+    
+    unroll_output = (output[9] + output[10] + output[11]) / 3.0
 
     print(unroll_output)
 
@@ -326,11 +339,11 @@ if __name__ == "__main__":
     logits["reduce"] = [output[11]]
     logits["unroll"] = unroll_output
     
-    config = gemm_config(512, 512, 512, logits)
+    config = gemm_config(M, N, K, logits)
 
     # compute
-    A = tvm.placeholder((512, 512))
-    B = tvm.placeholder((512, 512))
+    A = tvm.placeholder((M, K))
+    B = tvm.placeholder((K, N))
     C = gemm(A, B)
 
     # schedule
@@ -341,4 +354,5 @@ if __name__ == "__main__":
     print(func.imported_modules[0].get_source())
 
     # run
-    
+    cost = _evaluate(s, bufs, "cuda", 0, 10)
+    print("time cost is:", cost)

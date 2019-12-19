@@ -1,4 +1,6 @@
 import torch
+import torch.nn as nn
+import numpy as np
 from torch.nn import Parameter
 import torch.nn.functional as F
 from torch_geometric.nn.conv import MessagePassing
@@ -40,9 +42,11 @@ class MyConv(MessagePassing):
     def reset_parameters(self):
         for i in range(self.num_node_type):
             glorot(getattr(self, "node_weight_%d" % i))
+            # torch.nn.init.uniform(getattr(self, "node_weight_%d" % i))
             zeros(getattr(self, "node_bias_%d" % i))
         for i in range(self.num_edge_type):
             glorot(getattr(self, "edge_weight_%d" % i))
+            # torch.nn.init.uniform(getattr(self, "edge_weight_%d" % i))
 
 
     def forward(self, x, node_type_index, edge_index, edge_type_index, size=None):
@@ -97,6 +101,17 @@ class MyConv(MessagePassing):
         return '{}({}, {}, heads={})'.format(self.__class__.__name__,
                                              self.in_channels,
                                              self.out_channels, self.heads)
+
+
+class MLP(nn.Module):
+    def __init__(self, in_channel):
+        super(MLP, self).__init__()
+        self.l1 = nn.Linear(in_channel, 128)
+        self.l2 = nn.Linear(128, 256)
+        self.l3 = nn.Linear(256, 1)
+    
+    def forward(self, inputs):
+        return torch.relu(self.l3(torch.relu(self.l2(torch.relu(self.l1(inputs))))))
 
 
 class ComputeGraph(object):
