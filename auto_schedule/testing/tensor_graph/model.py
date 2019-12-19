@@ -107,6 +107,19 @@ class MyConv(MessagePassing):
                                              self.out_channels, self.heads)
 
 
+class ComputeGraph(object):
+    def __init__(self, x, edge_index, node_type_index, edge_type_index):
+        self.x = x
+        self.edge_index = edge_index
+        self.node_type_index = node_type_index
+        self.edge_type_index = edge_type_index
+        self.num_nodes = len(x)
+        self.num_edges = len(edge_index[0])
+        self.num_node_type = len(node_type_index) - 1
+        self.num_edge_type = len(edge_type_index) - 1
+        self.in_channel = len(x[0])
+
+
 if __name__ == "__main__":
     N = 3
     C = 2

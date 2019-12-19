@@ -2,6 +2,8 @@ import tvm
 import torch
 import torch_geometric
 
+import model
+
 
 def gemm(A, B, transposeA=False, transposeB=False):
     """Matrix multiplies matrix
@@ -161,4 +163,62 @@ def schedule_gemm_cuda(op, config):
 
 
 def graph_gemm(M, N, K):
-    pass
+    x = torch.FloatTensor(
+        [
+            [M, 0],  # 0, tensor nodes
+            [K, 0],  # 1
+            [1, 0],  # 2
+            [K, 0],  # 3
+            [N, 0],  # 4
+            [1, 0],  # 5
+            [M, 0],  # 6
+            [N, 0],  # 7
+            [1, 0],  # 8
+            [0, M],  # 9, index nodes
+            [0, N],  # 10
+            [0, K]   # 11
+        ]
+    )
+    edge_index = torch.LongTensor(
+        [
+            [0, 1],  # stride edge
+            [1, 0],
+            [1, 2],
+            [2, 1],
+            [3, 4],
+            [4, 3],
+            [4, 5],
+            [5, 4],
+            [6, 7],
+            [7, 6],
+            [7, 8],
+            [8, 7],
+            [0, 9],  # read edge
+            [9, 0],
+            [1, 10],
+            [10, 1],
+            [3, 10],
+            [10, 3],
+            [4, 11],
+            [11, 4],
+            [6, 9],  # write edge
+            [9, 6],
+            [7, 11],
+            [11, 7]
+        ]
+    ).t()
+
+    node_type_index = [0, 9, 12]
+    edge_type_index = [0, 12, 20, 24]
+
+    g = model.ComputeGraph(x, edge_index, node_type_index, edge_type_index)
+
+    return g
+
+
+if __name__ == "__main__":
+    g = graph_gemm(512, 512, 512)
+    out_channel = 128
+    net = model.MyConv(g.in_channel, out_channel, g.num_node_type, g.num_edge_type)
+    output = net(g.x, g.node_type_index, g.edge_index, g.edge_type_index)
+    print(output)
