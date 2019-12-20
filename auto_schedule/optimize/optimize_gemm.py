@@ -105,7 +105,7 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
             )
         end = time.time()
         # print(tvm.lower(s, bufs, simple_mode=True))
-        print("###################################### [%.6f]" % time.time)
+        print("###################################### [%.6f]" % time.time())
         print("op schedules:")
         for config in configs.op_config_lst:
             print("----------------------------------")
