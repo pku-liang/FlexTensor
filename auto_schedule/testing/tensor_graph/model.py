@@ -8,10 +8,10 @@ from torch_geometric.nn.inits import glorot, zeros
 from torch_geometric.utils import softmax
 
 
-class MyConv(MessagePassing):
+class TensorGAT(MessagePassing):
     def __init__(self, in_channels, out_channels, num_node_type=1, num_edge_type=1, heads=1, concat=True,
                  negative_slope=0.2, dropout=0, bias=True, **kwargs):
-        super(MyConv, self).__init__(aggr='add', **kwargs)
+        super(TensorGAT, self).__init__(aggr='add', **kwargs)
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.heads = heads
@@ -50,7 +50,7 @@ class MyConv(MessagePassing):
 
 
     def forward(self, x, node_type_index, edge_index, edge_type_index, size=None):
-        assert len(node_type_index) == self.num_node_type + 1, "a=%d, b=%d" % (node_type_index, self.num_node_type)
+        assert len(node_type_index) == self.num_node_type + 1, "a=%d, b=%d" % (len(node_type_index), self.num_node_type + 1)
         res = []
         for i in range(self.num_node_type):
             tmp_res = torch.matmul(x[node_type_index[i]:node_type_index[i+1]], getattr(self, "node_weight_%d" % i))
@@ -104,39 +104,90 @@ class MyConv(MessagePassing):
 
 
 class MLP(nn.Module):
-    def __init__(self, in_channel):
+    def __init__(self, in_channel, out_channel):
         super(MLP, self).__init__()
         self.l1 = nn.Linear(in_channel, 128)
-        self.l2 = nn.Linear(128, 256)
-        self.l3 = nn.Linear(256, 1)
+        self.l2 = nn.Linear(128, out_channel)
     
     def forward(self, inputs):
-        return torch.relu(self.l3(torch.relu(self.l2(torch.relu(self.l1(inputs))))))
+        return self.l2(torch.relu(self.l1(inputs)))
 
 
-class ComputeGraph(object):
-    def __init__(self, x, edge_index, node_type_index, edge_type_index):
-        self.x = x
-        self.edge_index = edge_index
-        self.node_type_index = node_type_index
-        self.edge_type_index = edge_type_index
-        self.num_nodes = len(x)
-        self.num_edges = len(edge_index[0])
-        self.num_node_type = len(node_type_index) - 1
-        self.num_edge_type = len(edge_type_index) - 1
-        self.in_channel = len(x[0])
+class GNNScheduler(nn.Module):
+    def __init__(
+        self, in_channel, spatial_channel=4, reduce_channel=3, 
+        fuse_channel=3, reorder_channel=1, unroll_channel=2, 
+        num_node_type=1, num_edge_type=1):
+        super(GNNScheduler, self).__init__()
+        self.spatial_channel = spatial_channel
+        self.reduce_channel = reduce_channel
+        self.fuse_channel = fuse_channel
+        self.reorder_channel = reorder_channel
+        self.unroll_channel = unroll_channel
 
+        self.layer1 = TensorGAT(in_channel, 32, num_node_type=num_node_type, num_edge_type=num_edge_type, heads=1)
+        self.layer2 = TensorGAT(32, 32, num_node_type=num_node_type, num_edge_type=num_edge_type, heads=2)
+        self.layer3 = TensorGAT(32 * 2, 128, num_node_type=num_node_type, num_edge_type=num_edge_type, heads=2)
+        self.layer4 = TensorGAT(128 * 2, 64, num_node_type=num_node_type, num_edge_type=num_edge_type, heads=1)
+        self.spatial_classifier = MLP(64 + spatial_channel, 1)
+        self.reduce_classifier = MLP(64 + reduce_channel, 1)
+        self.fuse_classifier = MLP(64 + fuse_channel, 1)
+        self.reorder_classifier = MLP(64 + reorder_channel, 1)
+        self.unroll_classifier = MLP(64 + unroll_channel, 1)
 
-if __name__ == "__main__":
-    N = 3
-    C = 2
-    K = 10
-    Nnode = 3
-    Nedge = 2
-    net = MyConv(C, K, Nnode, Nedge)
-    x = torch.rand([N, C])
-    edge_index = torch.LongTensor([[0, 1, 0, 2, 1, 2], [1, 0, 2, 0, 2, 1]])
-    node_type_index = [0, 1, 2, 3]
-    edge_type_index = [0, 2, 6]
-    outputs = net(x, node_type_index, edge_index, edge_type_index)
-    print(outputs)
+    def forward(self, x, node_type_index, edge_index, edge_type_index, schedule_choices):
+        """
+        args:
+        -------
+        x:                torch.FloatTensor [num_nodes, feature_size]
+        node_type_index:  list [tensor_nodes|spatial_nodes|reduce_nodes|add_nodes]
+        edge_index:       torch.LongTensor [2, num_edges]
+        edge_type_index:  list [self_edge|stride_edge|read_edge|write_edge|add_edge]
+        schedule_choices: dict {knob_name(spatial/reduce/fuse/reorder/unroll):torch.FloatTensor [num_choice, channel]}
+        --------
+        return:
+        --------
+        dict {knob_name(spatial/reduce/fuse/reorder/unroll):torch.FloatTensor [num_choice, 1]}
+        """
+        output1 = self.layer1(x, node_type_index, edge_index, edge_type_index)
+        act1 = torch.relu(output1)
+        output2 = self.layer2(act1, node_type_index, edge_index, edge_type_index)
+        act2 = torch.relu(output2)
+        output3 = self.layer3(act2, node_type_index, edge_index, edge_type_index)
+        act3 = torch.relu(output3)
+        output4 = self.layer4(act3, node_type_index, edge_index, edge_type_index)
+        act4 = torch.relu(output4 + output2)
+
+        ret = {}
+        # spatial
+        ret["spatial"] = []
+        for spatial_choices in schedule_choices["spatial"]:
+            spatial_logits = self.spatial_classifier(torch.cat([spatial_choices, act4.expand([spatial_choices.shape[0], -1], dim=1)]))
+            spatial_logits = torch.softmax(spatial_logits, dim=0)
+            ret["spatial"].append(spatial_logits)
+        # reduce
+        ret["reduce"] = []
+        for reduce_choices in schedule_choices["reduce"]:
+            reduce_logits = self.reduce_classifier(torch.cat([reduce_choices, act4.expand([reduce_choices.shape[0], -1], dim=1)]))
+            reduce_logits = torch.softmax(reduce_logits, dim=0)
+            ret["reduce"].append(reduce_logits)
+        # fuse
+        ret["fuse"] = []
+        for fuse_choices in schedule_choices["fuse"]:
+            fuse_logits = self.fuse_classifier(torch.cat([fuse_choices, act4.expand([fuse_choices.shape[0], -1], dim=1)]))
+            fuse_logits = torch.softmax(fuse_logits, dim=0)
+            ret["fuse"].append(fuse_logits)
+        # reorder
+        ret["reorder"] = []
+        for reorder_choices in schedule_choices["reorder"]:
+            reorder_logits = self.reorder_classifier(torch.cat([reorder_choices, act4.expand([reorder_choices.shape[0], -1], dim=1)]))
+            reorder_logits = torch.softmax(reorder_logits, dim=0)
+            ret["reorder"].append(reorder_logits)
+        # unroll
+        ret["unroll"] = []
+        for unroll_choices in schedule_choices["unroll"]:
+            unroll_logits = self.unroll_classifier(torch.cat([unroll_choices, act4.expand([unroll_choices.shape[0], -1], dim=1)]))
+            unroll_logits = torch.softmax(unroll_logits, dim=0)
+            ret["unroll"].append(unroll_logits)
+
+        return ret
