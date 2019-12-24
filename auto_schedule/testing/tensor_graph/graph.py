@@ -1,7 +1,7 @@
 import torch
 
 
-MAX_EXTENT = 1024
+MAX_EXTENT = 1
 
 
 class ComputeGraph(object):
@@ -15,6 +15,12 @@ class ComputeGraph(object):
         self.num_node_type = len(node_type_index) - 1
         self.num_edge_type = len(edge_type_index) - 1
         self.in_channel = len(x[0])
+
+    def to(self, device="cpu:0"):
+        self.x = self.x.to(device)
+        self.edge_index = self.edge_index.to(device)
+        self.node_type_index = self.node_type_index.to(device)
+        self.edge_type_index = self.edge_type_index.to(device)
 
 
 def graph_gemm(M, N, K):
@@ -77,8 +83,8 @@ def graph_gemm(M, N, K):
         ]
     ).t()
 
-    node_type_index = [0, 9, 11, 12, 12]
-    edge_type_index = [0, 12, 24, 32, 36, 36]
+    node_type_index = torch.LongTensor([0, 9, 11, 12, 12])
+    edge_type_index = torch.LongTensor([0, 12, 24, 32, 36, 36])
 
     g = ComputeGraph(x, edge_index, node_type_index, edge_type_index)
 
