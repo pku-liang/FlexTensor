@@ -232,7 +232,7 @@ def count_hits(decision_dict, label_dict, ret, soft_margin=None):
             if resi < 1e-5:
                 ret[key][0] += 1
             for j, margin in enumerate(margin_lst):
-                if resi < margin:
+                if resi < margin + 1e-5:
                     ret[key][2 + j] += 1
             ret[key][1] += 1
 
@@ -376,7 +376,7 @@ def run(epoch=10, pseudo_batch_size=8, train_ratio=0.8, lr=0.002,
         if (ep + 1) % check_dist == 0:
             torch.save(net.state_dict(), model_file)
         if (ep + 1) % log_dist == 0:
-            logger.info("Epoch=%d, Loss=%.6f" % (ep + 1, float(print_loss)))
+            logger.info("Epoch=%d, Loss=%.6f" % (ep + 1, float(print_loss / log_dist)))
             print_loss = 0.0
             _test()
             net.train()
