@@ -44,35 +44,31 @@ DataItem = namedtuple("DataItem", "op shape target config")
 ProcessedItem = namedtuple("ProcessedItem", "raw graph schedule_choices label")
 
 
-def load_data(filename):
-    if not (os.path.exists(filename) and os.path.isfile(filename)):
-        raise RuntimeError("File not found when loading data from %s" % filename)
-    ret = []
-    with open(filename, "r") as fin:
-        for line in fin:
-            if line:
-                key, string = line.split(":", 1)
-                op, _, shape_str, target_str = key.split("_")
-                shape = [int(x) for x in shape_str[1:-1].split(", ")]
-                target, dev_id_str = target_str[:-1].split("(")
-                dev_id = int(dev_id_str)
-                config = json.loads(string)
-                ret.append(DataItem(
-                    op=op, 
-                    shape=shape, 
-                    target=TargetItem(target=target, dev_id=dev_id), 
-                    config=utils.Config(config[0], config[1]))
-                )
-    return ret
+def load_data(train_file, test_file, eval_dev=-1):
+    for filename in [train_file, test_file]:
+        if not (os.path.exists(filename) and os.path.isfile(filename)):
+            raise RuntimeError("File not found when loading data from %s" % filename)
 
-
-def split_train_test_data(data, train_ratio, shuffle=True):
-    num_train = int(len(data) * train_ratio)
-    if shuffle:
-        np.random.shuffle(data)
-    train_data = data[:num_train]
-    test_data = data[num_train:]
-    return train_data, test_data
+    def _load(filename):
+        ret = []
+        with open(filename, "r") as fin:
+            for line in fin:
+                if line:
+                    key, string = line.split(":", 1)
+                    op, _, shape_str, target_str = key.split("_")
+                    shape = [int(x) for x in shape_str[1:-1].split(", ")]
+                    target, dev_id_str = target_str[:-1].split("(")
+                    dev_id = int(dev_id_str) if eval_dev < 0 else eval_dev
+                    config = json.loads(string)
+                    ret.append(DataItem(
+                        op=op, 
+                        shape=shape, 
+                        target=TargetItem(target=target, dev_id=dev_id), 
+                        config=utils.Config(config[0], config[1]))
+                    )
+        return ret
+    
+    return _load(train_file), _load(test_file)
 
 
 def to_tensor(data):
@@ -239,8 +235,9 @@ def count_hits(decision_dict, label_dict, ret, soft_margin=None):
 
 def run(epoch=10, pseudo_batch_size=8, train_ratio=0.8, lr=0.002, 
         check_dist=10, log_dist=100, device="cpu:0", test_only=False,
-        model_file="default.pkl", data_file="data.txt", continue_train=False,
-        override_model=False, use_mse=True, soft_margin=None):
+        model_file="default.pkl", train_file="train.txt", test_file="test.txt",
+        continue_train=False, override_model=False, use_mse=True,
+        soft_margin=None, eval_dev=-1):
     if ((test_only or continue_train) and 
         not (os.path.exists(model_file) and os.path.isfile(model_file))):
         raise RuntimeError("Model file not found %s" % model_file)
@@ -257,8 +254,7 @@ def run(epoch=10, pseudo_batch_size=8, train_ratio=0.8, lr=0.002,
 
     soft_margin = [] if soft_margin is None else soft_margin
     
-    raw_data = load_data(data_file)
-    _train_data, _test_data = split_train_test_data(raw_data, train_ratio)
+    _train_data, _test_data = load_data(train_file, test_file, eval_dev)
     train_data = preprocess(_train_data, onehot=onehot)
     test_data = preprocess(_test_data, onehot=onehot)
     move_data_to_device(train_data, device=device)
@@ -392,33 +388,35 @@ if __name__ == "__main__":
 
     parser.add_argument("--epoch", help="number of epoch", type=int, default=100)
     parser.add_argument("--batch", help="pseudo batch size", type=int, default=1)
-    parser.add_argument("--ratio", help="train ratio", type=float, default=0.8)
     parser.add_argument("--lr", help="learning rate", type=float, default=0.01)
     parser.add_argument("--dcheck", help="distance of checkpoint", type=int, default=10)
     parser.add_argument("--dlog", help="distance of logging", type=int, default=10)
     parser.add_argument("--dev", help="device to run on", type=str, default="cpu:0")
     parser.add_argument("--only_test", help="only test, no train", action="store_true")
     parser.add_argument("--fmodel", help="path to model file", type=str, default="default.pkl")
-    parser.add_argument("--fdata", help="path to data file", type=str, default="data.txt")
+    parser.add_argument("--ftrain", help="path to train data file", type=str, default="train.txt")
+    parser.add_argument("--ftest", help="path to test data file", type=str, default="test.txt")
     parser.add_argument("--retrain", help="continue to train existing model", action="store_true")
     parser.add_argument("--override", help="override existing model", action="store_true")
     parser.add_argument("--use_mse", help="use mse loss, otherwise cross_entorpy", action="store_true")
+    parser.add_argument("--eval_dev", help="device id to evaluate performance", type=int, default=-1)
 
     args = parser.parse_args()
     margin = [1, 2, 3, 4, 5]
     run(
         epoch=args.epoch,
         pseudo_batch_size=args.batch,
-        train_ratio=args.ratio,
         lr=args.lr,
         check_dist=args.dcheck,
         log_dist=args.dlog,
         device=args.dev,
         test_only=args.only_test,
         model_file=args.fmodel,
-        data_file=args.fdata,
+        train_file=args.ftrain,
+        test_file=args.ftest,
         continue_train=args.retrain,
         override_model=args.override,
         use_mse=args.use_mse,
-        soft_margin=margin
+        soft_margin=margin,
+        eval_dev=args.eval_dev
     )
