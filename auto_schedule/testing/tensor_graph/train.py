@@ -46,10 +46,14 @@ ProcessedItem = namedtuple("ProcessedItem", "raw graph schedule_choices label")
 
 def load_data(train_file, test_file, eval_dev=-1):
     for filename in [train_file, test_file]:
+        if filename is None:
+            continue
         if not (os.path.exists(filename) and os.path.isfile(filename)):
             raise RuntimeError("File not found when loading data from %s" % filename)
 
     def _load(filename):
+        if filename is None:
+            return []
         ret = []
         with open(filename, "r") as fin:
             for line in fin:
@@ -254,7 +258,10 @@ def run(epoch=10, pseudo_batch_size=8, train_ratio=0.8, lr=0.002,
 
     soft_margin = [] if soft_margin is None else soft_margin
     
-    _train_data, _test_data = load_data(train_file, test_file, eval_dev)
+    if test_only:
+        _train_data, _test_data = load_data(None, test_file, eval_dev)
+    else:
+        _train_data, _test_data = load_data(train_file, test_file, eval_dev)
     train_data = preprocess(_train_data, onehot=onehot)
     test_data = preprocess(_test_data, onehot=onehot)
     move_data_to_device(train_data, device=device)
@@ -333,10 +340,13 @@ def run(epoch=10, pseudo_batch_size=8, train_ratio=0.8, lr=0.002,
             arith_dev = np.array(percent_lst).var()
             logger.info(">>>> exceed ratio: %.6f" % (float(exceed_count) / total))
             logger.info(">>>> arithmetic average speedup: %.6f (dev %.6f)" % (arith_mean, arith_dev))
+            return arith_mean
         elif _has_auto_schedule:
             logger.info(">>>> Performance test skipped")
+            return -1
         else:
             logger.info(">>>> Performance results not availabel, consider installing auto_schedule")
+            return -1
 
     if test_only:
         logger.info("Test Only.")
@@ -348,6 +358,7 @@ def run(epoch=10, pseudo_batch_size=8, train_ratio=0.8, lr=0.002,
     count_batch = 0
     print_loss = 0.0
     loss = 0.0
+    best_perf = -1
 
     net.train()
     for ep in range(epoch):
@@ -369,15 +380,21 @@ def run(epoch=10, pseudo_batch_size=8, train_ratio=0.8, lr=0.002,
                 count_batch = 0
                 loss = 0.0
 
-        if (ep + 1) % check_dist == 0:
-            torch.save(net.state_dict(), model_file)
+        if (ep + 1) % check_dist == 0 or ep == epoch:
+            perf = _test()
+            net.train()
+            if perf - best_perf >= 0:
+                best_perf = perf
+                torch.save(net.state_dict(), model_file)
+                logger.info("Model checkpoint done!")
+            else:
+                logger.info("Model checkpoint skipped!")
+            if best_perf > 0:
+                logger.info("The best performance speedup: %.6f" % best_perf)
         if (ep + 1) % log_dist == 0:
             logger.info("Epoch=%d, Loss=%.6f" % (ep + 1, float(print_loss / log_dist)))
             print_loss = 0.0
-            _test()
-            net.train()
 
-    torch.save(net.state_dict(), model_file)
     logger.info("Train done! Starting test...")
     _test()
     logging.info("Test done! All done!")
