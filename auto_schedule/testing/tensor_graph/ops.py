@@ -148,5 +148,5 @@ def GEMM(M, K, N):
 def Conv2d(N, C, H, W, K, k, stride=1, padding=0, dilation=1, groups=1):
     A = tvm.placeholder((N, C, H, W), name="A")
     B = tvm.placeholder((K, C, k, k), name="B")
-    C = conv2d_nchw(A, B, bias=None, stride=stride, padding=padding, dialtion=dilation, groups=groups)
+    C = conv2d_nchw(A, B, bias=None, stride=stride, padding=padding, dilation=dilation, groups=groups)
     return [C.op], [A, B, C]

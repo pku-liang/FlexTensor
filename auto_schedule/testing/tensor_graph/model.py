@@ -171,11 +171,6 @@ class GNNScheduler(nn.Module):
         output4 = self.layer4(act3, node_type_index, edge_index, edge_type_index)
         act4 = torch.relu(output4 + output2)
 
-        if self.last_act4 is not None:
-            res = torch.nn.functional.mse_loss(act4, self.last_act4)
-            # print("Debug: act4 variation=", res)
-        self.last_act4 = act4.detach()
-
         # different type of nodes
         tensor_nodes_act = act4[node_type_index[0]:node_type_index[1]]
         spatial_nodes_act = act4[node_type_index[1]:node_type_index[2]]

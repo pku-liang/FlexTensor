@@ -1,33 +1,18 @@
 import os
+import graph
+import torch
 import tvm
 import copy
 import math
 import json
 import utils
-import graph
 import model
 import space
 import ops
-import torch
 import numpy as np
 import logging
 import argparse
 
-formatter = logging.Formatter("[%(levelname)s] %(message)s (%(asctime)s)")
-
-fh = logging.FileHandler("log_train.txt")
-fh.setLevel(logging.DEBUG)
-fh.setFormatter(formatter)
-
-sh = logging.StreamHandler()
-sh.setLevel(logging.DEBUG)
-sh.setFormatter(formatter)
-
-logger = logging.getLogger("train")
-logger.setLevel(logging.DEBUG)
-logger.addHandler(fh)
-logger.addHandler(sh)
-logger.info("############# New Task ###########")
 
 from collections import namedtuple, deque
 try:
@@ -168,6 +153,8 @@ def get_compute(op, shape):
 def get_graph(op, shape):
     if op == "gemm":
         return graph.graph_gemm(*shape)
+    elif op == "conv2d":
+        return graph.conv2d_graph(*shape)
     else:
         raise RuntimeError("Not supported op graph type: %s" % op)
 
@@ -417,8 +404,26 @@ if __name__ == "__main__":
     parser.add_argument("--override", help="override existing model", action="store_true")
     parser.add_argument("--use_mse", help="use mse loss, otherwise cross_entorpy", action="store_true")
     parser.add_argument("--eval_dev", help="device id to evaluate performance", type=int, default=-1)
+    parser.add_argument("--flog", help="filename of log", type=str, default="log_train.txt")
 
     args = parser.parse_args()
+
+    formatter = logging.Formatter("[%(levelname)s] %(message)s (%(asctime)s)")
+
+    fh = logging.FileHandler(args.flog)
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(formatter)
+
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.DEBUG)
+    sh.setFormatter(formatter)
+
+    logger = logging.getLogger("train")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(fh)
+    logger.addHandler(sh)
+    logger.info("############# New Task ###########")
+
     margin = [1, 2, 3, 4, 5]
     run(
         epoch=args.epoch,
