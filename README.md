@@ -1,10 +1,11 @@
-# AutoScheduler for Tensor Computations
+# FlexTensor
 
 ## Introductions
 
-This auto-scheduler is used to automatically optimize tensor computations for CPU/GPU and is aiming at more targets in the future.
-It relies on tensor compiler [TVM](https://github.com/dmlc/tvm) to generate codes for these targets.
-Currently it uses profile-based method in searching for best schedules and plans to support more advanced methods in the future.
+This framework is used to automatically optimize tensor computations and is aiming at heterogenerous systems.
+It relies on tensor compiler [TVM](https://github.com/dmlc/tvm) to generate codes for different targets.
+Currently it uses profile-based method in searching for best schedules on GPU & GPU and plans to support more advanced methods in the future.
+For now only CPU & GPU are open-sourced.
 
 
 ## Installation
@@ -14,10 +15,10 @@ Requires: `Python 3.5+`, `Numpy`
 1. Install TVM, follow the [instructions](https://docs.tvm.ai/install/from_source.html).
 2. Clone this repo:
    ```sh
-   git clone https://github.com/KnowingNothing/AutoScheduler.git
+   git clone https://github.com/KnowingNothing/FlexTensor.git
    ```
 3. Set the environments:
-   `export AUTO_HOME=path/to/AutoScheduler`
+   `export AUTO_HOME=path/to/FlexTensor`
    `export PYTHONPATH=$AUTO_HOME:$PYTHONPATH`
 
 To run the baselines, `PyTorch` is required.
@@ -67,7 +68,7 @@ def wrap_gemm(N, K, M):
 ```
 Then register a task.
 ```py
-from auto_schedule.task import register_task, Task
+from flextensor.task import register_task, Task
 
 '''
 To create a task, the parameters are:
@@ -94,7 +95,7 @@ Existing tasks are registered in `task.py`.
 ### 3. Push the button
 
 ```py
-from auto_schedule.scheduler import schedule
+from flextensor.scheduler import schedule
 
 s, bufs, configs = schedule(
             task.key, # give the key of target task
@@ -117,7 +118,7 @@ The resulting `s` and `bufs` can be directly used to generate codes, the resulti
 # directly use the results
 func = tvm.build(s, bufs, task.target)
 # use the configs
-from auto_schedule.scheduler import schedule_with_config
+from flextensor.scheduler import schedule_with_config
 
 s, bufs = schedule_with_config(task_key, configs)
 func = tvm.build(s, bufs, task.target)
