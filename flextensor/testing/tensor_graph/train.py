@@ -23,7 +23,7 @@ try:
     from flextensor.scheduler import schedule_with_config_ops
     _has_flextensor = True
 except ImportError:
-    print("Can't import flextensor, please install it from https://github.com/KnowingNothing/AutoScheduler.git")
+    print("Can't import flextensor, please install it from https://github.com/KnowingNothing/FlexTensor.git")
     print("No performance test")
     _has_flextensor = False
     
