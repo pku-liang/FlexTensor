@@ -1,6 +1,8 @@
 import os
-import graph
+import graph as _graph
 import torch
+import torch.multiprocessing as _multi
+multi = _multi.get_context("spawn")
 import tvm
 import copy
 import math
@@ -12,6 +14,8 @@ import ops
 import numpy as np
 import logging
 import argparse
+import signal
+import psutil
 
 
 from collections import namedtuple, deque
@@ -19,8 +23,8 @@ try:
     from auto_schedule.scheduler import schedule_with_config_ops
     _has_auto_schedule = True
 except ImportError:
-    logger.warn("Can't import auto_schedule, please install it from https://github.com/KnowingNothing/AutoScheduler.git")
-    logger.warn("No performance test")
+    print("Can't import auto_schedule, please install it from https://github.com/KnowingNothing/AutoScheduler.git")
+    print("No performance test")
     _has_auto_schedule = False
     
 
@@ -61,7 +65,7 @@ def load_data(train_file, test_file, eval_dev=-1):
 
 
 def to_tensor(data):
-    return torch.FloatTensor(data) / graph.MAX_EXTENT
+    return torch.FloatTensor(data) / _graph.MAX_EXTENT
 
 
 def preprocess(dataset, onehot=False):
@@ -150,11 +154,21 @@ def get_compute(op, shape):
         raise RuntimeError("Not supported op compute type: %s" % op)
 
 
+def evaluate(op_name, shape, config, target, dev_id, q):
+    tvm_op_lst, tvm_bufs = get_compute(op_name, shape)
+    s, bufs = schedule_with_config_ops(tvm_op_lst, tvm_bufs, config, target=target)
+    try:
+        dec_cost = _evaluate(s, bufs, target, dev_id, number=10)
+    except Exception as e:
+        dec_cost = str(e)
+    q.put(dec_cost)
+
+
 def get_graph(op, shape):
     if op == "gemm":
-        return graph.graph_gemm(*shape)
+        return _graph.graph_gemm(*shape)
     elif op == "conv2d":
-        return graph.conv2d_graph(*shape)
+        return _graph.conv2d_graph(*shape)
     else:
         raise RuntimeError("Not supported op graph type: %s" % op)
 
@@ -222,6 +236,50 @@ def count_hits(decision_dict, label_dict, ret, soft_margin=None):
                 if resi < margin + 1e-5:
                     ret[key][2 + j] += 1
             ret[key][1] += 1
+
+
+def kill_child_processes(parent_pid, sig=signal.SIGTERM):
+    """kill all child processes recursively"""
+    try:
+        parent = psutil.Process(parent_pid)
+    except psutil.NoSuchProcess:
+        return
+    children = parent.children(recursive=True)
+    for process in children:
+        try:
+            process.send_signal(sig)
+        except psutil.NoSuchProcess:
+            return
+
+
+class Result(object):
+    def __init__(self, p, q):
+        self.p = p
+        self.q = q
+
+    def get(self, timeout=1):
+        try:
+            res = self.q.get(block=True, timeout=timeout)
+        except Exception as e:
+            res = RuntimeError(str(e))
+        if self.p.is_alive():
+            kill_child_processes(self.p.pid)
+            self.p.terminate()
+        self.p.join()
+        self.q.close()
+        self.q.join_thread()
+        del self.p
+        del self.q
+        return res
+
+
+def parallel_execute(op_name, shape, config, target, dev_id):
+    q = multi.Queue()
+    p = multi.Process(
+        target=evaluate, 
+        args=(op_name, shape, config, target, dev_id, q))
+    p.start()
+    return Result(p, q)
 
 
 def run(epoch=10, pseudo_batch_size=8, train_ratio=0.8, lr=0.002, 
@@ -295,18 +353,32 @@ def run(epoch=10, pseudo_batch_size=8, train_ratio=0.8, lr=0.002,
                         index = decision_dict[key][i]
                         config.op_config_lst[-1][key][i] = subspace.get_entity(index)
                 # performance of this decision
-                s, bufs = schedule_with_config_ops(tvm_op_lst, tvm_bufs, config, target=data.raw.target.target)
-                try:
-                    dec_cost = _evaluate(s, bufs, data.raw.target.target, data.raw.target.dev_id, number=10)
-                except Exception as e:
-                    dec_cost = float("inf")
+                # use process not for performance but for robustness
+                dec_res = parallel_execute(data.raw.op, data.raw.shape, config, data.raw.target.target, data.raw.target.dev_id)
+                dec_cost = dec_res.get(timeout=10)
+                if not isinstance(dec_cost, float):
                     logger.warn("Error decision")
-                # performance of target
-                s, bufs = schedule_with_config_ops(tvm_op_lst, tvm_bufs, data.raw.config, target=data.raw.target.target)
-                label_cost = _evaluate(s, bufs, data.raw.target.target, data.raw.target.dev_id, number=10)
+                    dec_cost = float("inf")
+                label_res = parallel_execute(data.raw.op, data.raw.shape, data.raw.config, data.raw.target.target, data.raw.target.dev_id)
+                label_cost = label_res.get(timeout=10)
+                if not isinstance(label_cost, float):
+                    logger.warn("Error label")
+                    label_cost = float("inf")
+                # s, bufs = schedule_with_config_ops(tvm_op_lst, tvm_bufs, config, target=data.raw.target.target)
+                # try:
+                #     dec_cost = _evaluate(s, bufs, data.raw.target.target, data.raw.target.dev_id, number=10)
+                # except Exception as e:
+                #     dec_cost = float("inf")
+                #     logger.warn("Error decision")
+                # # performance of target
+                # s, bufs = schedule_with_config_ops(tvm_op_lst, tvm_bufs, data.raw.config, target=data.raw.target.target)
+                # label_cost = _evaluate(s, bufs, data.raw.target.target, data.raw.target.dev_id, number=10)
                 if dec_cost < label_cost:
                     exceed_count += 1
-                percent_lst.append(label_cost / dec_cost)
+                if (dec_cost == float("inf") and label_cost == float("inf")):
+                    percent_lst.append(1.0)
+                else:
+                    percent_lst.append(label_cost / dec_cost)
         total = len(test_data)
         logger.info("Test results:")
         string = ">>>> Accuracy: [margins: 0.0"
@@ -361,6 +433,7 @@ def run(epoch=10, pseudo_batch_size=8, train_ratio=0.8, lr=0.002,
             if count_batch == pseudo_batch_size:
                 # loss = loss / pseudo_batch_size
                 print_loss += loss.detach()
+                loss = loss * _graph.MAX_EXTENT
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()

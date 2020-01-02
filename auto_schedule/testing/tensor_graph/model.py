@@ -147,6 +147,7 @@ class GNNScheduler(nn.Module):
 
         # debug
         self.last_act4 = None
+        self.max_round = 10
 
     def forward(self, x, node_type_index, edge_index, edge_type_index, schedule_choices):
         """
@@ -164,12 +165,22 @@ class GNNScheduler(nn.Module):
         """
         output1 = self.layer1(x, node_type_index, edge_index, edge_type_index)
         act1 = torch.relu(output1)
+        record = act1.detach()
         output2 = self.layer2(act1, node_type_index, edge_index, edge_type_index)
         act2 = torch.relu(output2)
-        output3 = self.layer3(act2, node_type_index, edge_index, edge_type_index)
-        act3 = torch.relu(output3)
-        output4 = self.layer4(act3, node_type_index, edge_index, edge_type_index)
-        act4 = torch.relu(output4 + output2)
+        count = 1
+        while (torch.abs(record - act2) >= 1e-5).any() and count < self.max_round:
+            record = act2.detach()
+            output2 = self.layer2(act2, node_type_index, edge_index, edge_type_index)
+            act2 = torch.relu(output2)
+            count += 1
+        act4 = torch.relu(output1 + output2)  # hack
+        
+        # act2 = torch.relu(output2)
+        # output3 = self.layer3(act2, node_type_index, edge_index, edge_type_index)
+        # act3 = torch.relu(output3)
+        # output4 = self.layer4(act3, node_type_index, edge_index, edge_type_index)
+        # act4 = torch.relu(output4 + output2)
 
         # different type of nodes
         tensor_nodes_act = act4[node_type_index[0]:node_type_index[1]]
