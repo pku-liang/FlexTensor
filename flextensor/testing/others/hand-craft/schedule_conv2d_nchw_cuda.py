@@ -7,7 +7,7 @@ Target NVIDIA GPU P100
 """
 import tvm 
 from flextensor.measure import _evaluate
-from flextensor.nn import YoloConvLayer17
+from flextensor.nn import YoloConvLayer10
 
 
 def schedule_yolo_conv_cuda(s, outputs, inputs, weight):
@@ -137,7 +137,7 @@ def schedule_yolo_conv_opencl(s, outputs, inputs, weight):
 
 def try_yolo_conv_cuda(batch_size=1):
     # get the compute
-    yolo_conv = YoloConvLayer17()
+    yolo_conv = YoloConvLayer10()
     input_shape = yolo_conv.get_intput_shape()
     inputs = tvm.placeholder((batch_size, *input_shape), dtype="float32")
     weight = yolo_conv.get_weight()
@@ -162,12 +162,12 @@ def try_yolo_conv_cuda(batch_size=1):
     verify = tvm.ir_pass.VerifyGPUCode(stmt, kwargs)
     print(verify)
     time_cost = _evaluate(s, arg_bufs, "cuda", dev_id, 10)
-    print("Yolo conv17 use", time_cost, "ms")
+    print("Yolo conv10 use", time_cost, "ms")
 
 
 def try_yolo_conv_opencl(batch_size=1):
     # get the compute
-    yolo_conv = YoloConvLayer17()
+    yolo_conv = YoloConvLayer10()
     input_shape = yolo_conv.get_intput_shape()
     inputs = tvm.placeholder((batch_size, *input_shape), dtype="float32")
     weight = yolo_conv.get_weight()
