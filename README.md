@@ -16,7 +16,7 @@ a manual development process often takes months or even
 years, which falls far behind the rapid evolution of the application
 algorithms.
 
-In this paper, we introduce FlexTensor, which is a schedule
+We introduce FlexTensor, which is a schedule
 exploration and optimization framework for tensor computation
 on heterogeneous systems. FlexTensor can optimize
 tensor computation programs without human interference,
