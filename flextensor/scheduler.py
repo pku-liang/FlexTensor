@@ -2061,7 +2061,7 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
             space = generate_space_intra_op(op, down_graph, slevel=slevel, rlevel=rlevel, groups=3)
         elif task.target == "llvm":
             rslevel = max(slevel, rlevel)
-            space = generate_space_intra_op(op, down_graph, slevel=srlevel, rlevel=srlevel, 
+            space = generate_space_intra_op(op, down_graph, slevel=rslevel, rlevel=rslevel, 
                                             unroll_policy="off", fuse_policy="off",
                                             reorder_policy="off")
         else:
