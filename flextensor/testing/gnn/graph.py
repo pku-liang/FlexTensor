@@ -56,7 +56,7 @@ class IndexNode(GraphNode):
         tmp.add(self._var())
         if isinstance(b, self.__class__):
             return b._var() in tmp
-        elif isinstance(b, tvm.expr.Var):
+        elif isinstance(b, tvm.tir.Var):
             return b in tmp
         else:
             return False

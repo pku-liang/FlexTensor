@@ -607,7 +607,7 @@ def relation_from_op(op):
     """
     get relation from one op
     """
-    assert isinstance(op, tvm.tensor.ComputeOp), strict_limit("tvm.tensor.ComputeOp")
+    assert isinstance(op, tvm.te.tensor.ComputeOp), strict_limit("tvm.te.tensor.ComputeOp")
     relation_lst = []
     for body in op.body:
         part_lst = relation_from_expr(body)
@@ -639,7 +639,7 @@ def build(ops):
         part_relation_lst = relation_from_op(cur_op)
         relation_lst.extend(part_relation_lst)
         for t in cur_op.input_tensors:
-            if isinstance(t.op, tvm.tensor.ComputeOp):
+            if isinstance(t.op, tvm.te.tensor.ComputeOp):
                 q.put(t.op)
 
     # then build a graph from relations
@@ -655,12 +655,12 @@ if __name__ == "__main__":
     W = 14
     K = 512
     k = 3
-    Img = tvm.placeholder([N, C, H, W], dtype="float32")
-    Kernel = tvm.placeholder([K, C, k, k], dtype="float32")
+    Img = tvm.te.placeholder([N, C, H, W], dtype="float32")
+    Kernel = tvm.te.placeholder([K, C, k, k], dtype="float32")
     Outputs = conv2d_nchw(Img, Kernel, None, 1, 1, 1, 1)
 
-    a = tvm.placeholder([4, 4])
-    b = tvm.compute([4, 4], lambda i, j: a[(3 * i + j) * 4 - 12 * i - 4 * j + i, j])
+    a = tvm.te.placeholder([4, 4])
+    b = tvm.te.compute([4, 4], lambda i, j: a[(3 * i + j) * 4 - 12 * i - 4 * j + i, j])
 
     visitor = CopyVisitor()
     res = visitor.visit(b.op.body[0])

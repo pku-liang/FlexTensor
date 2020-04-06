@@ -6,9 +6,9 @@ def gemm(A, B, transposeA=False, transposeB=False):
 
     Args:
     -----------------------------
-    A: tvm.tensor.Tensor
+    A: tvm.te.tensor.Tensor
         shape [height, width]
-    B: tvm.tensor.Tensor
+    B: tvm.te.tensor.Tensor
         shape [width, length]
     transposeA: (optional:False) bool
     transposeB: (optional:False) bool
@@ -16,26 +16,26 @@ def gemm(A, B, transposeA=False, transposeB=False):
 
     Returns:
     -----------------------------
-    tvm.tensor.Tensor
+    tvm.te.tensor.Tensor
         shape [height, length]
     -----------------------------
     """
     if transposeA and transposeB:
-        k = tvm.reduce_axis((0, B.shape[1]))
+        k = tvm.te.reduce_axis((0, B.shape[1]))
         assert (A.shape[0].value == B.shape[1].value)
-        return tvm.compute((A.shape[1], B.shape[0]), lambda i, j: tvm.sum(A[k, i] * B[j, k], axis=k))
+        return tvm.te.compute((A.shape[1], B.shape[0]), lambda i, j: tvm.te.sum(A[k, i] * B[j, k], axis=k))
     elif transposeA and not transposeB:
-        k = tvm.reduce_axis((0, B.shape[0]))
+        k = tvm.te.reduce_axis((0, B.shape[0]))
         assert (A.shape[0].value == B.shape[0].value)
-        return tvm.compute((A.shape[1], B.shape[1]), lambda i, j: tvm.sum(A[k, i] * B[k, j], axis=k))
+        return tvm.te.compute((A.shape[1], B.shape[1]), lambda i, j: tvm.te.sum(A[k, i] * B[k, j], axis=k))
     elif not transposeA and transposeB:
-        k = tvm.reduce_axis((0, B.shape[1]))
+        k = tvm.te.reduce_axis((0, B.shape[1]))
         assert (A.shape[1].value == B.shape[1].value)
-        return tvm.compute((A.shape[0], B.shape[0]), lambda i, j: tvm.sum(A[i, k] * B[j, k], axis=k))
+        return tvm.te.compute((A.shape[0], B.shape[0]), lambda i, j: tvm.te.sum(A[i, k] * B[j, k], axis=k))
     else:
-        k = tvm.reduce_axis((0, B.shape[0]))
+        k = tvm.te.reduce_axis((0, B.shape[0]))
         assert (A.shape[1].value == B.shape[0].value)
-        return tvm.compute((A.shape[0], B.shape[1]), lambda i, j: tvm.sum(A[i, k] * B[k, j], axis=k))
+        return tvm.te.compute((A.shape[0], B.shape[1]), lambda i, j: tvm.te.sum(A[i, k] * B[k, j], axis=k))
 
 
 def zero_pad2d(inputs, padding=0):
@@ -43,7 +43,7 @@ def zero_pad2d(inputs, padding=0):
 
     Args:
     -----------------------------
-    inputs : tvm.tensor.Tensor
+    inputs : tvm.te.tensor.Tensor
         shape [batch, channel, height, width]
     padding: (optional:0) int or tuple
         expected: (h_pad_up, h_pad_down, w_pad_up, w_pad_down)
@@ -51,11 +51,11 @@ def zero_pad2d(inputs, padding=0):
 
     Returns:
     -----------------------------
-    tvm.tensor.Tensor
+    tvm.te.tensor.Tensor
         shape [batch, channel, padded_height, padded_width]
     -----------------------------
     """
-    padding = (padding, padding, padding, padding) if isinstance(padding, (int, tvm.expr.IntImm)) else padding
+    padding = (padding, padding, padding, padding) if isinstance(padding, (int, tvm.tir.IntImm)) else padding
     assert isinstance(padding, tuple)
     if len(padding) == 2:
         padding = (padding[0], padding[0], padding[1], padding[1])
@@ -64,10 +64,10 @@ def zero_pad2d(inputs, padding=0):
     padding_zero = 0.0 if "float" in inputs.dtype else 0
 
     batch_size, in_channel, height, width = inputs.shape
-    return tvm.compute(
+    return tvm.te.compute(
         (batch_size, in_channel, height + padding[0] + padding[1], width + padding[2] + padding[3]),
-        lambda b, c, h, w: tvm.if_then_else(
-                            tvm.all(h >= padding[0], h < height + padding[0], w >= padding[2], w < width + padding[2]),
+        lambda b, c, h, w: tvm.te.if_then_else(
+                            tvm.te.all(h >= padding[0], h < height + padding[0], w >= padding[2], w < width + padding[2]),
                             inputs[b, c, h - padding[0], w - padding[2]],
                             padding_zero
                             ),
@@ -80,11 +80,11 @@ def conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, grou
 
     Args:
     -----------------------------
-    inputs  : tvm.tensor.Tensor
+    inputs  : tvm.te.tensor.Tensor
         shape [batch, channel, height, width]
-    weight  : tvm.tensor.Tensor
+    weight  : tvm.te.tensor.Tensor
         shape [out_channel, channel // groups, kernel_height, kernel_width]
-    bias    : (optional:None) tvm.tensor.Tensor
+    bias    : (optional:None) tvm.te.tensor.Tensor
         shape [out_channel]
     stride  : (optional:1) int or tuple
 
@@ -97,7 +97,7 @@ def conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, grou
 
     Returns:
     -----------------------------
-    tvm.tensor.Tensor
+    tvm.te.tensor.Tensor
         shape [batch, out_channel, output_height, output_width]
     -----------------------------
     """
@@ -107,23 +107,23 @@ def conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, grou
     out_channel_per_group = out_channel // groups
     assert ((out_channel_per_group * groups).value == out_channel.value)
 
-    stride = (stride, stride) if isinstance(stride, (int, tvm.expr.IntImm)) else stride
-    padding = (padding, padding) if isinstance(padding, (int, tvm.expr.IntImm)) else padding
-    dilation = (dilation, dilation) if isinstance(dilation, (int, tvm.expr.IntImm)) else dilation
+    stride = (stride, stride) if isinstance(stride, (int, tvm.tir.IntImm)) else stride
+    padding = (padding, padding) if isinstance(padding, (int, tvm.tir.IntImm)) else padding
+    dilation = (dilation, dilation) if isinstance(dilation, (int, tvm.tir.IntImm)) else dilation
     assert (isinstance(stride, tuple) and len(stride) == 2)
     assert (isinstance(padding, tuple) and len(padding) == 2)
     assert (isinstance(dilation, tuple) and len(dilation) == 2)
 
     out_h = (in_h + 2 * padding[0] - dilation[0] * (k_h - 1) - 1) // stride[0] + 1
     out_w = (in_w + 2 * padding[1] - dilation[1] * (k_w - 1) - 1) // stride[1] + 1
-    rc = tvm.reduce_axis((0, channel_per_group), name="rc")
-    rh = tvm.reduce_axis((0, k_h), name="rh")
-    rw = tvm.reduce_axis((0, k_w), name="rw")
+    rc = tvm.te.reduce_axis((0, channel_per_group), name="rc")
+    rh = tvm.te.reduce_axis((0, k_h), name="rh")
+    rw = tvm.te.reduce_axis((0, k_w), name="rw")
 
     padded = zero_pad2d(inputs, padding=padding)
-    output = tvm.compute(
+    output = tvm.te.compute(
         (batch_size, out_channel, out_h, out_w),
-        lambda b, c, h, w: tvm.sum(
+        lambda b, c, h, w: tvm.te.sum(
             (padded[b, c // out_channel_per_group * channel_per_group + rc, 
                     h * stride[0] + rh * dilation[0], w * stride[1] + rw * dilation[1]]
             * weight[c, rc, rh, rw]),
@@ -131,7 +131,7 @@ def conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, grou
         )
     )
     if bias is not None:
-        output = tvm.compute(
+        output = tvm.te.compute(
             (batch_size, out_channel, out_h, out_w),
             lambda b, c, h, w: output[b, c, h, w] + bias[c]
         )
@@ -139,14 +139,14 @@ def conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, grou
 
 
 def GEMM(M, K, N):
-    A = tvm.placeholder((M, K), name="A")
-    B = tvm.placeholder((K, N), name="B")
+    A = tvm.te.placeholder((M, K), name="A")
+    B = tvm.te.placeholder((K, N), name="B")
     C = gemm(A, B)
     return [C.op], [A, B, C]
 
 
 def Conv2d(N, C, H, W, K, k, stride=1, padding=0, dilation=1, groups=1):
-    A = tvm.placeholder((N, C, H, W), name="A")
-    B = tvm.placeholder((K, C, k, k), name="B")
+    A = tvm.te.placeholder((N, C, H, W), name="A")
+    B = tvm.te.placeholder((K, C, k, k), name="B")
     C = conv2d_nchw(A, B, bias=None, stride=stride, padding=padding, dilation=dilation, groups=groups)
     return [C.op], [A, B, C]

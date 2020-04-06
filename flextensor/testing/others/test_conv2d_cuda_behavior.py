@@ -56,15 +56,15 @@ def schedule_yolo_conv_cuda(s, outputs, inputs, weight, config):
     rx_factors = config.rx_factors
 
     # prepare thread_axis
-    bx = tvm.thread_axis("blockIdx.x")
-    by = tvm.thread_axis("blockIdx.y")
-    bz = tvm.thread_axis("blockIdx.z")
-    vx = tvm.thread_axis("vthread")
-    vy = tvm.thread_axis("vthread")
-    vz = tvm.thread_axis("vthread")
-    tx = tvm.thread_axis("threadIdx.x")
-    ty = tvm.thread_axis("threadIdx.y")
-    tz = tvm.thread_axis("threadIdx.z")
+    bx = tvm.te.thread_axis("blockIdx.x")
+    by = tvm.te.thread_axis("blockIdx.y")
+    bz = tvm.te.thread_axis("blockIdx.z")
+    vx = tvm.te.thread_axis("vthread")
+    vy = tvm.te.thread_axis("vthread")
+    vz = tvm.te.thread_axis("vthread")
+    tx = tvm.te.thread_axis("threadIdx.x")
+    ty = tvm.te.thread_axis("threadIdx.y")
+    tz = tvm.te.thread_axis("threadIdx.z")
 
     # split the spatial axes
     b, k, p, q = s[outputs].op.axis
@@ -152,11 +152,11 @@ def try_yolo_conv(batch_size, config):
     # get the compute
     yolo_conv = YoloConvLayer17()
     input_shape = yolo_conv.get_intput_shape()
-    inputs = tvm.placeholder((batch_size, *input_shape), dtype="float32")
+    inputs = tvm.te.placeholder((batch_size, *input_shape), dtype="float32")
     weight = yolo_conv.get_weight()
     outputs = yolo_conv(inputs)
     
-    s = tvm.create_schedule(outputs.op)
+    s = tvm.te.create_schedule(outputs.op)
     schedule_yolo_conv_cuda(s, outputs, inputs, weight, config)
 
     arg_bufs = [inputs, weight, outputs]

@@ -9,28 +9,28 @@ K = 256
 
 
 def test1():
-    A = tvm.placeholder([M, K], name="A")
-    B = tvm.placeholder([K, N], name="B")
-    k = tvm.reduce_axis((0, K), name="k")
-    # A1 = tvm.compute([M, K], lambda i, j: A[i, j], "A1")
-    # B1 = tvm.compute([K, N], lambda i, j: B[i, j], "B1")
-    C = tvm.compute([M, N], lambda i, j: tvm.sum(A[i, k] * B[k, j], axis=[k]), "C")
+    A = tvm.te.placeholder([M, K], name="A")
+    B = tvm.te.placeholder([K, N], name="B")
+    k = tvm.te.reduce_axis((0, K), name="k")
+    # A1 = tvm.te.compute([M, K], lambda i, j: A[i, j], "A1")
+    # B1 = tvm.te.compute([K, N], lambda i, j: B[i, j], "B1")
+    C = tvm.te.compute([M, N], lambda i, j: tvm.te.sum(A[i, k] * B[k, j], axis=[k]), "C")
 
-    s = tvm.create_schedule(C.op)
+    s = tvm.te.create_schedule(C.op)
 
     A1 = s.cache_read(A, "local", [C])
     B1 = s.cache_read(B, "local", [C])
 
     m, n = s[C].op.axis
     om, im = s[C].split(m, nparts=1)
-    s[C].bind(om, tvm.thread_axis("blockIdx.x"))
+    s[C].bind(om, tvm.te.thread_axis("blockIdx.x"))
     mo, mi = s[C].split(im, factor=32)
     no, ni = s[C].split(n, factor=16)
     k = s[C].op.reduce_axis[0]
     ko, ki = s[C].split(k, factor=8)
 
     s[C].reorder(mo, no, ko, mi, ki, ni)
-    # s[C].bind(no, tvm.thread_axis("threadIdx.x"))
+    # s[C].bind(no, tvm.te.thread_axis("threadIdx.x"))
 
     s[A1].compute_at(s[C], ko)
     s[B1].compute_at(s[C], ko)
@@ -46,15 +46,15 @@ def test1():
 def test2():
     tgt_host="llvm"
     tgt="aocl_sw_emu"
-    n = tvm.var("n")
-    A = tvm.placeholder((n,), name='A')
-    B = tvm.placeholder((n,), name='B')
-    C = tvm.compute(A.shape, lambda i: A[i] + B[i], name="C")
+    n = tvm.te.var("n")
+    A = tvm.te.placeholder((n,), name='A')
+    B = tvm.te.placeholder((n,), name='B')
+    C = tvm.te.compute(A.shape, lambda i: A[i] + B[i], name="C")
 
-    s = tvm.create_schedule(C.op)
+    s = tvm.te.create_schedule(C.op)
     px, x = s[C].split(C.op.axis[0], nparts=1)
 
-    s[C].bind(px, tvm.thread_axis("pipeline"))
+    s[C].bind(px, tvm.te.thread_axis("pipeline"))
 
     fadd = tvm.build(s, [A, B, C], tgt, target_host=tgt_host, name="myadd")
 
@@ -67,8 +67,8 @@ def test2():
 def run_aocl():
     tgt="aocl_sw_emu"
 
-    fadd = tvm.module.load("myadd.so")
-    fadd_dev = tvm.module.load("myadd.aocx")
+    fadd = tvm.runtime.module.load_module("myadd.so")
+    fadd_dev = tvm.runtime.module.load_module("myadd.aocx")
     fadd.import_module(fadd_dev)
 
     ctx = tvm.context(tgt, 0)
@@ -83,16 +83,16 @@ def run_aocl():
 
 
 def test3():
-    A = tvm.placeholder([M, K], name="A")
-    B = tvm.placeholder([K, N], name="B")
-    k = tvm.reduce_axis((0, K), name="k")
-    C = tvm.compute([M, N], lambda i, j: tvm.sum(A[i, k] * B[k, j], axis=[k]), "C")
+    A = tvm.te.placeholder([M, K], name="A")
+    B = tvm.te.placeholder([K, N], name="B")
+    k = tvm.te.reduce_axis((0, K), name="k")
+    C = tvm.te.compute([M, N], lambda i, j: tvm.te.sum(A[i, k] * B[k, j], axis=[k]), "C")
 
-    s = tvm.create_schedule(C.op)
+    s = tvm.te.create_schedule(C.op)
 
     m, n = s[C].op.axis
     om, im = s[C].split(m, nparts=1)
-    s[C].bind(om, tvm.thread_axis("pipeline"))
+    s[C].bind(om, tvm.te.thread_axis("pipeline"))
     mo, mi = s[C].split(im, factor=32)
     no, ni = s[C].split(n, factor=16)
     k = s[C].op.reduce_axis[0]

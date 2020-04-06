@@ -16,15 +16,15 @@ def make_nodes_from_tensor(tensor):
     """
     return: list of Node
     """
-    assert isinstance(tensor, tvm.tensor.Tensor), strict_limit("tvm.tensor.Tensor")
+    assert isinstance(tensor, tvm.te.tensor.Tensor), strict_limit("tvm.te.tensor.Tensor")
     node_lst = []
     for dim, val in enumerate(tensor.shape):
-        assert isinstance(val, tvm.expr.IntImm), strict_limit("tvm.expr.IntImm")
+        assert isinstance(val, tvm.tir.IntImm), strict_limit("tvm.tir.IntImm")
         node_lst.append(Node(val.value), name="%s/%d" % (tensor.name, dim))
     return node_lst
 
 
 def make_node_from_var(var, feature):
-    assert isinstance(var, tvm.expr.Var), strict_limit("tvm.expr.Var")
+    assert isinstance(var, tvm.tir.Var), strict_limit("tvm.tir.Var")
     return Node(feature, name=var.name)
 

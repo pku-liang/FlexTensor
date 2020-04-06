@@ -84,7 +84,7 @@ def tvm_PixelCNN_cpu(B, H, W, C, out_C, kernel_height, kernel_width, mask_type, 
 
     s, bufs = pixelcnn(B, H, W, C, out_C, kernel_height, kernel_width, mask_type, bias, dilation=dilation, stride=stride, padding=padding)
     ctx = tvm.cpu(dev_id=dev)
-    s =  tvm.create_schedule(s)
+    s =  tvm.te.create_schedule(s)
     f = tvm.build(s, bufs, "llvm")
 
     im = tvm.nd.array(Input.numpy().astype(np.float32), ctx)
@@ -116,18 +116,18 @@ def schedule_direct_cuda(cfg, s, mask, conv):
     bh, vh, th, hi = cfg["tile_bh"].apply(s, mask, bh)
     bw, vw, tw, wi = cfg["tile_bw"].apply(s, mask, bw)
     s[mask].reorder(bo, bh, bw, vo, vh, vw, to, th, tw, oi, hi, wi)
-    s[mask].bind(bo, tvm.thread_axis("blockIdx.z"))
-    s[mask].bind(bh, tvm.thread_axis("blockIdx.y"))
-    s[mask].bind(bw, tvm.thread_axis("blockIdx.x"))
-    s[mask].bind(vo, tvm.thread_axis("vthread"))
-    s[mask].bind(vh, tvm.thread_axis("vthread"))
-    s[mask].bind(vw, tvm.thread_axis("vthread"))
-    s[mask].bind(to, tvm.thread_axis("threadIdx.z"))
-    s[mask].bind(th, tvm.thread_axis("threadIdx.y"))
-    s[mask].bind(tw, tvm.thread_axis("threadIdx.x"))
-    s[mask].bind(oi, tvm.thread_axis("blockIdx.z"))
-    s[mask].bind(hi, tvm.thread_axis("blockIdx.y"))
-    s[mask].bind(wi, tvm.thread_axis("blockIdx.x"))
+    s[mask].bind(bo, tvm.te.thread_axis("blockIdx.z"))
+    s[mask].bind(bh, tvm.te.thread_axis("blockIdx.y"))
+    s[mask].bind(bw, tvm.te.thread_axis("blockIdx.x"))
+    s[mask].bind(vo, tvm.te.thread_axis("vthread"))
+    s[mask].bind(vh, tvm.te.thread_axis("vthread"))
+    s[mask].bind(vw, tvm.te.thread_axis("vthread"))
+    s[mask].bind(to, tvm.te.thread_axis("threadIdx.z"))
+    s[mask].bind(th, tvm.te.thread_axis("threadIdx.y"))
+    s[mask].bind(tw, tvm.te.thread_axis("threadIdx.x"))
+    s[mask].bind(oi, tvm.te.thread_axis("blockIdx.z"))
+    s[mask].bind(hi, tvm.te.thread_axis("blockIdx.y"))
+    s[mask].bind(wi, tvm.te.thread_axis("blockIdx.x"))
 
 
     n, f, y, x = s[conv].op.axis
@@ -156,7 +156,7 @@ def schedule_direct_cuda(cfg, s, mask, conv):
     pad_data, kernel = s[conv].op.input_tensors
 
     s[pad_data].compute_inline()
-    if isinstance(kernel.op, tvm.tensor.ComputeOp) and 'dilate' in kernel.op.tag:
+    if isinstance(kernel.op, tvm.te.tensor.ComputeOp) and 'dilate' in kernel.op.tag:
         s[kernel].compute_inline()
 
     if conv.op in s.outputs:
@@ -180,15 +180,15 @@ def schedule_direct_cuda(cfg, s, mask, conv):
     bx, vx, tx, xi = cfg["tile_x"].apply(s, output, x)
 
     bf = s[output].fuse(n, bf)
-    s[output].bind(bf, tvm.thread_axis("blockIdx.z"))
-    s[output].bind(by, tvm.thread_axis("blockIdx.y"))
-    s[output].bind(bx, tvm.thread_axis("blockIdx.x"))
-    s[output].bind(vf, tvm.thread_axis("vthread"))
-    s[output].bind(vy, tvm.thread_axis("vthread"))
-    s[output].bind(vx, tvm.thread_axis("vthread"))
-    s[output].bind(tf, tvm.thread_axis("threadIdx.z"))
-    s[output].bind(ty, tvm.thread_axis("threadIdx.y"))
-    s[output].bind(tx, tvm.thread_axis("threadIdx.x"))
+    s[output].bind(bf, tvm.te.thread_axis("blockIdx.z"))
+    s[output].bind(by, tvm.te.thread_axis("blockIdx.y"))
+    s[output].bind(bx, tvm.te.thread_axis("blockIdx.x"))
+    s[output].bind(vf, tvm.te.thread_axis("vthread"))
+    s[output].bind(vy, tvm.te.thread_axis("vthread"))
+    s[output].bind(vx, tvm.te.thread_axis("vthread"))
+    s[output].bind(tf, tvm.te.thread_axis("threadIdx.z"))
+    s[output].bind(ty, tvm.te.thread_axis("threadIdx.y"))
+    s[output].bind(tx, tvm.te.thread_axis("threadIdx.x"))
     s[output].reorder(bf, by, bx, vf, vy, vx, tf, ty, tx, fi, yi, xi)
     s[OL].compute_at(s[output], tx)
 
@@ -210,9 +210,9 @@ def schedule_direct_cuda(cfg, s, mask, conv):
         tz, fused = s[load].split(fused, nparts=cfg["tile_f"].size[2])
         ty, fused = s[load].split(fused, nparts=cfg["tile_y"].size[2])
         tx, fused = s[load].split(fused, nparts=cfg["tile_x"].size[2])
-        s[load].bind(tz, tvm.thread_axis("threadIdx.z"))
-        s[load].bind(ty, tvm.thread_axis("threadIdx.y"))
-        s[load].bind(tx, tvm.thread_axis("threadIdx.x"))
+        s[load].bind(tz, tvm.te.thread_axis("threadIdx.z"))
+        s[load].bind(ty, tvm.te.thread_axis("threadIdx.y"))
+        s[load].bind(tx, tvm.te.thread_axis("threadIdx.x"))
 
     # unroll
     s[output].pragma(kernel_scope, 'auto_unroll_max_step', cfg['auto_unroll_max_step'].val)
@@ -226,11 +226,11 @@ def schedule_direct_cuda(cfg, s, mask, conv):
 def pixelcnn_autotvm(N, H, W, CO, CI, KH, KW, mask_type, bias, stride, padding, dilation):
     # assert N == 1, "Only consider batch_size = 1 in this template"
 
-    # data = tvm.placeholder((N, CI, H, W), name='data')
-    # kernel = tvm.placeholder((CO, CI, KH, KW), name='kernel')
+    # data = tvm.te.placeholder((N, CI, H, W), name='data')
+    # kernel = tvm.te.placeholder((CO, CI, KH, KW), name='kernel')
     # conv = topi.nn.conv2d_nchw(data, kernel, stride, padding, dilation=dilation, out_dtype='float32')
     convop, tensors = pixelcnn(N, H, W, CI, CO, KH, KW, mask_type, bias=bias, stride=stride, padding=padding, dilation=dilation)
-    s = tvm.create_schedule(convop)
+    s = tvm.te.create_schedule(convop)
 
     cfg = autotvm.get_config()
 

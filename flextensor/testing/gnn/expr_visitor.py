@@ -6,53 +6,53 @@ import tvm
 class ExprVisitor(object):
     def visit(self, expr):
         type_info = type(expr)
-        if type_info == tvm.expr.Reduce:
+        if type_info == tvm.tir.Reduce:
             self.visit_reduce(expr)
-        elif type_info == tvm.expr.Call:
+        elif type_info == tvm.tir.Call:
             self.visit_call(expr)
-        elif type_info == tvm.expr.Var:
+        elif type_info == tvm.tir.Var:
             self.visit_var(expr)
-        elif type_info == tvm.expr.FloatImm:
+        elif type_info == tvm.tir.FloatImm:
             self.visit_float_imm(expr)
-        elif type_info == tvm.expr.IntImm:
+        elif type_info == tvm.tir.IntImm:
             self.visit_int_imm(expr)
-        elif type_info == tvm.expr.UIntImm:
+        elif type_info == tvm.tir.UIntImm:
             self.visit_uint_imm(expr)
-        elif type_info == tvm.expr.StringImm:
+        elif type_info == tvm.tir.StringImm:
             self.visit_string_imm(expr)
-        elif type_info == tvm.expr.Add:
+        elif type_info == tvm.tir.Add:
             self.visit_add(expr)
-        elif type_info == tvm.expr.Sub:
+        elif type_info == tvm.tir.Sub:
             self.visit_sub(expr)
-        elif type_info == tvm.expr.Mul:
+        elif type_info == tvm.tir.Mul:
             self.visit_mul(expr)
-        elif type_info == tvm.expr.Div:
+        elif type_info == tvm.tir.Div:
             self.visit_div(expr)
-        elif type_info == tvm.expr.Mod:
+        elif type_info == tvm.tir.Mod:
             self.visit_mod(expr)
-        elif type_info == tvm.expr.And:
+        elif type_info == tvm.tir.And:
             self.visit_and(expr)
-        elif type_info == tvm.expr.Or:
+        elif type_info == tvm.tir.Or:
             self.visit_or(expr)
-        elif type_info == tvm.expr.Not:
+        elif type_info == tvm.tir.Not:
             self.visit_not(expr)
-        elif type_info == tvm.expr.Cast:
+        elif type_info == tvm.tir.Cast:
             self.visit_cast(expr)
-        elif type_info == tvm.expr.EQ:
+        elif type_info == tvm.tir.EQ:
             self.visit_eq(expr)
-        elif type_info == tvm.expr.NE:
+        elif type_info == tvm.tir.NE:
             self.visit_ne(expr)
-        elif type_info == tvm.expr.LT:
+        elif type_info == tvm.tir.LT:
             self.visit_lt(expr)
-        elif type_info == tvm.expr.LE:
+        elif type_info == tvm.tir.LE:
             self.visit_le(expr)
-        elif type_info == tvm.expr.GT:
+        elif type_info == tvm.tir.GT:
             self.visit_gt(expr)
-        elif type_info == tvm.expr.GE:
+        elif type_info == tvm.tir.GE:
             self.visit_ge(expr)
-        elif type_info == tvm.expr.Min:
+        elif type_info == tvm.tir.Min:
             self.visit_min(expr)
-        elif type_info == tvm.expr.Max:
+        elif type_info == tvm.tir.Max:
             self.visit_max(expr)
         else:
             raise RuntimeError("Unsupported type: %s" % type_info)

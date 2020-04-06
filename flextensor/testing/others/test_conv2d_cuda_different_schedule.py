@@ -55,15 +55,15 @@ def schedule_yolo_conv_cuda_1(s, outputs, inputs, weight, parameter):
     rx_factors = parameter.rx_factors
 
     # prepare thread_axis
-    bx = tvm.thread_axis("blockIdx.x")
-    by = tvm.thread_axis("blockIdx.y")
-    bz = tvm.thread_axis("blockIdx.z")
-    vx = tvm.thread_axis("vthread")
-    vy = tvm.thread_axis("vthread")
-    vz = tvm.thread_axis("vthread")
-    tx = tvm.thread_axis("threadIdx.x")
-    ty = tvm.thread_axis("threadIdx.y")
-    tz = tvm.thread_axis("threadIdx.z")
+    bx = tvm.te.thread_axis("blockIdx.x")
+    by = tvm.te.thread_axis("blockIdx.y")
+    bz = tvm.te.thread_axis("blockIdx.z")
+    vx = tvm.te.thread_axis("vthread")
+    vy = tvm.te.thread_axis("vthread")
+    vz = tvm.te.thread_axis("vthread")
+    tx = tvm.te.thread_axis("threadIdx.x")
+    ty = tvm.te.thread_axis("threadIdx.y")
+    tz = tvm.te.thread_axis("threadIdx.z")
 
     # split the spatial axes
     b, k, p, q = s[outputs].op.axis
@@ -162,15 +162,15 @@ def schedule_yolo_conv_cuda_2(s, outputs, inputs, weight, parameter):
     rx_factors = parameter.rx_factors
 
     # prepare thread_axis
-    bx = tvm.thread_axis("blockIdx.x")
-    by = tvm.thread_axis("blockIdx.y")
-    bz = tvm.thread_axis("blockIdx.z")
-    vx = tvm.thread_axis("vthread")
-    vy = tvm.thread_axis("vthread")
-    vz = tvm.thread_axis("vthread")
-    tx = tvm.thread_axis("threadIdx.x")
-    ty = tvm.thread_axis("threadIdx.y")
-    tz = tvm.thread_axis("threadIdx.z")
+    bx = tvm.te.thread_axis("blockIdx.x")
+    by = tvm.te.thread_axis("blockIdx.y")
+    bz = tvm.te.thread_axis("blockIdx.z")
+    vx = tvm.te.thread_axis("vthread")
+    vy = tvm.te.thread_axis("vthread")
+    vz = tvm.te.thread_axis("vthread")
+    tx = tvm.te.thread_axis("threadIdx.x")
+    ty = tvm.te.thread_axis("threadIdx.y")
+    tz = tvm.te.thread_axis("threadIdx.z")
 
     # split the spatial axes
     b, k, p, q = s[outputs].op.axis
@@ -264,15 +264,15 @@ def schedule_yolo_conv_cuda_3(s, outputs, inputs, weight, parameter):
     rx_factors = parameter.rx_factors
 
     # prepare thread_axis
-    bx = tvm.thread_axis("blockIdx.x")
-    by = tvm.thread_axis("blockIdx.y")
-    bz = tvm.thread_axis("blockIdx.z")
-    vx = tvm.thread_axis("vthread")
-    vy = tvm.thread_axis("vthread")
-    vz = tvm.thread_axis("vthread")
-    tx = tvm.thread_axis("threadIdx.x")
-    ty = tvm.thread_axis("threadIdx.y")
-    tz = tvm.thread_axis("threadIdx.z")
+    bx = tvm.te.thread_axis("blockIdx.x")
+    by = tvm.te.thread_axis("blockIdx.y")
+    bz = tvm.te.thread_axis("blockIdx.z")
+    vx = tvm.te.thread_axis("vthread")
+    vy = tvm.te.thread_axis("vthread")
+    vz = tvm.te.thread_axis("vthread")
+    tx = tvm.te.thread_axis("threadIdx.x")
+    ty = tvm.te.thread_axis("threadIdx.y")
+    tz = tvm.te.thread_axis("threadIdx.z")
 
     # split the spatial axes
     b, k, p, q = s[outputs].op.axis
@@ -344,7 +344,7 @@ def schedule_yolo_conv_opencl(s, outputs, inputs, weight):
     padded = outputs.op.input_tensors[0]
 
     # prepare thread_axis
-    bx = tvm.thread_axis("blockIdx.x")
+    bx = tvm.te.thread_axis("blockIdx.x")
 
     # split the spatial axes
     b, k, p, q = s[outputs].op.axis
@@ -359,11 +359,11 @@ def try_yolo_conv(config, parameter, fsch):
     # get the compute
     # (1, 3, 448, 448, 64, 3, 7, 7, 1, 2, 3, 1, 1)
     batch, CI, H, W, CO, _, kh, kw, _, st, pad, dilation, group = config
-    inputs = tvm.placeholder((batch, CI, H, W), dtype="float32")
-    weight = tvm.placeholder((CO, CI, kh, kw), dtype="float32")
+    inputs = tvm.te.placeholder((batch, CI, H, W), dtype="float32")
+    weight = tvm.te.placeholder((CO, CI, kh, kw), dtype="float32")
     outputs = conv2d_nchw(inputs, weight, stride=st, padding=pad, dilation=dilation, groups=group)
     
-    s = tvm.create_schedule(outputs.op)
+    s = tvm.te.create_schedule(outputs.op)
     fsch(s, outputs, inputs, weight, parameter)
 
     arg_bufs = [inputs, weight, outputs]

@@ -21,10 +21,10 @@ from tvm import autotvm
 
 @autotvm.template
 def conv2d_batching(N, H, W, CO, CI, KH, KW, stride, padding):
-    data = tvm.placeholder((N, CI, H, W), name='data', dtype="float32")
-    kernel = tvm.placeholder((CO, CI, KH, KW), name='kernel', dtype="float32")
+    data = tvm.te.placeholder((N, CI, H, W), name='data', dtype="float32")
+    kernel = tvm.te.placeholder((CO, CI, KH, KW), name='kernel', dtype="float32")
     conv = conv2d_nchw(data, kernel, stride=stride, padding=padding)
-    s = tvm.create_schedule([conv.op])
+    s = tvm.te.create_schedule([conv.op])
 
     ##### space definition begin #####
     n, f, y, x = s[conv].op.axis
@@ -61,13 +61,13 @@ def conv2d_batching(N, H, W, CO, CI, KH, KW, stride, padding):
     bf, vf, tf, fi = cfg["tile_f"].apply(s, output, f)
     kernel_scope = yx
 
-    s[output].bind(yx, tvm.thread_axis("blockIdx.z"))
-    s[output].bind(bn, tvm.thread_axis("blockIdx.y"))
-    s[output].bind(bf, tvm.thread_axis("blockIdx.x"))
-    s[output].bind(vn, tvm.thread_axis("vthread"))
-    s[output].bind(vf, tvm.thread_axis("vthread"))
-    s[output].bind(tn, tvm.thread_axis("threadIdx.y"))
-    s[output].bind(tf, tvm.thread_axis("threadIdx.x"))
+    s[output].bind(yx, tvm.te.thread_axis("blockIdx.z"))
+    s[output].bind(bn, tvm.te.thread_axis("blockIdx.y"))
+    s[output].bind(bf, tvm.te.thread_axis("blockIdx.x"))
+    s[output].bind(vn, tvm.te.thread_axis("vthread"))
+    s[output].bind(vf, tvm.te.thread_axis("vthread"))
+    s[output].bind(tn, tvm.te.thread_axis("threadIdx.y"))
+    s[output].bind(tf, tvm.te.thread_axis("threadIdx.x"))
     s[output].reorder(yx, bn, bf, vn, vf, tn, tf, ni, fi)
     s[OL].compute_at(s[output], tf)
 
@@ -90,8 +90,8 @@ def conv2d_batching(N, H, W, CO, CI, KH, KW, stride, padding):
         fused = s[load].fuse(n, f, y, x)
         ty, fused = s[load].split(fused, nparts=cfg["tile_n"].size[2])
         tx, fused = s[load].split(fused, nparts=cfg["tile_f"].size[2])
-        s[load].bind(ty, tvm.thread_axis("threadIdx.y"))
-        s[load].bind(tx, tvm.thread_axis("threadIdx.x"))
+        s[load].bind(ty, tvm.te.thread_axis("threadIdx.y"))
+        s[load].bind(tx, tvm.te.thread_axis("threadIdx.x"))
 
     # tune unroll
     s[output].pragma(kernel_scope, 'auto_unroll_max_step', cfg['auto_unroll_max_step'].val)

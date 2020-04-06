@@ -8,22 +8,22 @@ from flextensor.scheduler import parallel_evaluate
 
 @autotvm.template
 def conv2d_channel_batch(B, N, M, C, K, L, O, stride=1, padding=0, dtype="float32"):
-    A = tvm.placeholder((B, N, M, C), dtype=dtype, name="A")
-    W = tvm.placeholder((K, L, C, O), dtype=dtype, name="W")
+    A = tvm.te.placeholder((B, N, M, C), dtype=dtype, name="A")
+    W = tvm.te.placeholder((K, L, C, O), dtype=dtype, name="W")
     N_out = max(0, (N + padding * 2 - K) // stride) + 1
     M_out = max(0, (M + padding * 2 - L) // stride) + 1
-    Apad = tvm.compute((B, N + 2 * padding, M + 2 * padding, C),
-                       lambda b, i, j, k: tvm.if_then_else(
-                           tvm.all(i >= padding, j >= padding, i < N + padding, j < M + padding),
+    Apad = tvm.te.compute((B, N + 2 * padding, M + 2 * padding, C),
+                       lambda b, i, j, k: tvm.te.if_then_else(
+                           tvm.te.all(i >= padding, j >= padding, i < N + padding, j < M + padding),
                            A[b, i - padding, j - padding, k], 0.0), name="Apad")
-    rx, ry = tvm.reduce_axis((0, K), name="rx"), tvm.reduce_axis((0, L), name="ry")
-    rc = tvm.reduce_axis((0, C), name="rc")
-    Output = tvm.compute((B, N_out, M_out, O),
-                         lambda b, i, j, k: tvm.sum(Apad[b, i * stride + rx, j * stride + ry, rc] * W[rx, ry, rc, k],
+    rx, ry = tvm.te.reduce_axis((0, K), name="rx"), tvm.te.reduce_axis((0, L), name="ry")
+    rc = tvm.te.reduce_axis((0, C), name="rc")
+    Output = tvm.te.compute((B, N_out, M_out, O),
+                         lambda b, i, j, k: tvm.te.sum(Apad[b, i * stride + rx, j * stride + ry, rc] * W[rx, ry, rc, k],
                                                     axis=[rx, ry, rc]),
                          name="Output")
 
-    s = tvm.create_schedule(Output.op)
+    s = tvm.te.create_schedule(Output.op)
     s[Apad].compute_inline()
     CL = s.cache_write(Output, "local")
 

@@ -30,19 +30,19 @@ def tvm_callback_cuda_postproc(code):
 def test_gemm():
     # graph
     nn = 2048
-    n = tvm.var('n')
+    n = tvm.te.var('n')
     n = tvm.convert(nn)
     m, l = n, n
-    A = tvm.placeholder((l, n), name='A')
-    B = tvm.placeholder((l, m), name='B')
-    k = tvm.reduce_axis((0, l), name='k')
-    C = tvm.compute(
+    A = tvm.te.placeholder((l, n), name='A')
+    B = tvm.te.placeholder((l, m), name='B')
+    k = tvm.te.reduce_axis((0, l), name='k')
+    C = tvm.te.compute(
         (m, n),
-        lambda ii, jj: tvm.sum(A[k, jj] * B[k, ii], axis=k),
+        lambda ii, jj: tvm.te.sum(A[k, jj] * B[k, ii], axis=k),
         name='C')
 
     # schedule
-    s = tvm.create_schedule(C.op)
+    s = tvm.te.create_schedule(C.op)
     AA = s.cache_read(A, "shared", [C])
     BB = s.cache_read(B, "shared", [C])
     AL = s.cache_read(AA, "local", [C])
@@ -52,12 +52,12 @@ def test_gemm():
     scale = 8
     num_thread = 8
     block_factor = scale * num_thread
-    block_x = tvm.thread_axis("blockIdx.x")
-    thread_x = tvm.thread_axis((0, num_thread), "threadIdx.x")
-    block_y = tvm.thread_axis("blockIdx.y")
-    thread_y = tvm.thread_axis((0, num_thread), "threadIdx.y")
-    thread_xz = tvm.thread_axis((0, 2), "vthread", name="vx")
-    thread_yz = tvm.thread_axis((0, 2), "vthread", name="vy")
+    block_x = tvm.te.thread_axis("blockIdx.x")
+    thread_x = tvm.te.thread_axis((0, num_thread), "threadIdx.x")
+    block_y = tvm.te.thread_axis("blockIdx.y")
+    thread_y = tvm.te.thread_axis((0, num_thread), "threadIdx.y")
+    thread_xz = tvm.te.thread_axis((0, 2), "vthread", name="vx")
+    thread_yz = tvm.te.thread_axis((0, 2), "vthread", name="vy")
 
     by, yi = s[C].split(C.op.axis[0], factor=block_factor)
     bx, xi = s[C].split(C.op.axis[1], factor=block_factor)

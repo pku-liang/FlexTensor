@@ -209,8 +209,8 @@ if __name__ == "__main__":
     config = gemm_config(M, N, K, logits)
 
     # compute
-    A = tvm.placeholder((M, K))
-    B = tvm.placeholder((K, N))
+    A = tvm.te.placeholder((M, K))
+    B = tvm.te.placeholder((K, N))
     C = gemm(A, B)
 
     # schedule

@@ -28,7 +28,7 @@ def zero_pad2d(inputs, padding=0):
     return hcl.compute(
         (batch_size, in_channel, height + padding[0] + padding[1], width + padding[2] + padding[3]),
         lambda b, c, h, w: hcl.select(
-                            hcl.tvm.all(h >= padding[0], h < height + padding[0], w >= padding[2], w < width + padding[2]),
+                            hcl.tvm.te.all(h >= padding[0], h < height + padding[0], w >= padding[2], w < width + padding[2]),
                             inputs[b, c, h - padding[0], w - padding[2]],
                             padding_zero
                             ),

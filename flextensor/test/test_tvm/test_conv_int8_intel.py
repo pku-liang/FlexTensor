@@ -77,8 +77,8 @@ def run_inference(data_dtype, kernel_dtype, out_dtype, im_height, im_width, in_f
                                                     hstride, wstride, out_dtype)
 
     # Create TVM placeholders
-    data = tvm.placeholder(data_shape, name='data', dtype=data_dtype)
-    kernel = tvm.placeholder(kernel_shape, name='kernel', dtype=kernel_dtype)
+    data = tvm.te.placeholder(data_shape, name='data', dtype=data_dtype)
+    kernel = tvm.te.placeholder(kernel_shape, name='kernel', dtype=kernel_dtype)
 
     # Create the numpy arrays to be used for executing conv models
     if data_dtype == 'float32':
@@ -99,7 +99,7 @@ def run_inference(data_dtype, kernel_dtype, out_dtype, im_height, im_width, in_f
                                     padding=hpad, layout='NCHWc',
                                     out_layout='NCHWc', out_dtype=out_dtype)
         out = topi.nn.relu(conv)
-        sch = tvm.create_schedule(out.op)
+        sch = tvm.te.create_schedule(out.op)
         func = tvm.build(sch, [data, kernel, out], target=TARGET_NAME, name='out')
         func(data_array, kernel_array, c_orig)
         LOGGER.debug(tvm.lower(sch, [data, kernel], simple_mode=True))

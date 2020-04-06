@@ -150,7 +150,7 @@ class IndexInfo(object):
         return self
 
     def mul(self, b):
-        if isinstance(b, (tvm.expr.IntImm, tvm.expr.UIntImm)):
+        if isinstance(b, (tvm.tir.IntImm, tvm.tir.UIntImm)):
             self.mul_const *= b.value
             self.add_const *= b.value
             for sym in self.add_sym:
@@ -167,7 +167,7 @@ class IndexInfo(object):
         return self
 
     def div(self, b):   # TODO bad implementation
-        if isinstance(b, (tvm.expr.IntImm, tvm.expr.UIntImm)):
+        if isinstance(b, (tvm.tir.IntImm, tvm.tir.UIntImm)):
             self.div_const *= b.value
             self.add_const /= b.value
             for sym in self.add_sym:
@@ -184,7 +184,7 @@ class IndexInfo(object):
         return self
 
     def add(self, b):
-        if isinstance(b, (tvm.expr.IntImm, tvm.expr.UIntImm)):
+        if isinstance(b, (tvm.tir.IntImm, tvm.tir.UIntImm)):
             self.add_const += b
         if isinstance(b, (int,)):
             self.add_const += b
@@ -199,7 +199,7 @@ class IndexInfo(object):
         return self
 
     def sub(self, b):
-        if isinstance(b, (tvm.expr.IntImm, tvm.expr.UIntImm)):
+        if isinstance(b, (tvm.tir.IntImm, tvm.tir.UIntImm)):
             self.add_const -= b
         if isinstance(b, (int,)):
             self.add_const -= b
@@ -211,7 +211,7 @@ class IndexInfo(object):
         return self
 
     def mod(self, b):
-        if isinstance(b, (tvm.expr.IntImm, tvm.expr.UIntImm)):
+        if isinstance(b, (tvm.tir.IntImm, tvm.tir.UIntImm)):
             self.mod_const.append(b)
         if isinstance(b, (int,)):
             self.mod_const.append(b)
@@ -228,7 +228,7 @@ class IndexInfo(object):
 class GetRelationOp(ExprVisitor):
     def __init__(self, op):
         super(GetRelationOp, self).__init__()
-        if not isinstance(op, tvm.tensor.ComputeOp):
+        if not isinstance(op, tvm.te.tensor.ComputeOp):
             raise RuntimeError("Can't use for type: %s" % type(op))
         self.root_op = op
         self.call_op = None

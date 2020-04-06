@@ -39,8 +39,8 @@ def test_conv2d_hwcn_map():
     stride = 2
     padding = 'SAME'
 
-    A = tvm.placeholder((in_height, in_width, in_channel, batch), name='A')
-    W = tvm.placeholder((kernel, kernel, in_channel, num_filter), name='W')
+    A = tvm.te.placeholder((in_height, in_width, in_channel, batch), name='A')
+    W = tvm.te.placeholder((kernel, kernel, in_channel, num_filter), name='W')
     B = topi.nn.conv2d_hwcn(A, W, stride, padding)
     C = topi.nn.relu(B)
     s1 = topi.cuda.schedule_conv2d_hwcn([B])
@@ -52,7 +52,7 @@ def test_conv2d_hwcn_map():
     c_np = np.maximum(b_np, 0)
 
     def check_device(device):
-        if not tvm.module.enabled(device):
+        if not tvm.runtime.module.enabled(device):
             print("Skip because %s is not enabled" % device)
             return
         ctx = tvm.context(device, 0)

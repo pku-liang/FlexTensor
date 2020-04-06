@@ -14,10 +14,10 @@ def to_tuple(expr_tuple):
 # define compute
 
 def conv2d_1x1(N, C, H, W, K):
-    A = tvm.placeholder((N, C, H, W), dtype="float32", name="A")
-    Weight = tvm.placeholder((K, C), dtype="float32", name="W")
-    rc = tvm.reduce_axis((0, C), name="rc")
-    B = tvm.compute((N, K, H, W), lambda b, k, i, j: tvm.sum(A[b, rc, i, j] * Weight[k, rc], axis=rc))
+    A = tvm.te.placeholder((N, C, H, W), dtype="float32", name="A")
+    Weight = tvm.te.placeholder((K, C), dtype="float32", name="W")
+    rc = tvm.te.reduce_axis((0, C), name="rc")
+    B = tvm.te.compute((N, K, H, W), lambda b, k, i, j: tvm.te.sum(A[b, rc, i, j] * Weight[k, rc], axis=rc))
     return [B.op], [A, Weight, B]
 
 
@@ -30,20 +30,20 @@ def jlc_schedule(ops):
     B = output.output(0)
     A = B.op.input_tensors[0]
     W = B.op.input_tensors[1]
-    s = tvm.create_schedule(output)
+    s = tvm.te.create_schedule(output)
     AA = s.cache_read(A, 'shared', [B])
     WW = s.cache_read(W, "shared", [B])
     AL = s.cache_read(AA, "local", [B])
     WL = s.cache_read(WW, "local", [B])
     BL = s.cache_write(B, "local")
 
-    block_x = tvm.thread_axis("blockIdx.x")
-    block_y = tvm.thread_axis("blockIdx.y")
-    block_z = tvm.thread_axis("blockIdx.z")
-    thread_x = tvm.thread_axis((0, blockdimx), "threadIdx.x")
-    thread_y = tvm.thread_axis((0, blockdimy), "threadIdx.y")
-    thread_xz = tvm.thread_axis("vthread")
-    thread_yz = tvm.thread_axis("vthread")
+    block_x = tvm.te.thread_axis("blockIdx.x")
+    block_y = tvm.te.thread_axis("blockIdx.y")
+    block_z = tvm.te.thread_axis("blockIdx.z")
+    thread_x = tvm.te.thread_axis((0, blockdimx), "threadIdx.x")
+    thread_y = tvm.te.thread_axis((0, blockdimy), "threadIdx.y")
+    thread_xz = tvm.te.thread_axis("vthread")
+    thread_yz = tvm.te.thread_axis("vthread")
 
 
     ni, fi, hi, wi = s[B].op.axis
@@ -101,7 +101,7 @@ def jlc_schedule(ops):
 
 def current_schedule(ops):
     output = ops[0]
-    s = tvm.create_schedule(output)
+    s = tvm.te.create_schedule(output)
     write_cache = s.cache_write(output.output(0), "local")
     A = output.input_tensors[0]
     W = output.input_tensors[1]
@@ -113,7 +113,7 @@ def current_schedule(ops):
     rc = s[write_cache].op.reduce_axis[0]
     rco, rci = s[write_cache].split(rc, nparts=16)
     write_cache_rf = s.rfactor(write_cache, rco)
-    # s[write_cache].bind(s[write_cache].op.reduce_axis[0], tvm.thread_axis("threadIdx.z"))
+    # s[write_cache].bind(s[write_cache].op.reduce_axis[0], tvm.te.thread_axis("threadIdx.z"))
     s[write_cache_rf].compute_at(s[write_cache], s[write_cache].op.reduce_axis[0])
 
     bi, ci, hi, wi = s[output].op.axis
@@ -138,12 +138,12 @@ def current_schedule(ops):
     # axis2 = s[output].fuse(b2, c2, h2, w2)
     # axis3 = s[output].fuse(bi, ci, hi, wi)
 
-    s[output].bind(c0, tvm.thread_axis("blockIdx.x"))
-    s[output].bind(b0, tvm.thread_axis("blockIdx.z"))
-    s[output].bind(c1, tvm.thread_axis("vthread"))
-    s[output].bind(hi, tvm.thread_axis("vthread"))
-    s[output].bind(wi, tvm.thread_axis("threadIdx.x"))
-    s[output].bind(c2, tvm.thread_axis("threadIdx.y"))
+    s[output].bind(c0, tvm.te.thread_axis("blockIdx.x"))
+    s[output].bind(b0, tvm.te.thread_axis("blockIdx.z"))
+    s[output].bind(c1, tvm.te.thread_axis("vthread"))
+    s[output].bind(hi, tvm.te.thread_axis("vthread"))
+    s[output].bind(wi, tvm.te.thread_axis("threadIdx.x"))
+    s[output].bind(c2, tvm.te.thread_axis("threadIdx.y"))
 
     s[write_cache].compute_at(s[output], wi)
     
@@ -160,8 +160,8 @@ def current_schedule(ops):
     tx, ci = s[AA].split(cn, nparts=14)
     ty, ni = s[AA].split(ci, nparts=8)
     # s[AA].reorder(ty, tx, yi, xi, ci, ni)
-    s[AA].bind(ty, tvm.thread_axis("threadIdx.y"))
-    s[AA].bind(tx, tvm.thread_axis("threadIdx.x"))
+    s[AA].bind(ty, tvm.te.thread_axis("threadIdx.y"))
+    s[AA].bind(tx, tvm.te.thread_axis("threadIdx.x"))
     #s[AA].vectorize(ni)  # vectorize memory load
 
     # Schedule for W's shared memory load
@@ -169,8 +169,8 @@ def current_schedule(ops):
     ty, ci = s[WW].split(ci, nparts=8)
     tx, fi = s[WW].split(fi, nparts=14)
     # s[WW].reorder(ty, tx, ci, fi)
-    s[WW].bind(ty, tvm.thread_axis("threadIdx.y"))
-    s[WW].bind(tx, tvm.thread_axis("threadIdx.x"))
+    s[WW].bind(ty, tvm.te.thread_axis("threadIdx.y"))
+    s[WW].bind(tx, tvm.te.thread_axis("threadIdx.x"))
     
 
     return s

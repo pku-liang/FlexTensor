@@ -48,7 +48,7 @@ def tvm_unpool1d_cpu(B, C, L, kernel_size, stride, padding, number=10, dev=0):
     indices = indices.cpu()
 
     s, bufs = maxunpooling1d(B, C, Input.shape[2],  kernel_size, stride, padding)
-    s =  tvm.create_schedule(s)
+    s =  tvm.te.create_schedule(s)
     ctx = tvm.cpu(dev)
     f = tvm.build(s, bufs, 'llvm')
 
@@ -74,7 +74,7 @@ def tvm_unpool1d_cuda(B, C, L, kernel_size, stride, padding, number=10, dev=0):
     indices = indices.cpu()
 
     s, bufs = maxunpooling1d(B, C, Input.shape[2],  kernel_size, stride, padding)
-    s =  tvm.create_schedule(s)
+    s =  tvm.te.create_schedule(s)
     f = tvm.build(s, bufs, "cuda")
     ctx = tvm.context("cuda", dev_id=dev)
 

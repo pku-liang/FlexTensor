@@ -93,7 +93,7 @@ def test_matmul(N_end, M_end, L_end):
                 fm = np.power(fm_inc, j) * fm_beg
                 fl = np.power(fl_inc, k) * fl_beg
                 ops, arg_bufs = matmul(N, M, L)
-                s = tvm.create_schedule(ops)
+                s = tvm.te.create_schedule(ops)
                 a, b = s[ops].op.axis
                 c = s[ops].op.reduce_axis[0]
                 ao, ai = s[ops].split(a, factor=fn)

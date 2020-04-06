@@ -107,7 +107,7 @@ def flatten_graph(ops):
         visited.add(op)
     while q:
         cur = q.popleft()
-        if isinstance(cur, tvm.tensor.ComputeOp):
+        if isinstance(cur, tvm.te.tensor.ComputeOp):
             bfs_order.append(cur)
         for t in cur.input_tensors:
             if t.op not in visited:

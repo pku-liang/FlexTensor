@@ -47,10 +47,10 @@ def pytorch_conv(batch, channel, out_channel, height, width, k_h, k_w, stride, p
 
 
 def tvm_conv(batch, channel, out_channel, height, width, k_h, k_w, stride, pad, target, devid=0, number=10):
-    A = tvm.placeholder((batch, channel, height, width), dtype="float32")
-    W = tvm.placeholder((out_channel, channel, k_h, k_w), dtype="float32")
+    A = tvm.te.placeholder((batch, channel, height, width), dtype="float32")
+    W = tvm.te.placeholder((out_channel, channel, k_h, k_w), dtype="float32")
     Output = conv2d_nchw(A, W, stride=stride, padding=pad)
-    s = tvm.create_schedule(Output.op)
+    s = tvm.te.create_schedule(Output.op)
     bufs = [A, W, Output]
     return evaluate(s, bufs, target, devid, number)
 
