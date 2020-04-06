@@ -261,7 +261,7 @@ def tvm_GatedPixelCNN_cpu(B, H, W, in_C, out_C, kernel_size, classVector, bias, 
 
 
     s, bufs = gatedpixelcnn(B, H, W, in_C, out_C, kernel_size, ClassVector=classVector, bias=bias, stride=stride, padding=padding, dilation=dilation)
-    s =  tvm.create_schedule(s)
+    s =  tvm.te.create_schedule(s)
     ctx = tvm.cpu(dev)
     f = tvm.build(s, bufs, 'llvm')
 
@@ -315,7 +315,7 @@ def schedule_direct_cuda(cfg, s, conv):
     pad_data, kernel = s[conv].op.input_tensors
 
     s[pad_data].compute_inline()
-    if isinstance(kernel.op, tvm.tensor.ComputeOp) and 'dilate' in kernel.op.tag:
+    if isinstance(kernel.op, tvm.te.tensor.ComputeOp) and 'dilate' in kernel.op.tag:
         s[kernel].compute_inline()
 
     if conv.op in s.outputs:
@@ -339,15 +339,15 @@ def schedule_direct_cuda(cfg, s, conv):
     bx, vx, tx, xi = cfg["tile_x"].apply(s, output, x)
 
     bf = s[output].fuse(n, bf)
-    s[output].bind(bf, tvm.thread_axis("blockIdx.z"))
-    s[output].bind(by, tvm.thread_axis("blockIdx.y"))
-    s[output].bind(bx, tvm.thread_axis("blockIdx.x"))
-    s[output].bind(vf, tvm.thread_axis("vthread"))
-    s[output].bind(vy, tvm.thread_axis("vthread"))
-    s[output].bind(vx, tvm.thread_axis("vthread"))
-    s[output].bind(tf, tvm.thread_axis("threadIdx.z"))
-    s[output].bind(ty, tvm.thread_axis("threadIdx.y"))
-    s[output].bind(tx, tvm.thread_axis("threadIdx.x"))
+    s[output].bind(bf, tvm.te.thread_axis("blockIdx.z"))
+    s[output].bind(by, tvm.te.thread_axis("blockIdx.y"))
+    s[output].bind(bx, tvm.te.thread_axis("blockIdx.x"))
+    s[output].bind(vf, tvm.te.thread_axis("vthread"))
+    s[output].bind(vy, tvm.te.thread_axis("vthread"))
+    s[output].bind(vx, tvm.te.thread_axis("vthread"))
+    s[output].bind(tf, tvm.te.thread_axis("threadIdx.z"))
+    s[output].bind(ty, tvm.te.thread_axis("threadIdx.y"))
+    s[output].bind(tx, tvm.te.thread_axis("threadIdx.x"))
     s[output].reorder(bf, by, bx, vf, vy, vx, tf, ty, tx, fi, yi, xi)
     s[OL].compute_at(s[output], tx)
 
@@ -369,9 +369,9 @@ def schedule_direct_cuda(cfg, s, conv):
         tz, fused = s[load].split(fused, nparts=cfg["tile_f"].size[2])
         ty, fused = s[load].split(fused, nparts=cfg["tile_y"].size[2])
         tx, fused = s[load].split(fused, nparts=cfg["tile_x"].size[2])
-        s[load].bind(tz, tvm.thread_axis("threadIdx.z"))
-        s[load].bind(ty, tvm.thread_axis("threadIdx.y"))
-        s[load].bind(tx, tvm.thread_axis("threadIdx.x"))
+        s[load].bind(tz, tvm.te.thread_axis("threadIdx.z"))
+        s[load].bind(ty, tvm.te.thread_axis("threadIdx.y"))
+        s[load].bind(tx, tvm.te.thread_axis("threadIdx.x"))
 
     # unroll
     s[output].pragma(kernel_scope, 'auto_unroll_max_step', cfg['auto_unroll_max_step'].val)
@@ -386,7 +386,7 @@ def schedule_direct_cuda(cfg, s, conv):
 def gatedPixelCNN(N, H, W, CO, CI, KH, ClassVector, bias, dilation, stride, padding):
     # assert N == 1, "Only consider batch_size = 1 in this template"
     outputs, inputs = gatedpixelcnn(N, H, W, CI, CO, KH, ClassVector=ClassVector, bias=bias, dilation=dilation, stride=stride, padding=padding)
-    s = tvm.create_schedule(outputs)
+    s = tvm.te.create_schedule(outputs)
     Input, KernelV, KernelV2H, KernelH, KernelHOut, GateV, Output = inputs
 
     cfg = autotvm.get_config()

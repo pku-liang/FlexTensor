@@ -12,7 +12,7 @@ is_power_of_x = utils.is_power_of_x
 
 
 def able_inline(op, down_graph):
-    is_compute = isinstance(op, tvm.tensor.ComputeOp)
+    is_compute = isinstance(op, tvm.te.tensor.ComputeOp)
     has_reduce = hasattr(op, "reduce_axis") and op.reduce_axis
     is_output = False
     for i in range(op.num_outputs):

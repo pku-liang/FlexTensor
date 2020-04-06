@@ -21,7 +21,7 @@ def tvm_shift_conv2d_cpu(B, H, W, C, kernel_size, dilation, stride=1, number=100
     Kernel[:, indexH, indexW] = 0
 
     output, bufs = shiftconv2d(B, H, W, C, kernel_size, dilation, stride)
-    s =  tvm.create_schedule(output)
+    s =  tvm.te.create_schedule(output)
     ctx = tvm.cpu(dev)
     # print(tvm.lower(s, bufs, simple_mode=True))
     f = tvm.build(s, bufs, 'llvm')

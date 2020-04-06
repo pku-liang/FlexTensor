@@ -12,10 +12,10 @@ from flextensor.utils import RpcInfo
 
 
 def conv2d_nchwc_compute_avx2(N, C, H, W, K, k=3, use_bias=False, st=1, pad=0, dilation=1, group=1, vlen1=8, vlen2=8):
-    inputs = tvm.placeholder([N, C // vlen1 // group, H, W, vlen1], dtype="float32")
-    weight = tvm.placeholder([K // vlen2, C // vlen1 // group, k, k, vlen1, vlen2], dtype="float32")
+    inputs = tvm.te.placeholder([N, C // vlen1 // group, H, W, vlen1], dtype="float32")
+    weight = tvm.te.placeholder([K // vlen2, C // vlen1 // group, k, k, vlen1, vlen2], dtype="float32")
     if use_bias:
-        bias = tvm.placeholder([K // vlen2, vlen2], dtype="float32")
+        bias = tvm.te.placeholder([K // vlen2, vlen2], dtype="float32")
     else:
         bias = None 
     output = conv2d_nchwc(inputs, weight, bias, stride=st, padding=pad, dilation=dilation, groups=group)

@@ -12,7 +12,7 @@ def print_source(s, bufs, target, file=sys.stdout):
 
 def recursive_fuse(s, cur, flag=False):
     for t in s[cur].op.input_tensors:
-        if isinstance(t.op, tvm.tensor.ComputeOp):
+        if isinstance(t.op, tvm.te.tensor.ComputeOp):
             recursive_fuse(s, t.op, True)
     if flag:
         s[cur].compute_inline()
@@ -28,8 +28,8 @@ for task in TASK_TABLE.values():
             continue
         hit_set.add(prefix)
         outops, bufs = task.func(*task.args)
-        s = tvm.create_schedule(outops)
-        bx = tvm.thread_axis("blockIdx.x")
+        s = tvm.te.create_schedule(outops)
+        bx = tvm.te.thread_axis("blockIdx.x")
         op = outops[0]
         recursive_fuse(s, op)
         outer, inner = s[op].split(s[op].op.axis[0], nparts=1)

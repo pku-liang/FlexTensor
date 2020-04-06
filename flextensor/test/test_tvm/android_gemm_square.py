@@ -36,28 +36,28 @@ def test_gemm_gpu(N, times, bn, num_block, num_thread):
     assert(bn <= N)
     assert(num_thread * num_thread * 16 <= N)
     assert(num_block * num_block * 2 <= N)
-    A = tvm.placeholder((N, N), name='A')
-    B = tvm.placeholder((N, N), name='Btmp')
-    k = tvm.reduce_axis((0, N), name='k')
+    A = tvm.te.placeholder((N, N), name='A')
+    B = tvm.te.placeholder((N, N), name='Btmp')
+    k = tvm.te.reduce_axis((0, N), name='k')
 
-    packedB = tvm.compute((N, N / bn, bn),
+    packedB = tvm.te.compute((N, N / bn, bn),
               lambda x, y, z: B[x, y * bn + z], name = 'B')
 
-    C = tvm.compute(
+    C = tvm.te.compute(
         (N, N),
-        lambda ii, jj: tvm.sum(A[ii, k] * packedB[k, jj / bn, jj % bn], axis=k),
+        lambda ii, jj: tvm.te.sum(A[ii, k] * packedB[k, jj / bn, jj % bn], axis=k),
         name='C')
 
-    s = tvm.create_schedule(C.op)
+    s = tvm.te.create_schedule(C.op)
     CC = s.cache_write(C, "local")
 
-    block_x = tvm.thread_axis("blockIdx.x")
-    block_y = tvm.thread_axis("blockIdx.y")
-    thread_x = tvm.thread_axis("threadIdx.x")
-    thread_y = tvm.thread_axis("threadIdx.y")
+    block_x = tvm.te.thread_axis("blockIdx.x")
+    block_y = tvm.te.thread_axis("blockIdx.y")
+    thread_x = tvm.te.thread_axis("threadIdx.x")
+    thread_y = tvm.te.thread_axis("threadIdx.y")
 
-    thread_xz = tvm.thread_axis((0, 2), "vthread", name="vx")
-    thread_yz = tvm.thread_axis((0, 2), "vthread", name="vy")
+    thread_xz = tvm.te.thread_axis((0, 2), "vthread", name="vx")
+    thread_yz = tvm.te.thread_axis((0, 2), "vthread", name="vy")
 
     pby, pbi = s[packedB].split(packedB.op.axis[0], nparts=num_thread)
     pbx, pbj = s[packedB].split(packedB.op.axis[1], nparts=num_thread)

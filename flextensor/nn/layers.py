@@ -30,13 +30,13 @@ class Conv2dLayer(Layer):
     """
     def __init__(self, in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1):
         super(Conv2dLayer, self).__init__()
-        if isinstance(kernel_size, (int, tvm.expr.IntImm)):
+        if isinstance(kernel_size, (int, tvm.tir.IntImm)):
             kernel_size = (kernel_size, kernel_size)
         assert_print(isinstance(kernel_size, tuple) and len(kernel_size) == 2)
-        self.weight = tvm.placeholder((out_channel, in_channel, *kernel_size), dtype="float32")
+        self.weight = tvm.te.placeholder((out_channel, in_channel, *kernel_size), dtype="float32")
         self.params["weight"] = self.weight
         if bias:
-            self.bias = tvm.placeholder((out_channel,), dtype="float32")
+            self.bias = tvm.te.placeholder((out_channel,), dtype="float32")
             self.params["bias"] = self.bias
         else:
             self.bias = None
@@ -298,10 +298,10 @@ class GemmConv2dLayer(Layer):
     """
     def __init__(self, in_channel, out_channel, kernel_size, bias=False, padding=0, stride=1, dilation=1, groups=1):
         super(GemmConv2dLayer, self).__init__()
-        if isinstance(kernel_size, (int, tvm.expr.IntImm)):
+        if isinstance(kernel_size, (int, tvm.tir.IntImm)):
             kernel_size = (kernel_size, kernel_size)
         assert_print(isinstance(kernel_size, tuple) and len(kernel_size) == 2)
-        self.weight = tvm.placeholder((out_channel, in_channel, *kernel_size), dtype="float32", name='weights')
+        self.weight = tvm.te.placeholder((out_channel, in_channel, *kernel_size), dtype="float32", name='weights')
         self.weight_shape = (out_channel, in_channel, *kernel_size)
         self.padding = padding
         self.stride = stride
@@ -309,7 +309,7 @@ class GemmConv2dLayer(Layer):
         self.groups = groups
         self.params["weight"] = self.weight
         if bias:
-            self.bias = tvm.placeholder((out_channel,), dtype="float32", name='bias')
+            self.bias = tvm.te.placeholder((out_channel,), dtype="float32", name='bias')
             self.params["bias"] = self.bias
         else:
             self.bias = None

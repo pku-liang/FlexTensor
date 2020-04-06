@@ -143,7 +143,7 @@ def build(ops):
             out_tensor = op.output(i)
             if not data.has_tensor(out_tensor):
                 data.add_tensor_nodes(out_tensor)
-        if isinstance(op, tvm.tensor.ComputeOp):    # add index node
+        if isinstance(op, tvm.te.tensor.ComputeOp):    # add index node
             data.add_index_nodes(op)
             data.set_op_relation(op)
 
@@ -158,12 +158,12 @@ if __name__ == "__main__":
     W = 14
     K = 512
     k = 3
-    Img = tvm.placeholder([N, C, H, W], dtype="float32")
-    Kernel = tvm.placeholder([K, C, k, k], dtype="float32")
+    Img = tvm.te.placeholder([N, C, H, W], dtype="float32")
+    Kernel = tvm.te.placeholder([K, C, k, k], dtype="float32")
     Outputs = conv2d_nchw(Img, Kernel, None, 1, 1, 1, 1)
 
-    a = tvm.placeholder([4, 4])
-    b = tvm.compute([4, 4], lambda i, j: a[(3 * i + j) * 4 - 12 * i - 4 * j + i, j])
+    a = tvm.te.placeholder([4, 4])
+    b = tvm.te.compute([4, 4], lambda i, j: a[(3 * i + j) * 4 - 12 * i - 4 * j + i, j])
 
     data = build(Outputs.op)
     var1 = IndexNode(Outputs.op, 0, "spatial")

@@ -23,11 +23,11 @@ def schedule_shift_1_x86(s, Img, KernelIndex, Output):
 def evaluate(shape, schedule_func):
     N, H, W, C, k, dilation = shape
     stride = 1
-    Img = tvm.placeholder([N, H, W, C], dtype="float32")
-    KernelIndex = tvm.placeholder([C], dtype="int32")
+    Img = tvm.te.placeholder([N, H, W, C], dtype="float32")
+    KernelIndex = tvm.te.placeholder([C], dtype="int32")
     Output = ShiftConv2d_nhwc(Img, KernelIndex, k, dilation, stride)
 
-    s = tvm.create_schedule(Output.op)
+    s = tvm.te.create_schedule(Output.op)
     schedule_func(s, Img, KernelIndex, Output)
 
     func = tvm.build(s, [Img, KernelIndex, Output], "llvm")

@@ -4,9 +4,9 @@ from flextensor.utils import to_tuple
 
 
 def array_mul(N):
-    A = tvm.placeholder((N,), dtype="float32")
-    B = tvm.placeholder((N,), dtype="float32")
-    C = tvm.compute((N,), lambda i: A[i] + B[i])
+    A = tvm.te.placeholder((N,), dtype="float32")
+    B = tvm.te.placeholder((N,), dtype="float32")
+    C = tvm.te.compute((N,), lambda i: A[i] + B[i])
     return [C.op], [A, B, C]
 
 
@@ -19,7 +19,7 @@ def test_array_mul(extent=1024, target="llvm", dev_id=0, number=10, verbose=Fals
         ary_inputs = [tvm.nd.array(np.random.uniform(size=to_tuple(buf.shape)).astype(buf.dtype), ctx) for buf in ary_bufs[:-1]]
         ary_inputs += [tvm.nd.array(np.zeros(shape=to_tuple(buf.shape), dtype=buf.dtype), ctx) for buf in ary_bufs[-1:]]
 
-        s = tvm.create_schedule(ary_ops)
+        s = tvm.te.create_schedule(ary_ops)
         func = tvm.build(s, ary_bufs, target)
         evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
 

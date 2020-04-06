@@ -58,32 +58,32 @@ def register(func, category, name, args, target, dev_id=0, override=False):
 
 
 def conv1d(N, C, L, K, kernel, stride=1, padding=0, dilation=1, groups=1):
-    Seq = tvm.placeholder((N, C, L))
-    W = tvm.placeholder((K, C//groups, kernel))
+    Seq = tvm.te.placeholder((N, C, L))
+    W = tvm.te.placeholder((K, C//groups, kernel))
     Output = op_conv1d(Seq, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
     return [Output.op], [Seq, W, Output]
 
 
 def conv_transpose1d(N, C, L, K, kernel, stride=1, padding=0, dilation=1, groups=1):
-    Seq = tvm.placeholder((N, C, L))
-    W = tvm.placeholder((C, K//groups, kernel))
+    Seq = tvm.te.placeholder((N, C, L))
+    W = tvm.te.placeholder((C, K//groups, kernel))
     Output = op_conv_transpose1d(Seq, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
     return [Output.op], [Seq, W, Output]
 
 
 def conv2d(N, C, H, W, K, kernel_size, stride=1, padding=0, dilation=1, groups=1):
-    Img = tvm.placeholder((N, C, H, W))
-    W = tvm.placeholder((K, C//groups, kernel_size, kernel_size))
+    Img = tvm.te.placeholder((N, C, H, W))
+    W = tvm.te.placeholder((K, C//groups, kernel_size, kernel_size))
     Output = conv2d_nchw(Img, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
     return [Output.op], [Img, W, Output]
 
 
 def conv2d_nchwc_layout(N, C, H, W, K, k=3, st=1, pad=0, dilation=1, group=1, vlen1=8, vlen2=8):
     use_bias = False
-    inputs = tvm.placeholder([N, C // vlen1 // group, H, W, vlen1], dtype="float32")
-    weight = tvm.placeholder([K // vlen2, C // vlen1 // group, k, k, vlen1, vlen2], dtype="float32")
+    inputs = tvm.te.placeholder([N, C // vlen1 // group, H, W, vlen1], dtype="float32")
+    weight = tvm.te.placeholder([K // vlen2, C // vlen1 // group, k, k, vlen1, vlen2], dtype="float32")
     if use_bias:
-        bias = tvm.placeholder([K // vlen2, vlen2], dtype="float32")
+        bias = tvm.te.placeholder([K // vlen2, vlen2], dtype="float32")
     else:
         bias = None 
     output = conv2d_nchwc(inputs, weight, bias, stride=st, padding=pad, dilation=dilation, groups=group)
@@ -94,116 +94,116 @@ def conv2d_nchwc_layout(N, C, H, W, K, k=3, st=1, pad=0, dilation=1, group=1, vl
 
 
 def depthwise_conv2d(N, C, H, W, factor, kernel_size, stride=1, padding=0, dilation=1):
-    Img = tvm.placeholder((N, C, H, W))
-    W = tvm.placeholder((C, factor, kernel_size, kernel_size))
+    Img = tvm.te.placeholder((N, C, H, W))
+    W = tvm.te.placeholder((C, factor, kernel_size, kernel_size))
     Ouput = depthwise_conv2d_nchw(Img, W, stride=stride, padding=padding, dilation=dilation)
     return [Ouput.op], [Img, W, Ouput]
 
 
 def conv_transpose2d(N, C, H, W, K, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1):
-    Inputs = tvm.placeholder((N, C, H, W))
-    W = tvm.placeholder((C, K//groups, kernel_size, kernel_size))
+    Inputs = tvm.te.placeholder((N, C, H, W))
+    W = tvm.te.placeholder((C, K//groups, kernel_size, kernel_size))
     Output = conv_transpose2d_nchw(Inputs, W, stride=stride, padding=padding, output_padding=output_padding, dilation=dilation, groups=groups)
     return [Output.op], [Inputs, W, Output]
 
 
 def conv3d(N, C, D, H, W, K, kernel_size, stride=1, padding=0, dilation=1, groups=1):
-    Img = tvm.placeholder((N, C, D, H, W))
-    W = tvm.placeholder((K, C//groups, kernel_size, kernel_size, kernel_size))
+    Img = tvm.te.placeholder((N, C, D, H, W))
+    W = tvm.te.placeholder((K, C//groups, kernel_size, kernel_size, kernel_size))
     Output = conv3d_ncdhw(Img, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
     return [Output.op], [Img, W, Output]
 
 
 def conv_transpose3d(N, C, D, H, W, K, kernel_size, stride=1, padding=0, dialtion=1, groups=1):
-    Img = tvm.placeholder((N, C, D, H, W))
-    W = tvm.placeholder((C, K//groups, kernel_size, kernel_size, kernel_size))
+    Img = tvm.te.placeholder((N, C, D, H, W))
+    W = tvm.te.placeholder((C, K//groups, kernel_size, kernel_size, kernel_size))
     Output = conv_transpose3d_ncdhw(Img, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
     return [Output.op], [Img, W, Output]
 
 
 def gemm_conv2d(N, C, H, W, K, kernel_size, stride=1, padding=0, dilation=1, groups=1):
-    Img = tvm.placeholder((N, C, H, W))
-    W = tvm.placeholder((K, C, kernel_size, kernel_size))
+    Img = tvm.te.placeholder((N, C, H, W))
+    W = tvm.te.placeholder((K, C, kernel_size, kernel_size))
     Output = gemm_conv2d_nchw(Img, W, stride=stride, padding=padding, dilation=dilation, groups=groups)
     return [Output.op], [Img, W, Output]
 
 
 def gemv(N, K):
-    A = tvm.placeholder((N, K))
-    B = tvm.placeholder((K,))
+    A = tvm.te.placeholder((N, K))
+    B = tvm.te.placeholder((K,))
     Output = op_gemv(A, B)
     return [Output.op], [A, B, Output]
 
 
 def gemm(N, K, M):
-    A = tvm.placeholder((N, K))
-    B = tvm.placeholder((K, M))
+    A = tvm.te.placeholder((N, K))
+    B = tvm.te.placeholder((K, M))
     Output = op_gemm(A, B)
     return [Output.op], [A, B, Output]
 
 
 def bilinear(N, K1, K2, M):
-    A = tvm.placeholder((N, K1))
-    B = tvm.placeholder((N, K2))
-    C = tvm.placeholder((M, K1, K2))
+    A = tvm.te.placeholder((N, K1))
+    B = tvm.te.placeholder((N, K2))
+    C = tvm.te.placeholder((M, K1, K2))
     Output = op_bilinear(A, B, C)
     return [Output.op], [A, B, C, Output]
 
 
 def mttkrp(N, K1, K2, M):
-    A = tvm.placeholder((N, K1, K2))
-    B = tvm.placeholder((K1, M))
-    C = tvm.placeholder((K2, M))
+    A = tvm.te.placeholder((N, K1, K2))
+    B = tvm.te.placeholder((K1, M))
+    C = tvm.te.placeholder((K2, M))
     Output = MTTKRP3d(A, B, C)
     return [Output.op], [A, B, C, Output]
 
 
 def conv2d_1x1_packed(N, C, H, W, K, kernel_size):
-    A = tvm.placeholder((N, C, H * W))
-    B = tvm.placeholder((K, C))
-    rc = tvm.reduce_axis((0, C))
-    Output = tvm.compute((N, K, H * W), lambda b, k, i: tvm.sum(A[b, rc, i] * B[k, rc], axis=rc))
+    A = tvm.te.placeholder((N, C, H * W))
+    B = tvm.te.placeholder((K, C))
+    rc = tvm.te.reduce_axis((0, C))
+    Output = tvm.te.compute((N, K, H * W), lambda b, k, i: tvm.te.sum(A[b, rc, i] * B[k, rc], axis=rc))
     return [Output.op], [A, B, Output]
 
 def block_circulant_matrix(ROW, COL, FFT):
-    Input = tvm.placeholder((ROW, COL))
+    Input = tvm.te.placeholder((ROW, COL))
     Output = op_block_circulant_matrix(Input, FFT)
     return [Output.op], [Input, Output]
 
 def maxunpooling1d(N, C, L, kernel_size, stride=1, padding=0):
-    Input = tvm.placeholder((N, C, L))
-    Indices = tvm.placeholder((N, C, L))
+    Input = tvm.te.placeholder((N, C, L))
+    Indices = tvm.te.placeholder((N, C, L))
     Output = op_maxunpool1d(Input, Indices, kernel_size, stride=stride, padding=padding)
     return [Output.op], [Input, Indices, Output]
 
 def maxunpooling2d(N, C, H, W, kernel_size, stride=1, padding=0):
-    Input = tvm.placeholder((N, C, H, W))
-    Indices = tvm.placeholder((N, C, H, W))
+    Input = tvm.te.placeholder((N, C, H, W))
+    Indices = tvm.te.placeholder((N, C, H, W))
     Output = op_maxunpool2d(Input, Indices, kernel_size, stride=stride, padding=padding)
     return [Output.op], [Input, Indices, Output]
 
 def shiftconv2d(N, H, W, C, kernel_size, dialtion=1, stride=1):
-    Input = tvm.placeholder((N, H, W, C))
-    KernelIndex = tvm.placeholder((C, ), dtype="int32")
+    Input = tvm.te.placeholder((N, H, W, C))
+    KernelIndex = tvm.te.placeholder((C, ), dtype="int32")
     # PInput, kernelIndex, Output = op_shift_conv2d(Input, Kernel, dilation, stride)
     # return [PInput.op, kernelIndex.op, Output.op], [Input, Kernel, Output]
     Output = op_shift_conv2d(Input, KernelIndex, kernel_size, dilation, stride)
     return [Output.op], [Input, KernelIndex, Output]
 
 def pixelcnn(N, H, W, C, OutC, kernel_height, kernel_width, mask_type, bias=None, stride=1, padding=0, dilation=1, groups=1):
-    Input = tvm.placeholder((N, H, W, C))
-    Kernel = tvm.placeholder((OutC, C, kernel_height, kernel_width))
+    Input = tvm.te.placeholder((N, H, W, C))
+    Kernel = tvm.te.placeholder((OutC, C, kernel_height, kernel_width))
     Mask, Output = op_pixel_cnn(Input, Kernel, mask_type, bias=bias, dilation=dilation, stride=stride, padding=padding)
     return [Mask.op, Output.op], [Input, Kernel, Mask, Output]
 
 def gatedpixelcnn(N, H, W, C, OutC, kernel_size, ClassVector=None, bias=None, stride=1, padding=0, dilation=1, groups=1):
-    Input = tvm.placeholder((N, H, W, C))
-    KernelV = tvm.placeholder((2 * OutC, C, kernel_size, kernel_size))
-    KernelV2H = tvm.placeholder((2 * OutC, 2 * OutC, 1, 1))
-    KernelH = tvm.placeholder((2 * OutC, C, 1, kernel_size))
-    KernelHOut = tvm.placeholder((OutC, OutC, 1, 1))
+    Input = tvm.te.placeholder((N, H, W, C))
+    KernelV = tvm.te.placeholder((2 * OutC, C, kernel_size, kernel_size))
+    KernelV2H = tvm.te.placeholder((2 * OutC, 2 * OutC, 1, 1))
+    KernelH = tvm.te.placeholder((2 * OutC, C, 1, kernel_size))
+    KernelHOut = tvm.te.placeholder((OutC, OutC, 1, 1))
     if ClassVector is not None:
-        ClassVector = tvm.placeholder((N, 2 * OutC, 1, 1))
+        ClassVector = tvm.te.placeholder((N, 2 * OutC, 1, 1))
     GateV, Output = op_gated_pixel_cnn(Input, KernelV, KernelV2H, KernelH, KernelHOut, ClassVector, bias=bias, dilation=dilation, stride=stride, padding=padding)
     return [GateV.op, Output.op], [Input, KernelV, KernelV2H, KernelH, KernelHOut, GateV, Output]
 

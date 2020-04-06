@@ -17,30 +17,30 @@ out_size = (in_size - kernel + 2*pad) // stride + 1
 def conv_time(args):
     tile_x, tile_y, step, target, dev_id, number = args
     # Algorithm
-    A = tvm.placeholder((in_size, in_size, in_channel, batch), name='A')
-    W = tvm.placeholder((kernel, kernel, in_channel, out_channel), name='W')
+    A = tvm.te.placeholder((in_size, in_size, in_channel, batch), name='A')
+    W = tvm.te.placeholder((kernel, kernel, in_channel, out_channel), name='W')
     # Pad input
-    Apad = tvm.compute(
+    Apad = tvm.te.compute(
         (in_size + 2*pad, in_size + 2*pad, in_channel, batch),
         lambda yy, xx, cc, nn: tvm.select(
-            tvm.all(yy >= pad, yy - pad < in_size,
+            tvm.te.all(yy >= pad, yy - pad < in_size,
                     xx >= pad, xx - pad < in_size),
             A[yy - pad, xx - pad, cc, nn], tvm.const(0., "float32")),
         name='Apad')
     # Create reduction variables
-    rc = tvm.reduce_axis((0, in_channel), name='rc')
-    ry = tvm.reduce_axis((0, kernel), name='ry')
-    rx = tvm.reduce_axis((0, kernel), name='rx')
+    rc = tvm.te.reduce_axis((0, in_channel), name='rc')
+    ry = tvm.te.reduce_axis((0, kernel), name='ry')
+    rx = tvm.te.reduce_axis((0, kernel), name='rx')
     # Compute the convolution
-    B = tvm.compute(
+    B = tvm.te.compute(
         (out_size, out_size, out_channel, batch),
-        lambda yy, xx, ff, nn: tvm.sum(
+        lambda yy, xx, ff, nn: tvm.te.sum(
             Apad[yy * stride + ry, xx * stride + rx, rc, nn] * W[ry, rx, rc, ff],
             axis=[ry, rx, rc]),
         name='B')
 
     # Designate the memory hierarchy
-    s = tvm.create_schedule(B.op)
+    s = tvm.te.create_schedule(B.op)
     # s[Apad].compute_inline()
     BL = s.cache_write(B, "local")
 

@@ -41,7 +41,7 @@ def flatten_graph(ops):
         visited.add(op)
     while q:
         cur = q.popleft()
-        if isinstance(cur, tvm.tensor.ComputeOp):
+        if isinstance(cur, tvm.te.tensor.ComputeOp):
             bfs_order.append(cur)
         for t in cur.input_tensors:
             if t.op not in visited:
@@ -124,7 +124,7 @@ def eval_func(func_file, bufs_shape, dtype, target, number=100, dev_id=0, rpc_in
             remote.upload(os.path.join(LIB_DIR, func_file))
             func = remote.load_module(func_file)
         else:
-            func = tvm.module.load(os.path.join(LIB_DIR, func_file))
+            func = tvm.runtime.module.load_module(os.path.join(LIB_DIR, func_file))
         evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
         time_cost = evaluator(*tvm_arys).mean * 1e3
     finally:
@@ -735,14 +735,14 @@ class OpScheduler(Scheduler):
             thread_extents = 1
             assert_print(length > 1, "fused axes length <= 1")
             if 2 <= length <= 3:
-                s[op].bind(fused_spatial_axes[0], tvm.thread_axis("blockIdx.x"))
-                s[op].bind(fused_spatial_axes[1], tvm.thread_axis("threadIdx.x"))
+                s[op].bind(fused_spatial_axes[0], tvm.te.thread_axis("blockIdx.x"))
+                s[op].bind(fused_spatial_axes[1], tvm.te.thread_axis("threadIdx.x"))
                 thread_pos = fused_spatial_axes[1]
                 thread_extents = spatial_fuse_extents[1]
             else:
-                s[op].bind(fused_spatial_axes[0], tvm.thread_axis("blockIdx.x"))
-                s[op].bind(fused_spatial_axes[1], tvm.thread_axis("vthread"))
-                s[op].bind(fused_spatial_axes[2], tvm.thread_axis("threadIdx.x"))
+                s[op].bind(fused_spatial_axes[0], tvm.te.thread_axis("blockIdx.x"))
+                s[op].bind(fused_spatial_axes[1], tvm.te.thread_axis("vthread"))
+                s[op].bind(fused_spatial_axes[2], tvm.te.thread_axis("threadIdx.x"))
                 thread_pos = fused_spatial_axes[2]
                 thread_extents = spatial_fuse_extents[2]
 
@@ -808,7 +808,7 @@ class OpScheduler(Scheduler):
                     fuse_lst = s[share].op.axis
                     fused = s[share].fuse(*fuse_lst)
                     outer, inner = s[share].split(fused, nparts=thread_extents)
-                    s[share].bind(outer, tvm.thread_axis("threadIdx.x"))
+                    s[share].bind(outer, tvm.te.thread_axis("threadIdx.x"))
             
             # unroll
             if "unroll" in config and len(config["unroll"]) > 0:
@@ -893,15 +893,15 @@ class OpScheduler(Scheduler):
             
             # always bind here
             # - prepare thread axis
-            bx = tvm.thread_axis("blockIdx.x")
-            by = tvm.thread_axis("blockIdx.y")
-            bz = tvm.thread_axis("blockIdx.z")
-            vx = tvm.thread_axis("vthread")
-            vy = tvm.thread_axis("vthread")
-            vz = tvm.thread_axis("vthread")
-            tx = tvm.thread_axis("threadIdx.x")
-            ty = tvm.thread_axis("threadIdx.y")
-            tz = tvm.thread_axis("threadIdx.z")
+            bx = tvm.te.thread_axis("blockIdx.x")
+            by = tvm.te.thread_axis("blockIdx.y")
+            bz = tvm.te.thread_axis("blockIdx.z")
+            vx = tvm.te.thread_axis("vthread")
+            vy = tvm.te.thread_axis("vthread")
+            vz = tvm.te.thread_axis("vthread")
+            tx = tvm.te.thread_axis("threadIdx.x")
+            ty = tvm.te.thread_axis("threadIdx.y")
+            tz = tvm.te.thread_axis("threadIdx.z")
 
             blocks = [bz, by, bx]
             threads = [tz, ty, tx]
@@ -1157,15 +1157,15 @@ class OpScheduler(Scheduler):
       
             # always bind here
             # - prepare thread axis
-            bx = tvm.thread_axis("blockIdx.x")
-            by = tvm.thread_axis("blockIdx.y")
-            bz = tvm.thread_axis("blockIdx.z")
-            vx = tvm.thread_axis("vthread")
-            vy = tvm.thread_axis("vthread")
-            vz = tvm.thread_axis("vthread")
-            tx = tvm.thread_axis("threadIdx.x")
-            ty = tvm.thread_axis("threadIdx.y")
-            tz = tvm.thread_axis("threadIdx.z")
+            bx = tvm.te.thread_axis("blockIdx.x")
+            by = tvm.te.thread_axis("blockIdx.y")
+            bz = tvm.te.thread_axis("blockIdx.z")
+            vx = tvm.te.thread_axis("vthread")
+            vy = tvm.te.thread_axis("vthread")
+            vz = tvm.te.thread_axis("vthread")
+            tx = tvm.te.thread_axis("threadIdx.x")
+            ty = tvm.te.thread_axis("threadIdx.y")
+            tz = tvm.te.thread_axis("threadIdx.z")
 
             blocks = [bz, by, bx]
             threads = [tz, ty, tx]
@@ -2119,7 +2119,7 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
     
     #################################################
     # final schedule
-    # s = tvm.create_schedule(ops)
+    # s = tvm.te.create_schedule(ops)
     # # perform inter operator schedule
     # graph_template = GraphScheduler.generate_graph_schedule(configs.graph_config, phase="inline")
     # graph_template(s, op_lst, op_states)
@@ -2178,11 +2178,11 @@ def schedule_with_config_ops(ops, bufs, configs, op_pos=None, target="llvm"):
         assert_print(isinstance(op_pos, int), "op_pos should be int")
         assert_print(op_pos < len(op_lst) and op_pos < len(op_config_lst), "op_pos too big")
         loop_length = op_pos + 1
-        s = tvm.create_schedule(op_lst[op_pos])
+        s = tvm.te.create_schedule(op_lst[op_pos])
     else:
         assert_print(len(op_config_lst) <= len(op_lst), "config length exceed op_lst")
         loop_length = len(op_config_lst)
-        s = tvm.create_schedule(ops)
+        s = tvm.te.create_schedule(ops)
 
     ###################################################
     # perform inter operations schedule first for inline

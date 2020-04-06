@@ -37,25 +37,25 @@ pad = 1
 stride = 1
 
 # Algorithm
-A = tvm.placeholder((in_size, in_size, in_channel, batch), name='A')
-W = tvm.placeholder((kernel, kernel, in_channel, out_channel), name='W')
+A = tvm.te.placeholder((in_size, in_size, in_channel, batch), name='A')
+W = tvm.te.placeholder((kernel, kernel, in_channel, out_channel), name='W')
 out_size = (in_size - kernel + 2*pad) // stride + 1
 # Pad input
-Apad = tvm.compute(
+Apad = tvm.te.compute(
     (in_size + 2*pad, in_size + 2*pad, in_channel, batch),
-    lambda yy, xx, cc, nn: tvm.if_then_else(
-        tvm.all(yy >= pad, yy - pad < in_size,
+    lambda yy, xx, cc, nn: tvm.te.if_then_else(
+        tvm.te.all(yy >= pad, yy - pad < in_size,
                 xx >= pad, xx - pad < in_size),
         A[yy - pad, xx - pad, cc, nn], tvm.const(0., "float32")),
     name='Apad')
 # Create reduction variables
-rc = tvm.reduce_axis((0, in_channel), name='rc')
-ry = tvm.reduce_axis((0, kernel), name='ry')
-rx = tvm.reduce_axis((0, kernel), name='rx')
+rc = tvm.te.reduce_axis((0, in_channel), name='rc')
+ry = tvm.te.reduce_axis((0, kernel), name='ry')
+rx = tvm.te.reduce_axis((0, kernel), name='rx')
 # Compute the convolution
-B = tvm.compute(
+B = tvm.te.compute(
     (out_size, out_size, out_channel, batch),
-    lambda yy, xx, ff, nn: tvm.sum(
+    lambda yy, xx, ff, nn: tvm.te.sum(
         Apad[yy * stride + ry, xx * stride + rx, rc, nn] * W[ry, rx, rc, ff],
         axis=[ry, rx, rc]),
     name='B')
@@ -85,7 +85,7 @@ B = tvm.compute(
 #
 
 # Designate the memory hierarchy
-s = tvm.create_schedule(B.op)
+s = tvm.te.create_schedule(B.op)
 s[Apad].compute_inline() # compute Apad inline
 AA = s.cache_read(Apad, 'shared', [B])
 WW = s.cache_read(W, "shared", [B])
@@ -119,13 +119,13 @@ step = 8
 vthread = 2
 
 # Get the GPU thread indices
-block_x = tvm.thread_axis("blockIdx.x")
-block_y = tvm.thread_axis("blockIdx.y")
-block_z = tvm.thread_axis("blockIdx.z")
-thread_x = tvm.thread_axis((0, num_thread), "threadIdx.x")
-thread_y = tvm.thread_axis((0, num_thread), "threadIdx.y")
-thread_xz = tvm.thread_axis((0, vthread), "vthread", name="vx")
-thread_yz = tvm.thread_axis((0, vthread), "vthread", name="vy")
+block_x = tvm.te.thread_axis("blockIdx.x")
+block_y = tvm.te.thread_axis("blockIdx.y")
+block_z = tvm.te.thread_axis("blockIdx.z")
+thread_x = tvm.te.thread_axis((0, num_thread), "threadIdx.x")
+thread_y = tvm.te.thread_axis((0, num_thread), "threadIdx.y")
+thread_xz = tvm.te.thread_axis((0, vthread), "vthread", name="vx")
+thread_yz = tvm.te.thread_axis((0, vthread), "vthread", name="vy")
 
 # Split the workloads
 hi, wi, fi, ni = s[B].op.axis

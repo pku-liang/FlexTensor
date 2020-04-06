@@ -9,10 +9,10 @@ from flextensor.configs.conv2d_config import yolo_shapes_b1
 
 def conv2d_nchwc_compute_avx2(N, C, H, W, K, k=3, use_bias=False, st=1, pad=0, dilation=1, group=1):
     vlen = 8    # AVX2 provides 256 bit operations
-    inputs = tvm.placeholder([N, C // vlen // group, H, W, vlen], dtype="float32")
-    weight = tvm.placeholder([K // vlen, C // vlen // group, k, k, vlen, vlen], dtype="float32")
+    inputs = tvm.te.placeholder([N, C // vlen // group, H, W, vlen], dtype="float32")
+    weight = tvm.te.placeholder([K // vlen, C // vlen // group, k, k, vlen, vlen], dtype="float32")
     if use_bias:
-        bias = tvm.placeholder([K // vlen, vlen], dtype="float32")
+        bias = tvm.te.placeholder([K // vlen, vlen], dtype="float32")
     else:
         bias = None 
     output = conv2d_nchwc(inputs, weight, bias, stride=st, padding=pad, dilation=dilation, groups=group)
@@ -25,7 +25,7 @@ ic_factors = [2, 16]
 
 
 def conv2d_nchwc_schedule_avx2_yolo_conv6(output):
-    s = tvm.create_schedule(output.op)
+    s = tvm.te.create_schedule(output.op)
     pad = s[output].op.input_tensors[0]
     s[pad].compute_inline()
 
@@ -101,10 +101,10 @@ if __name__ == "__main__":
         ic_factors[0] = i
         ic_factors[1] = 256 // i
         # get compute
-        inputs = tvm.placeholder([N, C // vlen // group, H, W, vlen], dtype="float32")
-        weight = tvm.placeholder([K // vlen, C // vlen // group, k, k, vlen, vlen], dtype="float32")
+        inputs = tvm.te.placeholder([N, C // vlen // group, H, W, vlen], dtype="float32")
+        weight = tvm.te.placeholder([K // vlen, C // vlen // group, k, k, vlen, vlen], dtype="float32")
         if use_bias:
-            bias = tvm.placeholder([K // vlen, vlen], dtype="float32")
+            bias = tvm.te.placeholder([K // vlen, vlen], dtype="float32")
         else:
             bias = None 
         output = conv2d_nchwc(inputs, weight, bias, stride=st, padding=pad, dilation=dilation, groups=group)

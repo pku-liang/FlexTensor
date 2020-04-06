@@ -80,12 +80,12 @@ def try_yolo_conv(batch_size=1):
     # get the compute
     yolo_conv = YoloConvLayer6()
     input_shape = yolo_conv.get_intput_shape()
-    inputs = tvm.placeholder((batch_size, *input_shape), dtype="float32")
+    inputs = tvm.te.placeholder((batch_size, *input_shape), dtype="float32")
     weight = yolo_conv.get_weight()
     outputs = yolo_conv(inputs)
     bias = yolo_conv.get_bias()
     
-    s = tvm.create_schedule(outputs.op)
+    s = tvm.te.create_schedule(outputs.op)
     schedule_yolo_conv_x86(s, outputs, inputs, weight)
 
     if bias is None:

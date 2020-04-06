@@ -53,17 +53,17 @@ pad = 0
 stride = 1
 
 # Algorithm
-A = tvm.placeholder((N, C, H, H), name='A')
-W = tvm.placeholder((K, C), name='W')
+A = tvm.te.placeholder((N, C, H, H), name='A')
+W = tvm.te.placeholder((K, C), name='W')
 # Pad input
 
 # Create reduction variables
-rc = tvm.reduce_axis((0, C), name='rc')
+rc = tvm.te.reduce_axis((0, C), name='rc')
 
 # Compute the convolution
-B = tvm.compute(
+B = tvm.te.compute(
     (N, K, H, H),
-    lambda nn, ff, yy, xx: tvm.sum(
+    lambda nn, ff, yy, xx: tvm.te.sum(
         A[nn, rc, yy, xx] * W[ff, rc],
         axis=[rc]),
     name='B')
@@ -111,20 +111,20 @@ step_s = [16]
 # griddimx_s=[192, 256, 320, 392, 448, 512]
 
 def make_schedule(blockdimx, blockdimy, threaddimy, step):
-    s = tvm.create_schedule(B.op)
+    s = tvm.te.create_schedule(B.op)
     AA = s.cache_read(A, 'shared', [B])
     WW = s.cache_read(W, "shared", [B])
     AL = s.cache_read(AA, "local", [B])
     WL = s.cache_read(WW, "local", [B])
     BL = s.cache_write(B, "local")
 
-    block_x = tvm.thread_axis("blockIdx.x")
-    block_y = tvm.thread_axis("blockIdx.y")
-    block_z = tvm.thread_axis("blockIdx.z")
-    thread_x = tvm.thread_axis((0, blockdimx), "threadIdx.x")
-    thread_y = tvm.thread_axis((0, blockdimy), "threadIdx.y")
-    thread_xz = tvm.thread_axis("vthread")
-    thread_yz = tvm.thread_axis("vthread")
+    block_x = tvm.te.thread_axis("blockIdx.x")
+    block_y = tvm.te.thread_axis("blockIdx.y")
+    block_z = tvm.te.thread_axis("blockIdx.z")
+    thread_x = tvm.te.thread_axis((0, blockdimx), "threadIdx.x")
+    thread_y = tvm.te.thread_axis((0, blockdimy), "threadIdx.y")
+    thread_xz = tvm.te.thread_axis("vthread")
+    thread_yz = tvm.te.thread_axis("vthread")
 
 
     ni, fi, hi, wi = s[B].op.axis

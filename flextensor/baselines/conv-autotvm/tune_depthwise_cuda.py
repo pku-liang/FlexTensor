@@ -125,11 +125,11 @@ def _depthwise_conv2d_nchw(Input, Filter, stride, padding, dilation, out_dtype=N
     pad_after = [0, 0, pad_down, pad_right]
     PaddedInput = topi.nn.pad(Input, pad_before, pad_after, name="PaddedInput")
     # depthconv stage
-    di = tvm.reduce_axis((0, filter_height), name='di')
-    dj = tvm.reduce_axis((0, filter_width), name='dj')
-    Output = tvm.compute(
+    di = tvm.te.reduce_axis((0, filter_height), name='di')
+    dj = tvm.te.reduce_axis((0, filter_width), name='dj')
+    Output = tvm.te.compute(
         (batch, out_channel, out_height, out_width),
-        lambda b, c, i, j: tvm.sum(
+        lambda b, c, i, j: tvm.te.sum(
             (PaddedInput[b, c/channel_multiplier, i*stride_h+di*dilation_h,
                          j*stride_w+dj*dilation_w].astype(out_dtype) *
              Filter[c/channel_multiplier, c%channel_multiplier, di, dj].astype(out_dtype)),
@@ -152,8 +152,8 @@ def schedule_depthwise_conv2d_nchw_cuda(cfg, s, outs):
     s: Schedule
         The computation schedule for depthwise_conv2d nchw.
     """
-    outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
-    # s = tvm.create_schedule([x.op for x in outs])
+    outs = [outs] if isinstance(outs, tvm.te.tensor.Tensor) else outs
+    # s = tvm.te.create_schedule([x.op for x in outs])
 
     def _callback(op):
         pad_data = op.input_tensors[0]
@@ -184,7 +184,7 @@ def schedule_depthwise_conv2d_nchw_cuda(cfg, s, outs):
         # ##### space definition end #####
 
         s[pad_data].compute_inline()
-        # if isinstance(kernel.op, tvm.tensor.ComputeOp) and 'dilate' in kernel.op.tag:
+        # if isinstance(kernel.op, tvm.te.tensor.ComputeOp) and 'dilate' in kernel.op.tag:
         #     s[kernel].compute_inline()
 
         if conv.op in s.outputs:
@@ -209,15 +209,15 @@ def schedule_depthwise_conv2d_nchw_cuda(cfg, s, outs):
 
         kernel_scope, n = s[output].split(n, nparts=1)
         bf = s[output].fuse(n, bf)
-        s[output].bind(bf, tvm.thread_axis("blockIdx.z"))
-        s[output].bind(by, tvm.thread_axis("blockIdx.y"))
-        s[output].bind(bx, tvm.thread_axis("blockIdx.x"))
-        s[output].bind(vf, tvm.thread_axis("vthread"))
-        s[output].bind(vy, tvm.thread_axis("vthread"))
-        s[output].bind(vx, tvm.thread_axis("vthread"))
-        s[output].bind(tf, tvm.thread_axis("threadIdx.z"))
-        s[output].bind(ty, tvm.thread_axis("threadIdx.y"))
-        s[output].bind(tx, tvm.thread_axis("threadIdx.x"))
+        s[output].bind(bf, tvm.te.thread_axis("blockIdx.z"))
+        s[output].bind(by, tvm.te.thread_axis("blockIdx.y"))
+        s[output].bind(bx, tvm.te.thread_axis("blockIdx.x"))
+        s[output].bind(vf, tvm.te.thread_axis("vthread"))
+        s[output].bind(vy, tvm.te.thread_axis("vthread"))
+        s[output].bind(vx, tvm.te.thread_axis("vthread"))
+        s[output].bind(tf, tvm.te.thread_axis("threadIdx.z"))
+        s[output].bind(ty, tvm.te.thread_axis("threadIdx.y"))
+        s[output].bind(tx, tvm.te.thread_axis("threadIdx.x"))
         s[output].reorder(bf, by, bx, vf, vy, vx, tf, ty, tx, fi, yi, xi)
         s[OL].compute_at(s[output], tx)
 
@@ -232,9 +232,9 @@ def schedule_depthwise_conv2d_nchw_cuda(cfg, s, outs):
             fused, tx = s[load].split(fused, cfg["tile_x"].size[2])
             fused, ty = s[load].split(fused, cfg["tile_y"].size[2])
             fused, tz = s[load].split(fused, cfg["tile_f"].size[2])
-            s[load].bind(tz, tvm.thread_axis("threadIdx.z"))
-            s[load].bind(ty, tvm.thread_axis("threadIdx.y"))
-            s[load].bind(tx, tvm.thread_axis("threadIdx.x"))
+            s[load].bind(tz, tvm.te.thread_axis("threadIdx.z"))
+            s[load].bind(ty, tvm.te.thread_axis("threadIdx.y"))
+            s[load].bind(tx, tvm.te.thread_axis("threadIdx.x"))
 
         s[output].pragma(kernel_scope, 'auto_unroll_max_step', cfg['auto_unroll_max_step'].val)
         s[output].pragma(kernel_scope, 'unroll_explicit', cfg['unroll_explicit'].val)
@@ -245,11 +245,11 @@ def schedule_depthwise_conv2d_nchw_cuda(cfg, s, outs):
 
 @autotvm.template
 def depthwise_conv2d_nchw(N, H, W, factor, CI, KH, KW, stride, padding, dilation):
-    data = tvm.placeholder((N, CI, H, W), name='data')
-    kernel = tvm.placeholder((CI, factor, KH, KW), name='kernel')
+    data = tvm.te.placeholder((N, CI, H, W), name='data')
+    kernel = tvm.te.placeholder((CI, factor, KH, KW), name='kernel')
     conv = _depthwise_conv2d_nchw(data, kernel, stride, padding, dilation=dilation, out_dtype='float32')
 
-    s = tvm.create_schedule([conv.op])
+    s = tvm.te.create_schedule([conv.op])
     cfg = autotvm.get_config()
 
     ##### space definition begin #####
