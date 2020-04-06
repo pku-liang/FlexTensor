@@ -41,7 +41,7 @@ on NVIDIA V100 GPU compared to the state-of-the-art.
 
 ## Installation
 
-Requires: `Python 3.5+`, `Numpy`, `TVM <= v0.6`
+Requires: `Python 3.5+`, `Numpy`, `TVM >= v0.7.dev`
 
 1. Install TVM, follow the [instructions](https://docs.tvm.ai/install/from_source.html).
 2. Clone this repo:
