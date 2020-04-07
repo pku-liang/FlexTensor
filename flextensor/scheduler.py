@@ -66,7 +66,7 @@ def verify_code(stmt, target, dev_id):
             "max_thread_y": max_dims[1],
             "max_thread_z": max_dims[2]
         }
-        valid = tvm.ir_pass.VerifyGPUCode(stmt, check_gpu)
+        valid = tvm.tir.ir_pass.VerifyGPUCode(stmt, check_gpu)
         return valid
     else: 
         # no barrier for other targets

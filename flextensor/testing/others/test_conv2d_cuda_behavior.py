@@ -172,7 +172,7 @@ def try_yolo_conv(batch_size, config):
         "max_thread_y": max_dims[1],
         "max_thread_z": max_dims[2]
     }
-    verify = tvm.ir_pass.VerifyGPUCode(stmt, kwargs)
+    verify = tvm.tir.ir_pass.VerifyGPUCode(stmt, kwargs)
     print("%d. config is:\n %s" % (__COUNTER__, str(config)))
     if verify:
         print("Valid kernel")

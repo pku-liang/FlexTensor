@@ -159,7 +159,7 @@ def try_yolo_conv_cuda(batch_size=1):
         "max_thread_y": max_dims[1],
         "max_thread_z": max_dims[2]
     }
-    verify = tvm.ir_pass.VerifyGPUCode(stmt, kwargs)
+    verify = tvm.tir.ir_pass.VerifyGPUCode(stmt, kwargs)
     print(verify)
     time_cost = _evaluate(s, arg_bufs, "cuda", dev_id, 10)
     print("Yolo conv10 use", time_cost, "ms")
