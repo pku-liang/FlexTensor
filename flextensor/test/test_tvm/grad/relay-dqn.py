@@ -20,21 +20,23 @@ input_shape = (batch_size, *image_shape)
 input_type = relay.TensorType(input_shape, dtype)
 
 print("Get DQN network...")
-net = relay.testing.dqn.get_net(
-  batch_size, num_actions=num_actions, image_shape=image_shape, dtype=dtype)
+# net = relay.testing.dqn.get_net(
+#   batch_size, num_actions=num_actions, image_shape=image_shape, dtype=dtype)
 
 fmod, fparams = relay.testing.dqn.get_workload(batch_size)
 
-print("Get gradient...")
-bnet = relay.transform.gradient(fmod["main"])
+# print("Get gradient...")
+# fmod = relay.transform.ToANormalForm()(fmod)
+# bnet = relay.transform.gradient(fmod["main"], mode="higher_order")
+# fmod = relay.transform.ToANormalForm()(fmod)
 
-print("Make workload")
-mod, params = relay.testing.create_workload(bnet)
+# print("Make workload")
+# mod, params = relay.testing.create_workload(bnet)
 
 print("Build graph...")
-with relay.build_config(opt_level=3):
+with relay.build_config(opt_level=1):
   graph, lib, params = relay.build_module.build(
-      mod, target=target, params=params)
+      fmod, target=target, params=fparams)
 
 ctx = tvm.context(str(target), 0)
 
