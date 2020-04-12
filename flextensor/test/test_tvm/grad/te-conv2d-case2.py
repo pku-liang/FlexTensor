@@ -9,7 +9,7 @@ K = 8
 R = 3
 S = 3
 
-st = 1
+st = 2
 group = 2
 
 OG = K // group

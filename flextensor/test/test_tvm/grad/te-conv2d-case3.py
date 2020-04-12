@@ -9,7 +9,7 @@ K = 8
 R = 3
 S = 3
 
-st = 1
+st = 2
 group = 2
 
 OG = K // group
@@ -21,13 +21,13 @@ Q = (W - S + 1) // st
 dtype = "float32"
 
 A = tvm.te.placeholder([N, C, H, W], dtype=dtype, name="A")
-B = tvm.te.placeholder([K, C, R, S], dtype=dtype, name="B")
-c = tvm.te.reduce_axis([0, C], name="c")
+B = tvm.te.placeholder([K, IG, R, S], dtype=dtype, name="B")
+c = tvm.te.reduce_axis([0, IG], name="c")
 r = tvm.te.reduce_axis([0, R], name="r")
 s = tvm.te.reduce_axis([0, S], name="s")
 C = tvm.te.compute([N, K, P, Q],
   lambda n, k, h, w :
-    tvm.te.sum(A[n, c, h * st + r, w * st + s] * B[k, c, r, s], axis=[c,r,s]), name="C")
+    tvm.te.sum(A[n, k // OG * IG + c, h * st + r, w * st + s] * B[k, c, r, s], axis=[c,r,s]), name="C")
 
 dC = tvm.te.compute([N, K, P, Q], lambda a, b, c, d: 1, name="dC")
 
