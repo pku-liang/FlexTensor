@@ -11,6 +11,10 @@ C = tvm.te.compute([H, H],
   lambda h, w :
     tvm.te.sum(A[h, k] * A[k, w], axis=[k]), name="C")
 
-dC = tvm.te.compute([H, H], lambda h, w: 1, name="dC")
+dC = tvm.te.compute([H, H], lambda h, w: 1.0, name="dC")
 
-print(tvm.te.grad_op(A, C, dC))
+dA = tvm.te.grad_op(A, C, dC)
+
+s = tvm.te.create_schedule(dA.op)
+
+print(tvm.lower(s, [A, dC, dA], simple_mode=True))

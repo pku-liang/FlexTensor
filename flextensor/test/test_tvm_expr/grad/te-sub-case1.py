@@ -2,14 +2,15 @@ import tvm
 
 
 H = 8
-W = 16
+W = 9
 
 dtype = "float32"
 
-A = tvm.te.placeholder([H], dtype=dtype, name="A")
+A = tvm.te.placeholder([H, W], dtype=dtype, name="A")
+
 C = tvm.te.compute([H, W],
-  lambda i, j:
-    A[i], name="C")
+  lambda h, w :
+    A[h, w] * 4 - A[h, w] * A[h, w], name="C")
 
 dC = tvm.te.compute([H, W], lambda h, w: 1.0, name="dC")
 

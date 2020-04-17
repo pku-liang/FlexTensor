@@ -11,6 +11,10 @@ C = tvm.te.compute([H * W],
   lambda i:
     A[i//W, i%W], name="C")
 
-dC = tvm.te.compute([H * W], lambda h: 1, name="dC")
+dC = tvm.te.compute([H * W], lambda h: 1.0, name="dC")
 
-print(tvm.te.grad_op(A, C, dC))
+dA = tvm.te.grad_op(A, C, dC)
+
+s = tvm.te.create_schedule(dA.op)
+
+print(tvm.lower(s, [A, dC, dA], simple_mode=True))
