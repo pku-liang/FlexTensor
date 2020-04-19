@@ -11,7 +11,7 @@ dtype = "float32"
 def softmax(inputs):
   K = inputs.shape[-1]
   k = tvm.te.reduce_axis([0, K], name="k")
-  exp_val = tvm.te.compute(inputs.shape, lambda n, h: (inputs[n, h]), name="Softmax_exp")
+  exp_val = tvm.te.compute(inputs.shape, lambda n, h: tvm.tir.exp(inputs[n, h]), name="Softmax_exp")
   sum_val = tvm.te.compute(exp_val.shape[:-1], lambda n: tvm.te.sum(exp_val[n, k], axis=[k]), name="Softmax_sum")
   final_val = tvm.te.compute(exp_val.shape, lambda n, h: exp_val[n, h]/sum_val[n], name="Softmax_div")
   return [exp_val, sum_val, final_val]
