@@ -10,4 +10,4 @@
 | Downcast | 1 | A | | yes | yes | |
 | Braodcast | 1 | A | | yes | yes | |
 | Padding | 1 | A | | yes | yes | |
-
+| AvgPool | 1 | A | | yes | yes | |
