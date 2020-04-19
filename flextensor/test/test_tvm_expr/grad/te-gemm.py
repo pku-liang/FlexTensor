@@ -10,7 +10,7 @@ K = 3
 dtype = "float32"
 
 A = tvm.te.placeholder([H, K], dtype=dtype, name="A")
-B = tvm.te.placeholder([K, W], dtype=dtype, name="A")
+B = tvm.te.placeholder([K, W], dtype=dtype, name="B")
 k = tvm.te.reduce_axis([0, K], name="k")
 C = tvm.te.compute([H, W],
   lambda h, w :
