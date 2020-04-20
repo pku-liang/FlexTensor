@@ -8,6 +8,6 @@
 | Conv2d | 3 | A | st=2, pad=0, group=2, dilation=1 | yes | yes | |
 | Flatten | 1 | A | | yes | yes | rtol < 1e-30 |
 | Downcast | 1 | A | | yes | yes | rtol < 1e-30 |
-| Broadcast | 1 | A | | yes | yes | |
+| Broadcast | 1 | A | | yes | yes | rtol=1e-6 |
 | Padding | 1 | A | | yes | yes | |
 | AvgPool | 1 | A | | yes | yes | |
