@@ -46,4 +46,15 @@ func(A_tvm, dC_tvm, dA_tvm)
 print(dC_tvm)
 print(dA_tvm.asnumpy())
 
-
+# =======>
+# compare the results with numpy
+golden_np = np.zeros([H, W]).astype("float32")
+for i in range(0, P):
+    for j in range(0, Q):
+        for di in range(0, R):
+            for dj in range(0, S):
+                assert(i+di < H)
+                assert(j+dj < W)
+                golden_np[i*R+di][j*S+dj] = dC_np[i][j] / (R * S)
+tvm.testing.assert_allclose(dA_tvm.asnumpy(), golden_np, rtol=1e-30)
+print("Compare with Numpy success!")

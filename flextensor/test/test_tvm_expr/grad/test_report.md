@@ -10,4 +10,4 @@
 | Downcast | 1 | A | | yes | yes | rtol<1e-30 |
 | Broadcast | 1 | A | | yes | yes | rtol=1e-6 |
 | Padding | 1 | A | | yes | yes | rtol<1e-30 |
-| AvgPool | 1 | A | | yes | yes | |
+| AvgPool | 1 | A | | yes | yes | rtol<1e-30 |
