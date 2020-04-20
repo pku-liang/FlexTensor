@@ -3,11 +3,11 @@ import numpy as np
 import torch
 
 
-N = 2
+N = 3
 nC = 16
-H = 14
-W = 14
-K = 8
+H = 15
+W = 15
+K = 16
 R = 3
 S = 3
 
@@ -17,8 +17,8 @@ group = 2
 OG = K // group
 IG = nC // group
 
-P = (H - R + 1) // st
-Q = (W - S + 1) // st
+P = (H - R + 1) // st + 1
+Q = (W - S + 1) // st + 1
 
 dtype = "float32"
 
@@ -52,6 +52,7 @@ A_np = np.random.uniform(-1, 1, [N, nC, H, W]).astype("float32")
 B_np = np.random.uniform(-1, 1, [K, nC, R, S]).astype("float32")
 # dC_np = np.ones([N, K, P, Q]).astype("float32")
 dC_np = np.random.uniform(-1, 1, [N, K, P, Q]).astype("float32")
+print(dC_np)
 dA_np = np.zeros([N, nC, H, W]).astype("float32")
 
 ctx = tvm.context("llvm", 0)
@@ -69,10 +70,10 @@ A_torch = torch.tensor(A_np)
 B_torch = torch.tensor(B_np)
 dC_torch = torch.tensor(dC_np)
 #without output_padding=1: shapes (2, 16, 14, 14), golden:(2, 16, 13, 13) mismatch
-golden_torch = torch.nn.functional.conv_transpose2d(dC_torch, B_torch, stride=(st, st), output_padding=1)
+golden_torch = torch.nn.functional.conv_transpose2d(dC_torch, B_torch, stride=(st, st), output_padding=0)
 # print("da_tvm", dA_tvm.shape)
 # print("golden_shape,", golden_torch.size())
 print("dA_tvm:", dA_tvm)
-print("golden_torch", golden_torch)
-tvm.testing.assert_allclose(dA_tvm.asnumpy(), golden_torch.numpy(), rtol=1)
+# print("golden_torch", golden_torch)
+tvm.testing.assert_allclose(dA_tvm.asnumpy(), golden_torch.numpy(), atol=1e-3, rtol=1e-5)
 print("Compare with PyTorch success!")
