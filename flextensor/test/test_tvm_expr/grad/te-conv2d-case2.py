@@ -64,7 +64,6 @@ dA_tvm = tvm.nd.array(dA_np, ctx)
 func(A_tvm, B_tvm, dC_tvm, dA_tvm)
 
 
-# =======>
 # compare the results with pytorch
 A_torch = torch.tensor(A_np)
 B_torch = torch.tensor(B_np)
@@ -73,7 +72,7 @@ dC_torch = torch.tensor(dC_np)
 golden_torch = torch.nn.functional.conv_transpose2d(dC_torch, B_torch, stride=(st, st), output_padding=0)
 # print("da_tvm", dA_tvm.shape)
 # print("golden_shape,", golden_torch.size())
+
 print("dA_tvm:", dA_tvm)
 # print("golden_torch", golden_torch)
 tvm.testing.assert_allclose(dA_tvm.asnumpy(), golden_torch.numpy(), atol=1e-3, rtol=1e-5)
-print("Compare with PyTorch success!")
