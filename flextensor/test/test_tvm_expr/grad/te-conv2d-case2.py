@@ -31,7 +31,7 @@ C = tvm.te.compute([N, K, P, Q],
   lambda n, k, h, w :
     tvm.te.sum(A[n, c, h * st + r, w * st + s] * B[k, c, r, s], axis=[c,r,s]), name="C")
 
-dC = tvm.te.compute([N, K, P, Q], lambda a, b, c, d: 1.0, name="dC")
+dC = tvm.te.placeholder([N, K, P, Q], dtype=dtype, name="dC")
 
 print(C.op.body)
 
@@ -47,9 +47,11 @@ print(tvm.lower(s, [A, B, dC, dA], simple_mode=True))
 
 func = tvm.build(s, [A, B, dC, dA], target="llvm")
 
-A_np = np.random.uniform(-10, 10, [N, nC, H, W]).astype("float32")
-B_np = np.random.uniform(-10, 10, [K, nC, R, S]).astype("float32")
-dC_np = np.random.uniform(-10, 10, [N, K, P, Q]).astype("float32")
+A_np = np.random.uniform(-1, 1, [N, nC, H, W]).astype("float32")
+# B_np = np.ones([K, nC, R, S]).astype("float32")
+B_np = np.random.uniform(-1, 1, [K, nC, R, S]).astype("float32")
+# dC_np = np.ones([N, K, P, Q]).astype("float32")
+dC_np = np.random.uniform(-1, 1, [N, K, P, Q]).astype("float32")
 dA_np = np.zeros([N, nC, H, W]).astype("float32")
 
 ctx = tvm.context("llvm", 0)
