@@ -58,7 +58,7 @@ bnet = relay.transform.gradient(fmod["main"], mode='first_order')
 print("Make workload")
 mod, params = relay.testing.create_workload_with_label(bnet)
 #mod, params = relay.testing.create_workload_with_label(net) #will be good for forward network
-exit(0)
+
 print("Build graph...")
 with relay.build_config(opt_level=1):
   graph, lib, params = relay.build_module.build(
