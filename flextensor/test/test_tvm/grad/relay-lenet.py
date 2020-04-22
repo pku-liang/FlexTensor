@@ -40,15 +40,14 @@ def get_LeNet(batch_size=batch_size, img_shape=(1, 28, 28), dtype="float32"):
     dense2 = layers.dense_without_bias(dense1, units=84, name="dense2")
     dense3 = layers.dense_without_bias(dense2, units=10, name="dense3")
     softmax = relay.nn.softmax(dense3)
-    #tvm-expr/python/tvm/relay/testing/init.py
-    #change init.py 161: if k.startswith("data") instead of k == "data"
+    #label is from input
     label = relay.var("data2", shape=(batch_size, 10), dtype=dtype)
     loss = relay.nn.cross_entropy(softmax, label)
     args = relay.analysis.free_vars(loss)
     return relay.Function(args, loss)
 def get_workload():
     net = get_LeNet()
-    return tvm.relay.testing.create_workload(net)
+    return tvm.relay.testing.create_workload_with_label(net)
 print("Get LeNet network...")
 net = get_LeNet()
 fmod, fparams = get_workload()
@@ -57,8 +56,8 @@ print("Get gradient...")
 bnet = relay.transform.gradient(fmod["main"], mode='first_order')
 
 print("Make workload")
-mod, params = relay.testing.create_workload(bnet)
-#mod, params = relay.testing.create_workload(net) #will be good for forward network
+mod, params = relay.testing.create_workload_with_label(bnet)
+#mod, params = relay.testing.create_workload_with_label(net) #will be good for forward network
 
 print("Build graph...")
 with relay.build_config(opt_level=1):
