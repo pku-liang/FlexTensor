@@ -230,7 +230,7 @@ def softmax_log(inputs):
   K = inputs.shape[1]
   k = tvm.te.reduce_axis([0, K], name="k")
   k1 = tvm.te.reduce_axis([0, K], name="k1")
-  max_val = tvm.te.compute([N, K], lambda n, h: tvm.te.max(inputs[n, k1]/K, axis=[k1]), name="max_val")
+  max_val = tvm.te.compute([N, K], lambda n, h: tvm.te.max(inputs[n, k1], axis=[k1]), name="max_val")
   exp_val = tvm.te.compute([N, K], lambda n, h: (inputs[n, h]-max_val(n, h)), name="Softmax_exp", requires_grad=True)
   sum_val = tvm.te.compute([N], lambda n: tvm.te.sum(exp_val[n, k], axis=[k]), name="Softmax_sum", requires_grad=True)
   epsilon = tvm.tir.expr.const(1e-5, inputs.dtype) if "float" in inputs.dtype else 1
