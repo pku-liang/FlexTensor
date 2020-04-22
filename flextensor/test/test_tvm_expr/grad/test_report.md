@@ -11,3 +11,5 @@
 | Broadcast | 1 | A | | yes | yes | rtol=1e-6 |
 | Padding | 1 | A | | yes | yes | rtol<1e-30 |
 | AvgPool | 1 | A | | yes | yes | rtol<1e-30 |
+| Softmax | 1 | A | | yes | yes | atol=1e-6, rtol=1e-5 |
+| Maxpool | 1 | A | | yes | yes | atol=1e-5, rtol=1e-30 |

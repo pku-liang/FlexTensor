@@ -30,7 +30,7 @@ def zero_pad1d(inputs, padding=0):
     assert_print(isinstance(padding, tuple), "type(padding)={}".format(type(padding)))
     assert_print(len(padding) == 2)
 
-    padding_zero = 0.0 if "float" in inputs.dtype else 0
+    padding_zero = tvm.tir.expr.const(0, inputs.dtype)
 
     batch_size, in_channel, in_len = inputs.shape
     return tvm.te.compute(
@@ -66,7 +66,7 @@ def zero_expand1d(inputs, stride=1):
     stride = stride[0] if isinstance(stride, tuple) else stride
     assert_print(isinstance(stride, (int, tvm.tir.IntImm)), "type(stride)={}".format(type(stride)))
 
-    expand_zero = 0.0 if "float" in inputs.dtype else 0
+    expand_zero = tvm.tir.expr.const(0, inputs.dtype)
 
     batch_size, in_channel, in_len = inputs.shape
     out_len = (in_len - 1) * stride + 1
@@ -103,7 +103,7 @@ def zero_pad2d(inputs, padding=0):
         padding = (padding[0], padding[0], padding[1], padding[1])
     assert_print(len(padding) == 4)
 
-    padding_zero = 0.0 if "float" in inputs.dtype else 0
+    padding_zero = tvm.tir.expr.const(0, inputs.dtype)
 
     batch_size, in_channel, height, width = inputs.shape
     return tvm.te.compute(
@@ -140,7 +140,7 @@ def zero_pad2d_nchwc(inputs, padding=0):
         padding = (padding[0], padding[0], padding[1], padding[1])
     assert_print(len(padding) == 4)
 
-    padding_zero = 0.0 if "float" in inputs.dtype else 0
+    padding_zero = tvm.tir.expr.const(0, inputs.dtype)
 
     batch_size, in_channel_chunk, height, width, in_channel_block = inputs.shape
     return tvm.te.compute(
@@ -177,7 +177,7 @@ def zero_pad3d(inputs, padding=0):
         padding = (padding[0], padding[0], padding[1], padding[1], padding[2], padding[2])
     assert_print(len(padding) == 6)
 
-    padding_zero = 0.0 if "float" in inputs.dtype else 0
+    padding_zero = tvm.tir.expr.const(0, inputs.dtype)
 
     batch_size, in_channel,depth, height, width = inputs.shape
     return tvm.te.compute(
@@ -217,7 +217,7 @@ def zero_expand2d(inputs, stride=1):
     assert_print(isinstance(stride, tuple), "type(stride)={}".format(type(stride)))
     assert_print(len(stride) == 2)
 
-    expand_zero = 0.0 if "float" in inputs.dtype else 0
+    expand_zero = tvm.tir.expr.const(0, inputs.dtype)
 
     batch_size, in_channel, height, width = inputs.shape
     out_height = (height - 1) * stride[0] + 1
@@ -270,7 +270,7 @@ def zero_expand3d(inputs, stride=1):
     assert_print(isinstance(stride, tuple), "type(stride)={}".format(type(stride)))
     assert_print(len(stride) == 3)
 
-    expand_zero = 0.0 if "float" in inputs.dtype else 0
+    expand_zero = tvm.tir.expr.const(0, inputs.dtype)
 
     batch_size, in_channel, depth, height, width = inputs.shape
     out_depth = (depth - 1) * stride[0] + 1
@@ -1441,7 +1441,7 @@ def MaxUnpooling1d(Input, Indices, kernel_size, stride, padding):
                             tvm.te.max(
                                 tvm.te.if_then_else(l == Indices[b, c, iterK], 
                                                  Input[b, c, iterK], 
-                                                 0.0), 
+                                                 tvm.tir.expr.const(0, Input.dtype)), 
                                 axis=iterK), 
                           name='output')
 
@@ -1487,7 +1487,7 @@ def MaxUnpooling2d(Input, Indices, kernel_size, stride, padding, output_size=Non
                             tvm.te.max(
                                 tvm.te.if_then_else(h * out_width + w == Indices[b, c, iterH, iterW], 
                                                  Input[b, c, iterH, iterW], 
-                                                 0.0), 
+                                                 tvm.tir.expr.const(0, Input.dtype)), 
                                 axis=[iterH, iterW]), 
                           name='output')
     return Output
@@ -1633,11 +1633,11 @@ def PixelCNN(Input, Kernel, mask_type, bias=None, dilation=1, stride=1, padding=
 
     if mask_type == 'A':
         Mask = tvm.te.compute(Kernel.shape, 
-                           lambda b, o, h, w : tvm.te.if_then_else(tvm.tir.Or(tvm.tir.And(h == kernelHeight // 2, w >= kernelWidth // 2), h > kernelHeight // 2), 0.0, Kernel[b, o, h, w]), 
+                           lambda b, o, h, w : tvm.te.if_then_else(tvm.tir.Or(tvm.tir.And(h == kernelHeight // 2, w >= kernelWidth // 2), h > kernelHeight // 2), tvm.tir.expr.const(0, Input.dtype), Kernel[b, o, h, w]), 
                            name='MaskA')
     else:
         Mask = tvm.te.compute(Kernel.shape, 
-                           lambda b, o, h, w : tvm.te.if_then_else(tvm.tir.Or(tvm.tir.And(h == kernelHeight // 2, w > kernelWidth // 2), h > kernelHeight // 2), 0.0, Kernel[b, o, h, w]), 
+                           lambda b, o, h, w : tvm.te.if_then_else(tvm.tir.Or(tvm.tir.And(h == kernelHeight // 2, w > kernelWidth // 2), h > kernelHeight // 2), tvm.tir.expr.const(0, Input.dtype), Kernel[b, o, h, w]), 
                            name='MaskB')
     
     Output = conv2d_nhwc(Input, Mask, bias, stride=stride, padding=padding, dilation=dilation)

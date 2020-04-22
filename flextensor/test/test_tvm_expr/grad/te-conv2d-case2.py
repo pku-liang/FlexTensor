@@ -4,10 +4,10 @@ import torch
 
 
 N = 3
-nC = 16
+nC = 1024
 H = 15
 W = 15
-K = 16
+K = 1024
 R = 3
 S = 3
 
@@ -52,7 +52,7 @@ A_np = np.random.uniform(-1, 1, [N, nC, H, W]).astype("float32")
 B_np = np.random.uniform(-1, 1, [K, nC, R, S]).astype("float32")
 # dC_np = np.ones([N, K, P, Q]).astype("float32")
 dC_np = np.random.uniform(-1, 1, [N, K, P, Q]).astype("float32")
-print(dC_np)
+
 dA_np = np.zeros([N, nC, H, W]).astype("float32")
 
 ctx = tvm.context("llvm", 0)
@@ -73,6 +73,7 @@ golden_torch = torch.nn.functional.conv_transpose2d(dC_torch, B_torch, stride=(s
 # print("da_tvm", dA_tvm.shape)
 # print("golden_shape,", golden_torch.size())
 
-print("dA_tvm:", dA_tvm)
+# print("dA_tvm:", dA_tvm)
 # print("golden_torch", golden_torch)
 tvm.testing.assert_allclose(dA_tvm.asnumpy(), golden_torch.numpy(), atol=1e-3, rtol=1e-5)
+print("Success!\n")

@@ -108,7 +108,8 @@ def mse_loss(inputs, targets):
   K = inputs.shape[1]
   n = tvm.te.reduce_axis([0, inputs.shape[0]], name="n")
   k = tvm.te.reduce_axis([0, inputs.shape[1]], name="k")
-  return tvm.te.compute([1], lambda i: tvm.te.sum((inputs[i + n, k]-targets[i + n, k])*(inputs[i + n, k]-targets[i + n, k])/(N*K), axis=[n, k]), name="mse")
+  # return tvm.te.compute([1], lambda i: tvm.te.sum((inputs[i + n, k]-targets[i + n, k])*(inputs[i + n, k]-targets[i + n, k])/(N*K), axis=[n, k]), name="mse")
+  return tvm.te.compute([1], lambda i: tvm.te.sum(tvm.tir.power((inputs[i + n, k]-targets[i + n, k]), 2)/(N*K), axis=[n, k]), name="mse")
 
 
 def main():
@@ -190,6 +191,8 @@ def main():
       tvm.testing.assert_allclose(gradients_tvm[i].asnumpy(), grad_torch[i].detach().numpy(), atol=1e-3, rtol=1e-5)
 
   print("Compare to Pytorch success!")
+
+  gradients_sum = [numpy.zeros_like(x) for x in inits]
 
 
 
