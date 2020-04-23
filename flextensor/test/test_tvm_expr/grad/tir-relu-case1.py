@@ -9,7 +9,9 @@ shape_size = [dim1, dim2]
 dtype = "float32"
 
 A = tvm.te.placeholder(shape_size, dtype=dtype, name="A", requires_grad=True)
-C = tvm.te.compute(A.shape, lambda *args: tvm.tir.tanh(A[args]), "tanh", requires_grad=True)
+zeros = tvm.tir.expr.const(0, dtype)
+func = lambda *args: tvm.tir.if_then_else(A[args] > zeros, A[args], zeros)
+C = tvm.te.compute(A.shape, func, "ReLU", requires_grad=True)
 
 dC = tvm.te.placeholder(A.shape, dtype=dtype, name="dC")
 dA, = tvm.te.mygradient(C, [A], dC)
@@ -38,11 +40,9 @@ print("dA_tvm", dA_tvm)
 # =======>
 # compare the results with pytorch
 A_torch = torch.tensor(A_np, requires_grad=True)
-C_torch = torch.tanh(A_torch)
+C_torch = torch.nn.ReLU()(A_torch)
 loss = C_torch.sum()
 loss.backward()
 print("Pytorch gradient:\n", A_torch.grad.numpy())
-tvm.testing.assert_allclose(dA_tvm.asnumpy(), A_torch.grad.numpy(), atol=1e-6, rtol=1e-7)
+tvm.testing.assert_allclose(dA_tvm.asnumpy(), A_torch.grad.numpy(), atol=1e-30, rtol=1e-30)
 print("Compare with PyTorch success!")
-
-
