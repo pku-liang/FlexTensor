@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 
-def cross_entorpy(inputs, targets, weights, reduction="mean"):
+def cross_entropy(inputs, targets, weights, reduction="mean"):
   N, C = inputs.shape
   c = tvm.te.reduce_axis([0, C], "c")
   sum_val = tvm.te.compute([N], lambda i: tvm.te.sum(tvm.tir.exp(inputs[i, c]), axis=[c]), "sum_val")
@@ -40,7 +40,7 @@ targets = tvm.te.placeholder([N, C], dtype=dtype, name="targets", requires_grad=
 labels = tvm.te.placeholder([N], dtype=ltype, name="labels", requires_grad=False)
 weights = tvm.te.placeholder([C], dtype=dtype, name="weights", requires_grad=False)
 
-loss = cross_entorpy(A, targets, weights, reduction="mean")
+loss = cross_entropy(A, targets, weights, reduction="mean")
 
 dloss = tvm.te.placeholder([1], dtype=dtype, name="dloss")
 
@@ -84,5 +84,5 @@ print(loss_torch.detach().numpy())
 loss_torch.backward()
 print(A_torch.grad.numpy())
 
-tvm.testing.assert_allclose(dA_tvm.asnumpy(), A_torch.grad.numpy(), rtol=1e-30)
+tvm.testing.assert_allclose(dA_tvm.asnumpy(), A_torch.grad.numpy(), rtol=1e-30, atol=1e-9)
 print("Compare to PyTorch success!")

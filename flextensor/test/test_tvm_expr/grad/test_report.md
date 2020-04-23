@@ -15,3 +15,5 @@
 | Maxpool | 1 | A | | yes | yes | atol=1e-5, rtol=1e-30 |
 | Tanh | 1 | A | | yes | yes | atol=1e-6, rtol=1e-7 |
 | ReLU | 1 | A | | yes | yes | atol<1e-30, rtol<1e-30 |
+| Mse_loss | 1 | A | | yes | yes | rtol<1e-30, atol<1e-30 |
+| Cross_entropy | 1 | A | | yes | yes | rtol=1e-30, atol=1e-9 |
