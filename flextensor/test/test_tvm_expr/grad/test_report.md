@@ -14,3 +14,4 @@
 | Softmax | 1 | A | | yes | yes | atol=1e-6, rtol=1e-5 |
 | Maxpool | 1 | A | | yes | yes | atol=1e-5, rtol=1e-30 |
 | Tanh | 1 | A | | yes | yes | atol=1e-6, rtol=1e-7 |
+| ReLU | 1 | A | | yes | yes | atol<1e-30, rtol<1e-30 |
