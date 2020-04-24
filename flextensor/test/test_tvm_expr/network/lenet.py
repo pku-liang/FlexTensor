@@ -90,11 +90,12 @@ def softmax(inputs):
   K = inputs.shape[1]
   k = tvm.te.reduce_axis([0, K], name="k")
   k1 = tvm.te.reduce_axis([0, K], name="k1")
-  mean_val = tvm.te.compute([N, K], lambda n, h: tvm.te.sum(inputs[n, k1]/K, axis=[k1]), name="mean_val")
-  exp_val = tvm.te.compute([N, K], lambda n, h: tvm.te.exp(inputs[n, h]-mean_val[n, h]), name="Softmax_exp")
+  # Prevent Overflow in exp
+  max_val = tvm.te.compute([N, K], lambda n, h: tvm.te.max(inputs[n, k1], axis=[k1]), name="mean_val", requires_grad=True)
+  exp_val = tvm.te.compute([N, K], lambda n, h: tvm.tir.exp(inputs[n, h]-max_val[n, h]), name="Softmax_exp", requires_grad=True)
   sum_val = tvm.te.compute([N], lambda n: tvm.te.sum(exp_val[n, k], axis=[k]), name="Softmax_sum")
-  epsilon = tvm.tir.expr.const(1e-5, inputs.dtype) if "float" in inputs.dtype else 1
-  return tvm.te.compute([N, K], lambda n, h: exp_val[n, h]/(sum_val[n] + epsilon), name="Softmax_div")
+  #epsilon = tvm.tir.expr.const(1e-5, inputs.dtype) if "float" in inputs.dtype else 1
+  return tvm.te.compute([N, K], lambda n, h: exp_val[n, h]/sum_val[n], name="Softmax_div")
 
 
 def sum_all(inputs):
@@ -156,7 +157,7 @@ def main():
   params = []
   for var in free_vars:
     shape = to_tuple(var.shape)
-    var_np = np.random.uniform(-1, 1, shape).astype(dtype)
+    var_np = np.random.uniform(-100, 100, shape).astype(dtype)
     params.append(var_np)
   img_np = np.random.uniform(-10, 10, to_tuple(img.shape)).astype(dtype)
   label_np = np.random.uniform(-10, 10, to_tuple(label.shape)).astype(dtype)
@@ -184,6 +185,7 @@ def main():
 
   tvm.testing.assert_allclose(ret_tvm.asnumpy(), ret_torch.detach().numpy(), atol=1e-3, rtol=1e-5)
   for i in range(len(gradients_tvm)):
+    print("grad_torch", i, grad_torch[i].detach().T.numpy())
     if i > 2:
       tvm.testing.assert_allclose(gradients_tvm[i].asnumpy(), grad_torch[i].detach().T.numpy(), atol=1e-3, rtol=1e-5)
     else:
