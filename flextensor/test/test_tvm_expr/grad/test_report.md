@@ -4,6 +4,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | GEMM | 1 | A | | yes | yes | rtol=1e-5 |
 | Conv2d | 1 | A | st=1, pad=0, group=1, dilation=1 | yes | yes | rtol=1e-3 |
+| Conv2d in topi | 1 | A | st=1, pad=0, group=1, dilation=1 | yes | yes | rtol=1e-5, atol=1e-4 |
 | Conv2d | 2 | A | st=2, pad=0, group=1, dilation=1 | yes | yes | rtol=1e-3 |
 | Conv2d | 3 | A | st=2, pad=0, group=2, dilation=1 | yes | yes | rtol=1e-3 |
 | Flatten | 1 | A | | yes | yes | rtol<1e-30 |
