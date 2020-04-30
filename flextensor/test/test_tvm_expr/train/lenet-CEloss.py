@@ -107,10 +107,9 @@ def cross_entropy(inputs, targets):
   sum_val = tvm.te.compute([N], lambda i: tvm.te.sum(tvm.tir.exp(inputs[i, c]-max_val[i]), axis=[c]), "sum_val")
   rrn = tvm.te.reduce_axis([0, N], "rrn")
   rrc = tvm.te.reduce_axis([0, C], "rrc")
+  x_class = tvm.te.compute([N], lambda i: tvm.te.sum(inputs[i, rrc]*targets[i, rrc], axis=[rrc]), name="x_class")
   return tvm.te.compute([1],
-    lambda i: tvm.te.sum(
-      targets[i+rrn, rrc] * ((tvm.tir.log(sum_val[i+rrn])+max_val[i+rrn]) - inputs[i+rrn, rrc]*targets[i+rrn, rrc])/(N),
-      axis=[rrn, rrc]),
+    lambda i: tvm.te.sum((tvm.tir.log(sum_val[i+rrn])+max_val[i+rrn] - x_class[i+rrn]) / N, axis=[rrn]),
     name="cross_entropy", requires_grad=True)
 
 def ReLU(inputs):
