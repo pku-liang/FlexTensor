@@ -18,3 +18,4 @@
 | ReLU | 1 | A | | yes | yes | atol<1e-30, rtol<1e-30 |
 | Mse_loss | 1 | A | | yes | yes | rtol<1e-30, atol<1e-30 |
 | Cross_entropy | 1 | A | | yes | yes | rtol=1e-30, atol=1e-9 |
+| Concatenate | 1 | A,B | | yes | yes | rtol<1e-30, atol<1e-30 |
