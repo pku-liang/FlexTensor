@@ -40,8 +40,6 @@ def elu(inputs):
   https://pytorch.org/docs/stable/nn.html#torch.nn.ELU
   ELU(x)=max(0,x)+min(0,(exp(x)−1))
   '''
-  assert_print(inputs.shape[0].value == batch_size)
-  assert_print(inputs.shape[1].value == state_size)
   func = lambda i, j: tvm.te.if_then_else(inputs[i, j] > 0, inputs[i, j], tvm.tir.exp(inputs[i, j]) - 1)
   return tvm.te.compute(inputs.shape, func, name="elu")
 
@@ -78,15 +76,11 @@ def internel_lltm(input, weight_for_gate, bias_for_gate, old_h, old_c):
   bias_for_gate:[3*state_size]
   '''
   X = topi.concatenate([old_h, input], axis=1)
-  assert_print(X.shape[0].value == batch_size)
-  assert_print(X.shape[1].value == 28*28 + state_size)
   gate_weights = topi.nn.dense(X, weight_for_gate, bias_for_gate)
   gates = topi.split(gate_weights, 3, axis=1)
   input_gate = topi.sigmoid(gates[0])
   output_gate = topi.sigmoid(gates[1])
   candidate_cell = elu(gates[2])
-  assert_print(gates[0].shape[0].value == batch_size)
-  assert_print(gates[1].shape[1].value == state_size)
   new_c = topi.add(old_c, topi.multiply(candidate_cell, input_gate))
   new_h = topi.multiply(topi.tanh(new_c), output_gate)
   return [new_h, new_c]
@@ -104,19 +98,6 @@ def lltm(input, targets, weight_for_classify, bias_for_classify, weight_for_gate
   assert_print(new_h.shape[1].value == weight_for_classify.shape[1].value)
   result = topi.nn.dense(new_h, weight_for_classify, bias_for_classify)
   loss = cross_entropy(result, targets)
-  assert_print(input.shape[0].value == batch_size)
-  assert_print(input.shape[1].value == 28*28)
-  assert_print(targets.shape[0].value == batch_size)
-  assert_print(targets.shape[1].value == 10)
-  assert_print(weight_for_classify.shape[0].value == 10)
-  assert_print(weight_for_classify.shape[1].value == state_size)
-  assert_print(bias_for_classify.shape[0].value == 10)
-  assert_print(result.shape[0].value == batch_size)
-  assert_print(result.shape[1].value == 10)
-  assert_print(new_h.shape[0].value == batch_size)
-  assert_print(new_h.shape[1].value == state_size)
-  assert_print(new_c.shape[0].value == batch_size)
-  assert_print(new_c.shape[1].value == state_size)
   return loss, result, new_h, new_c
 
 def main():
