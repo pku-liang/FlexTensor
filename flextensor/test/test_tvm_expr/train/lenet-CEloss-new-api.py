@@ -163,17 +163,30 @@ class LeNet(Model):
         self.fc2 = Linear('fc2', 120, 84, bias=False)
         self.fc3 = Linear('fc3', 84, 10, bias=False)
 
-    def __call__(self, inputs):
-        outputs = topi.nn.relu(self.conv1(inputs))
-        outputs = avg_pool2d(outputs)
-        outputs = topi.nn.relu(self.conv2(outputs))
-        outputs = avg_pool2d(outputs)
-        outputs = flatten(outputs)
+    def __call__(self, inputs, debug_mode=False):
+        debug_tensors = OrderedDict()
+
+        def D(tensor, key):
+            if debug_mode:
+                debug_tensors[key] = tensor
+            return tensor
+
+        outputs = D(self.conv1(inputs), 'conv1')
+        outputs = D(topi.nn.relu(outputs), 'relu1')
+        outputs = D(avg_pool2d(outputs), 'pool1')
+        outputs = D(self.conv2(outputs), 'conv2')
+        outputs = D(topi.nn.relu(outputs), 'relu2')
+        outputs = D(avg_pool2d(outputs), 'pool2')
+        outputs = D(flatten(outputs), 'flatten')
         # outputs = topi.nn.relu(self.fc1(outputs))
-        outputs = self.fc1(outputs)
-        outputs = topi.nn.relu(self.fc2(outputs))
-        outputs = topi.nn.relu(self.fc3(outputs))
-        return outputs
+        outputs = D(self.fc1(outputs), 'fc1')
+        outputs = D(self.fc2(outputs), 'fc2')
+        outputs = D(topi.nn.relu(outputs), 'relu3')
+        outputs = D(self.fc3(outputs), 'fc3')
+        outputs = D(topi.nn.relu(outputs), 'relu4')
+
+        if debug_mode: return outputs, debug_tensors  # OrderedDict({'relu3': debug_tensors['relu3']})
+        else: return outputs
 
     @property
     def weights(self):
@@ -183,13 +196,14 @@ class LeNet(Model):
 
 class Learner:
 
-    def __init__(self, model, train_loader, num_classes, criterion, lr, print_freq=1000, target='llvm', dtype='float64'):
+    def __init__(self, model, train_loader, num_classes, criterion, lr, debug_mode=False, print_freq=1000, target='llvm', dtype='float64'):
         self.model = model
         self.train_loader = train_loader
         self.num_classes = num_classes
         self.criterion = criterion
         self.lr = lr
 
+        self.debug_mode = debug_mode
         self.print_freq = print_freq
         self.target = target
         self.dtype = dtype
@@ -203,19 +217,33 @@ class Learner:
         images_pth, labels_pth = next(iter(self.train_loader))
         self.images = tvm.te.placeholder(list(images_pth.shape), dtype=self.dtype, name='images')
         self.labels = tvm.te.placeholder([labels_pth.shape[0], self.num_classes], dtype=self.dtype, name='labels')
-        self.logit = self.model(self.images)
+        if self.debug_mode:
+            self.logit, self.debug_tensors = self.model(self.images, debug_mode=self.debug_mode)
+        else:
+            self.logit = self.model(self.images, debug_mode=self.debug_mode)
         self.loss = cross_entropy(self.logit, self.labels)
         self.gradients = tvm.te.mygradient(self.loss, model.weights)
-        self.sched = tvm.te.create_schedule([self.loss.op] + [grad.op for grad in self.gradients])
-        args = [self.images, self.labels, *self.model.weights, self.logit, self.loss, *self.gradients]
+        extra_args = list(self.debug_tensors.values()) if self.debug_mode else list()
+        self.sched = tvm.te.create_schedule([self.loss.op] + [tensor.op for tensor in extra_args] + [grad.op for grad in self.gradients])
+        args = [self.images, self.labels, *self.model.weights, self.logit, self.loss, *extra_args, *self.gradients]
         # print(tvm.lower(self.sched, args, simple_mode=True))
         self.func = tvm.build(self.sched, args, target=self.target)
 
     def _allocate_buffers_for_endpoints(self):
-        logit_np = np.zeros(to_tuple(self.logit.shape)).astype(self.dtype)
-        loss_np = np.zeros(to_tuple(self.loss.shape)).astype(self.dtype)
-        self.logit_tvm = tvm.nd.array(logit_np, self.ctx)
-        self.loss_tvm = tvm.nd.array(loss_np, self.ctx)
+        def create_buffer(tensor):
+            np_buffer = np.zeros(to_tuple(tensor.shape)).astype(self.dtype)
+            tvm_buffer = tvm.nd.array(np_buffer, self.ctx)
+            return tvm_buffer
+
+        self.logit_tvm = create_buffer(self.logit)
+        self.loss_tvm = create_buffer(self.loss)
+        if self.debug_mode:
+            self.debug_tensors_tvm = {
+                key: create_buffer(tensor)
+                for key, tensor in self.debug_tensors.items()
+            }
+        else:
+            self.debug_tensors_tvm = {}
 
     def _initialize_weights(self):
         self.weights_np = [np.random.uniform(-1, 1, to_tuple(var.shape)).astype(self.dtype) for var in self.model.weights]
@@ -235,8 +263,15 @@ class Learner:
         self.grads_tvm = [tvm.nd.array(var, self.ctx) for var in grads_np]
 
     def _execute_func(self, images_tvm, targets_tvm):
-        self.func(images_tvm, targets_tvm, *self.weights_tvm, self.logit_tvm, self.loss_tvm, *self.grads_tvm)
-        return self.logit_tvm.asnumpy(), self.loss_tvm.asnumpy().item(0)
+        self.func(
+            images_tvm, targets_tvm, *self.weights_tvm, self.logit_tvm, self.loss_tvm, *self.grads_tvm,
+            *self.debug_tensors_tvm.values(),
+        )
+        debug_tensors_np = {key: tvm_array.asnumpy() for key, tvm_array in self.debug_tensors_tvm.items()}
+        if not self.debug_mode:
+            return self.logit_tvm.asnumpy(), self.loss_tvm.asnumpy().item(0)
+        else:
+            return self.logit_tvm.asnumpy(), self.loss_tvm.asnumpy().item(0), debug_tensors_np
 
     def _update_weights(self):
         for k, grad in enumerate(self.grads_tvm):
@@ -244,13 +279,15 @@ class Learner:
             self.weights_np[k] -= self.lr * grad.asnumpy()
         self.weights_tvm = [tvm.nd.array(var, self.ctx) for var in self.weights_np]
 
-    def _train_one_step(self, images, targets):
+    def _train_one_step(self, images, targets, record=True):
         batch_tvm = self._preprocess_batch(images, targets)
         self._reset_gradients()
-        logit_np, loss_val = self._execute_func(*batch_tvm)
+        logit_np, loss_val, *debug_tensors_np = self._execute_func(*batch_tvm)
+        self.debug_tensors_np = debug_tensors_np[0] if self.debug_mode else dict()
         preds = torch.from_numpy(np.argmax(logit_np, axis=1))
-        self.running_acc += (preds == targets).sum().item()
-        self.running_loss += loss_val
+        if record:
+            self.running_acc += (preds == targets).sum().item()
+            self.running_loss += loss_val
         self._update_weights()
 
     def train_one_epoch(self, epoch_idx):
@@ -276,9 +313,20 @@ class Learner:
     @property
     def state_dict(self):
         return OrderedDict({
-            self.model.weights[k].name: self.weights_np[k]
-            for k, grad in enumerate(self.grads_tvm)
+            weight.name: weight_np
+            for weight, weight_np in zip(self.model.weights, self.weights_np)
         })
+
+    @property
+    def grads_dict(self):
+        return OrderedDict({
+            weight.name: grad.asnumpy()
+            for weight, grad in zip(self.model.weights, self.grads_tvm)
+        })
+
+    @property
+    def debug_dict(self):
+        return self.debug_tensors_np
 
 
 def load_mnist_dataset(batch_size, test_batch_size=1):
@@ -300,7 +348,28 @@ if __name__ == '__main__':
     model = LeNet()
     train_loader = load_mnist_dataset(batch_size)[0]
     criterion = cross_entropy
-    learner = Learner(model, train_loader, num_classes, criterion, lr, target=target, dtype=dtype)
+    learner = Learner(model, train_loader, num_classes, criterion, lr, debug_mode=True, target=target, dtype=dtype)
+
+    state_dict = {
+        key: (nparray.min(), nparray.max())
+        for key, nparray in learner.state_dict.items()
+    }
+    print('state_dict:', state_dict)
+
+    images, targets = next(iter(train_loader))
+    # noinspection PyProtectedMember
+    learner._train_one_step(images, targets, record=False)
+    debug_dict = {
+        key: (nparray.min(), nparray.max())
+        for key, nparray in learner.debug_dict.items()
+    }
+    grads_dict = {
+        key: (nparray.min(), nparray.max())
+        for key, nparray in learner.grads_dict.items()
+    }
+
+    print('debug_dict:', debug_dict)
+    print('grads_dict:', grads_dict)
 
     for epoch_idx in range(num_epochs):
         learner.train_one_epoch(epoch_idx)
