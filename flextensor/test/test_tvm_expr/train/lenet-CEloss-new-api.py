@@ -79,6 +79,22 @@ def avg_pool2d(inputs, kernel_size=2, stride=None, padding=0, ceil_mode=False, c
     )
 
 
+def relu(x):
+    """Take relu of input x.
+
+    Parameters
+    ----------
+    x : tvm.te.Tensor
+        Input argument.
+
+    Returns
+    -------
+    y : tvm.te.Tensor
+        The result.
+    """
+    return tvm.te.compute(x.shape, lambda *i: tvm.te.max(x(*i), tvm.tir.const(0, x.dtype)))
+
+
 class Linear(Module):
 
     def __init__(self, name, in_features, out_features, bias=True):
@@ -113,7 +129,7 @@ def flatten(inputs):
     inputs: [batch, channel, height, width]
     return: [batch, channel * height * width]
     """
-    assert(inputs.shape[1].value*inputs.shape[2].value*inputs.shape[3].value == 400)
+    # assert(inputs.shape[1].value*inputs.shape[2].value*inputs.shape[3].value == 400)
     return tvm.te.compute([inputs.shape[0], inputs.shape[1]*inputs.shape[2]*inputs.shape[3]],
                           lambda i, j: inputs[i, j//(inputs.shape[2]*inputs.shape[3]),
                                               (j % (inputs.shape[2]*inputs.shape[3])) // inputs.shape[3],
@@ -172,18 +188,18 @@ class LeNet(Model):
             return tensor
 
         outputs = D(self.conv1(inputs), 'conv1')
-        outputs = D(topi.nn.relu(outputs), 'relu1')
+        outputs = D(relu(outputs), 'relu1')
         outputs = D(avg_pool2d(outputs), 'pool1')
         outputs = D(self.conv2(outputs), 'conv2')
-        outputs = D(topi.nn.relu(outputs), 'relu2')
+        outputs = D(relu(outputs), 'relu2')
         outputs = D(avg_pool2d(outputs), 'pool2')
         outputs = D(flatten(outputs), 'flatten')
         # outputs = topi.nn.relu(self.fc1(outputs))
         outputs = D(self.fc1(outputs), 'fc1')
         outputs = D(self.fc2(outputs), 'fc2')
-        outputs = D(topi.nn.relu(outputs), 'relu3')
+        outputs = D(relu(outputs), 'relu3')
         outputs = D(self.fc3(outputs), 'fc3')
-        outputs = D(topi.nn.relu(outputs), 'relu4')
+        outputs = relu(outputs)
 
         if debug_mode: return outputs, debug_tensors  # OrderedDict({'relu3': debug_tensors['relu3']})
         else: return outputs
@@ -191,6 +207,32 @@ class LeNet(Model):
     @property
     def weights(self):
         modules = [self.conv1, self.conv2, self.fc1, self.fc2, self.fc3]
+        return sum([m.weights for m in modules], [])
+
+
+class MLP(Model):
+
+    def __init__(self):
+        super().__init__()
+        self.fc = Linear('fc3', 28*28, 10, bias=False)
+
+    def __call__(self, inputs, debug_mode=False):
+        debug_tensors = OrderedDict()
+
+        def D(tensor, key):
+            if debug_mode:
+                debug_tensors[key] = tensor
+            return tensor
+
+        outputs = D(flatten(inputs), 'flatten')
+        outputs = self.fc(outputs)
+
+        if debug_mode: return outputs, debug_tensors  # OrderedDict({'relu3': debug_tensors['relu3']})
+        else: return outputs
+
+    @property
+    def weights(self):
+        modules = [self.fc]
         return sum([m.weights for m in modules], [])
 
 
@@ -264,8 +306,8 @@ class Learner:
 
     def _execute_func(self, images_tvm, targets_tvm):
         self.func(
-            images_tvm, targets_tvm, *self.weights_tvm, self.logit_tvm, self.loss_tvm, *self.grads_tvm,
-            *self.debug_tensors_tvm.values(),
+            images_tvm, targets_tvm, *self.weights_tvm, self.logit_tvm, self.loss_tvm,
+            *self.debug_tensors_tvm.values(), *self.grads_tvm
         )
         debug_tensors_np = {key: tvm_array.asnumpy() for key, tvm_array in self.debug_tensors_tvm.items()}
         if not self.debug_mode:
