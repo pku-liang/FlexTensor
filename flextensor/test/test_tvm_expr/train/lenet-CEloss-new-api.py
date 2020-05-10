@@ -1,13 +1,15 @@
+import json
 from collections import OrderedDict
+from typing import Union, Callable
 
-import tvm
-import topi
 import numpy as np
 import torch
 import torchvision
 import torchvision.transforms as transforms
-
+import tvm
 from flextensor.utils import to_tuple
+
+import topi
 
 
 class Module:
@@ -101,7 +103,9 @@ class Linear(Module):
         super().__init__(name)
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = tvm.te.placeholder([in_features, out_features], dtype='float64', name=f'{name}_weight')
+        # https://docs.tvm.ai/api/python/topi.html#topi.nn.dense
+        # - weight (tvm.te.Tensor) – 2-D with shape [out_dim, in_dim]
+        self.weight = tvm.te.placeholder([out_features, in_features], dtype='float64', name=f'{name}_weight')
         if bias:
             self.bias = tvm.te.placeholder([out_features, ], dtype='float64', name=f'{name}_bias')
         else:
@@ -164,11 +168,6 @@ class Model:
         raise NotImplementedError
 
 
-disable_relu = True
-if disable_relu:
-    topi.nn.relu = lambda x: x
-
-
 class LeNet(Model):
 
     def __init__(self):
@@ -227,7 +226,7 @@ class MLP(Model):
         outputs = D(flatten(inputs), 'flatten')
         outputs = self.fc(outputs)
 
-        if debug_mode: return outputs, debug_tensors  # OrderedDict({'relu3': debug_tensors['relu3']})
+        if debug_mode: return outputs, debug_tensors
         else: return outputs
 
     @property
@@ -238,12 +237,16 @@ class MLP(Model):
 
 class Learner:
 
-    def __init__(self, model, train_loader, num_classes, criterion, lr, debug_mode=False, print_freq=1000, target='llvm', dtype='float64'):
+    # noinspection PyProtectedMember
+    def __init__(self, model, train_loader, num_classes, criterion,
+                 lr: Union[float, Callable[[int], float]],  # lr(epoch,) -> lr
+                 debug_mode=False, print_freq=1000, target='llvm', dtype='float64'):
         self.model = model
         self.train_loader = train_loader
         self.num_classes = num_classes
         self.criterion = criterion
-        self.lr = lr
+        self.lr = lr if isinstance(lr, float) else lr(0)
+        self._lr_func = lr if not isinstance(lr, float) else lambda epoch: lr
 
         self.debug_mode = debug_mode
         self.print_freq = print_freq
@@ -288,7 +291,24 @@ class Learner:
             self.debug_tensors_tvm = {}
 
     def _initialize_weights(self):
-        self.weights_np = [np.random.uniform(-1, 1, to_tuple(var.shape)).astype(self.dtype) for var in self.model.weights]
+
+        # TODO: support BatchNorm2d
+        # NOTE: https://github.com/pytorch/vision/blob/master/torchvision/models/vgg.py#L49-L60
+        def init_weight(var):
+            w_pth = torch.empty(*to_tuple(var.shape), dtype=torch.float64)
+            if len(w_pth.shape) == 4:  # Conv2d
+                # NOTE: https://pytorch.org/docs/stable/nn.init.html#torch.nn.init.kaiming_normal_
+                torch.nn.init.kaiming_normal_(w_pth, mode='fan_out', nonlinearity='relu')
+            elif len(w_pth.shape) == 2:  # Linear
+                torch.nn.init.normal_(w_pth, mean=0, std=0.01)
+            elif len(w_pth.shape) == 1:  # bias
+                torch.nn.init.constant_(w_pth, 0)
+            else:
+                raise NotImplementedError(f'Unrecognized weight shape: {var.shape}')
+            return w_pth.numpy()
+
+        self.weights_np = [init_weight(var) for var in self.model.weights]
+        # self.weights_np = [np.random.uniform(-1, 1, to_tuple(var.shape)).astype(self.dtype) for var in self.model.weights]
         self.weights_tvm = [tvm.nd.array(var, self.ctx) for var in self.weights_np]
 
     def _preprocess_batch(self, images, targets):
@@ -325,24 +345,30 @@ class Learner:
         batch_tvm = self._preprocess_batch(images, targets)
         self._reset_gradients()
         logit_np, loss_val, *debug_tensors_np = self._execute_func(*batch_tvm)
-        self.debug_tensors_np = debug_tensors_np[0] if self.debug_mode else dict()
+        if self.debug_mode:
+            self.debug_tensors_np = debug_tensors_np[0]
+            self.debug_tensors_np.update({ 'logit': logit_np, 'loss': loss_val, })
+        else:
+            self.debug_tensors_np = dict()
+
         preds = torch.from_numpy(np.argmax(logit_np, axis=1))
         if record:
             self.running_acc += (preds == targets).sum().item()
-            self.running_loss += loss_val
+            self.running_loss += loss_val * images.size()[0]
         self._update_weights()
 
     def train_one_epoch(self, epoch_idx):
         num_covered = 0
         self.running_acc = 0.0
         self.running_loss = 0.0
+        self.lr = self._lr_func(epoch_idx)
         for i, (images, targets) in enumerate(self.train_loader):
             num_covered += images.size()[0]
             self._train_one_step(images, targets)
             if i % self.print_freq == 0:
                 loss_avg = self.running_loss / num_covered
                 acc_avg = self.running_acc / num_covered
-                print(f"epoch = {epoch_idx+1}, iteration = {i+1}: loss = {loss_avg}, acc = {acc_avg}")
+                print(f"epoch = {epoch_idx+1}, iteration = {i+1}: lr = {self.lr}, loss = {loss_avg}, acc = {acc_avg}")
         assert num_covered == len(self.train_loader.dataset)
         acc_avg = self.running_acc / num_covered
         print(f"epoch = {epoch_idx+1}: accuracy = {acc_avg}")
@@ -379,9 +405,14 @@ def load_mnist_dataset(batch_size, test_batch_size=1):
     return train_loader, test_loader
 
 
+def pprint_dict(d):
+    return json.dumps(d, indent=2)
+
+
 if __name__ == '__main__':
     batch_size = 4
-    lr = 1e-6
+    # lr = 1e-6
+    lr = lambda epoch: [1e-2, 1e-3, 1e-4][epoch]  # learning rate scheduler
     num_epochs = 3
     num_classes = 10
     target = 'llvm'
@@ -396,22 +427,22 @@ if __name__ == '__main__':
         key: (nparray.min(), nparray.max())
         for key, nparray in learner.state_dict.items()
     }
-    print('state_dict:', state_dict)
+    print('state_dict:', pprint_dict(state_dict))
 
     images, targets = next(iter(train_loader))
     # noinspection PyProtectedMember
     learner._train_one_step(images, targets, record=False)
     debug_dict = {
-        key: (nparray.min(), nparray.max())
+        key: (nparray.min(), nparray.max()) if not isinstance(nparray, float) else nparray
         for key, nparray in learner.debug_dict.items()
     }
     grads_dict = {
-        key: (nparray.min(), nparray.max())
+        key: (nparray.min(), nparray.max()) if not isinstance(nparray, float) else nparray
         for key, nparray in learner.grads_dict.items()
     }
 
-    print('debug_dict:', debug_dict)
-    print('grads_dict:', grads_dict)
+    print('debug_dict:', pprint_dict(debug_dict))
+    print('grads_dict:', pprint_dict(grads_dict))
 
     for epoch_idx in range(num_epochs):
         learner.train_one_epoch(epoch_idx)
