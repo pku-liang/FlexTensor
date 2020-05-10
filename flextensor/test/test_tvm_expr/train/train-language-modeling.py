@@ -31,16 +31,15 @@ import hashlib
 import math
 import os
 import time
+import warnings
 from collections import Counter, namedtuple
 from collections import defaultdict
-import warnings
 
 import numpy as np
 import torch
 import torch.nn as nn
 # noinspection PyUnresolvedReferences
 from torch.optim.lr_scheduler import MultiStepLR
-
 
 # https://github.com/salesforce/awd-lstm-lm/issues/7
 warnings.simplefilter("ignore", UserWarning)
@@ -374,21 +373,171 @@ def embedded_dropout(embed, words, dropout=0.1, scale=None):
                                       )
     return X
 
-# NOTE: interface: init_hidden, decoder.weight/bias, dropoutx, rnns
+
+class RNNFactory:
+    _build_funcs = dict()
+
+    @classmethod
+    def register(cls, rnn_type):
+        def wrapper(build_func):
+            cls._build_funcs[rnn_type] = build_func
+            return build_func
+        return wrapper
+
+    @staticmethod
+    def build(rnn_type, ntoken, ninp, nhid, nlayers,
+              tie_weights=False, wdrop=0.0, initrange=0.1, **kwargs):
+
+        encoder = RNNFactory._build_encoder(ntoken, ninp, initrange)
+        decoder = RNNFactory._build_decoder(nhid, ntoken, initrange)
+        if tie_weights: decoder.weight = encoder.weight
+
+        try:
+            rnns, init_hidden = RNNFactory._build_funcs[rnn_type](ninp, nhid, nlayers, tie_weights, **kwargs)
+        except KeyError:
+            raise NotImplementedError('Unsupported rnn type: {}'.format(rnn_type))
+
+        if wdrop:
+            rnns = [WeightDrop(rnn, ['weight_hh_l0'], dropout=wdrop) for rnn in rnns]
+
+        return encoder, nn.ModuleList(rnns), decoder, init_hidden
+
+    @staticmethod
+    def _build_encoder(ntoken, ninp, initrange):
+        encoder = nn.Embedding(ntoken, ninp)
+        encoder.weight.data.uniform_(-initrange, initrange)
+        return encoder
+
+    @staticmethod
+    def _build_decoder(nhid, ntoken, initrange):
+        decoder = nn.Linear(nhid, ntoken)
+        decoder.weight.data.uniform_(-initrange, initrange)
+        decoder.bias.data.fill_(0)
+        return decoder
+
+
+@RNNFactory.register(rnn_type='LSTM')
+def _build_stacked_lstm(ninp, nhid, nlayers, tie_weights):
+    rnns = list()
+    for l in range(nlayers):
+        input_size = ninp if l == 0 else nhid
+        if l != nlayers - 1 or not tie_weights:
+            hidden_size = nhid
+        else:
+            hidden_size = ninp
+        rnns.append(torch.nn.LSTM(input_size, hidden_size, num_layers=1, dropout=0))
+
+    def init_hidden(batch_size):
+        first_weight = next(rnns[0].parameters()).data
+        weights = list()
+        for l in range(nlayers):
+            if l != nlayers - 1 or not tie_weights:
+                hidden_size = nhid
+            else:
+                hidden_size = ninp
+            weights.append([
+                first_weight.new_zeros(1, batch_size, hidden_size),
+                first_weight.new_zeros(1, batch_size, hidden_size)
+            ])
+        return weights
+
+    return rnns, init_hidden
+
+
+@RNNFactory.register(rnn_type='GRU')
+def _build_stacked_gru(ninp, nhid, nlayers, tie_weights):
+    rnns = list()
+    for l in range(nlayers):
+        input_size = ninp if l == 0 else nhid
+        hidden_size = nhid if l != nlayers - 1 else ninp
+        rnns.append(torch.nn.GRU(input_size, hidden_size, num_layers=1, dropout=0))
+
+    def init_hidden(batch_size):
+        first_weight = next(rnns[0].parameters()).data
+        weights = list()
+        for l in range(nlayers):
+            if l != nlayers - 1 or not tie_weights:
+                hidden_size = nhid
+            else:
+                hidden_size = ninp
+            weights.append([
+                first_weight.new_zeros(1, batch_size, hidden_size),
+            ])
+        return weights
+
+    return rnns, init_hidden
+
+@RNNFactory.register(rnn_type='MILSTM')
+def _build_mi_lstm(ninp, nhid, nlayers, tie_weights, forget_bias=0.0,
+                   bias_start=0.0, alpha_start=1.0, beta_start=1.0,
+                   activation=torch.tanh):
+    from mi_lstm_pytorch import MILSTMCell
+    rnns = list()
+    for l in range(nlayers):
+        input_size = ninp if l == 0 else nhid
+        if l != nlayers - 1 or not tie_weights:
+            hidden_size = nhid
+        else:
+            hidden_size = ninp
+        rnns.append(MILSTMCell(
+            input_size, hidden_size, forget_bias,
+            bias_start, alpha_start, beta_start, activation,
+        ))
+
+    def init_hidden(batch_size):
+        first_weight = next(rnns[0].parameters()).data
+        weights = list()
+        for l in range(nlayers):
+            if l != nlayers - 1 or not tie_weights:
+                hidden_size = nhid
+            else:
+                hidden_size = ninp
+            weights.append([
+                first_weight.new_zeros(1, batch_size, hidden_size),
+                first_weight.new_zeros(1, batch_size, hidden_size),
+            ])
+        return weights
+
+    return rnns, init_hidden
+
+
+@RNNFactory.register(rnn_type='SCRNN')
+def _build_scrnn(ninp, nhid, nlayers, tie_weights, context_units, alpha):
+    from scrnn_pytorch import SCRNCell
+    rnns = list()
+    for l in range(nlayers):
+        input_size = ninp if l == 0 else nhid
+        if l != nlayers - 1 or not tie_weights:
+            hidden_size = nhid
+        else:
+            hidden_size = ninp
+        rnns.append(SCRNCell(
+            input_size, hidden_size, context_units, alpha,
+        ))
+
+    def init_hidden(batch_size):
+        first_weight = next(rnns[0].parameters()).data
+        weights = list()
+        for l in range(nlayers):
+            if l != nlayers - 1 or not tie_weights:
+                hidden_size = nhid
+            else:
+                hidden_size = ninp
+            weights.append([
+                first_weight.new_zeros(1, batch_size, hidden_size+context_units),
+            ])
+        return weights
+
+    return rnns, init_hidden
+
+
 class RNNModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers,
-                 dropout=0.5, dropouth=0.5, dropouti=0.5, dropoute=0.1,
-                 wdrop=0, tie_weights=False):
+    def __init__(self, encoder, rnns, decoder, init_hidden_func,
+                 dropout=0.5, dropouth=0.5, dropouti=0.5, dropoute=0.1):
 
         super(RNNModel, self).__init__()
-
-        self.rnn_type = rnn_type
-
-        self.ninp = ninp
-        self.nhid = nhid
-        self.nlayers = nlayers
 
         self.dropout = dropout
         self.dropouti = dropouti
@@ -399,43 +548,11 @@ class RNNModel(nn.Module):
         self.idrop = nn.Dropout(dropouti)
         self.hdrop = nn.Dropout(dropouth)
         self.drop = nn.Dropout(dropout)
-        self.encoder = nn.Embedding(ntoken, ninp)
 
-        if rnn_type == 'LSTM':
-            self.rnns = [torch.nn.LSTM(ninp if l == 0 else nhid, nhid if l != nlayers - 1 else (ninp if tie_weights else nhid), 1, dropout=0)
-                         for l in range(nlayers)]
-            if wdrop:
-                self.rnns = [WeightDrop(rnn, ['weight_hh_l0'], dropout=wdrop) for rnn in self.rnns]
-        elif rnn_type == 'GRU':
-            self.rnns = [torch.nn.GRU(ninp if l == 0 else nhid, nhid if l != nlayers - 1 else ninp, 1, dropout=0)
-                         for l in range(nlayers)]
-            if wdrop:
-                self.rnns = [WeightDrop(rnn, ['weight_hh_l0'], dropout=wdrop) for rnn in self.rnns]
-        else:
-            raise NotImplementedError(f'RNN type {rnn_type} is not supported')
-
-        self.rnns = torch.nn.ModuleList(self.rnns)
-        self.decoder = nn.Linear(nhid, ntoken)
-
-        # Optionally tie weights as in:
-        # "Using the Output Embedding to Improve Language Models" (Press & Wolf 2016)
-        # https://arxiv.org/abs/1608.05859
-        # and
-        # "Tying Word Vectors and Word Classifiers: A Loss Framework for Language Modeling" (Inan et al. 2016)
-        # https://arxiv.org/abs/1611.01462
-        if tie_weights:
-            # if nhid != ninp:
-            #    raise ValueError('When using the tied flag, nhid must be equal to emsize')
-            self.decoder.weight = self.encoder.weight
-
-        self._init_weights()
-        self.tie_weights = tie_weights
-
-    def _init_weights(self):
-        initrange = 0.1
-        self.encoder.weight.data.uniform_(-initrange, initrange)
-        self.decoder.bias.data.fill_(0)
-        self.decoder.weight.data.uniform_(-initrange, initrange)
+        self.encoder = encoder
+        self.rnns = rnns
+        self.decoder = decoder
+        self.init_hidden = init_hidden_func
 
     def forward(self, input, hidden, return_h=False):
         emb = embedded_dropout(self.encoder, input, dropout=self.dropoute if self.training else 0)
@@ -450,30 +567,17 @@ class RNNModel(nn.Module):
             raw_output, new_h = rnn(raw_output, hidden[l])
             new_hidden.append(new_h)
             raw_outputs.append(raw_output)
-            if l != self.nlayers - 1:
+            if l != len(self.rnns) - 1:
                 raw_output = self.lockdrop(raw_output, self.dropouth)
                 outputs.append(raw_output)
-        hidden = new_hidden
 
+        hidden = new_hidden
         output = self.lockdrop(raw_output, self.dropout)
         outputs.append(output)
-
         result = output.view(output.size(0) * output.size(1), output.size(2))
+
         if return_h: return result, hidden, raw_outputs, outputs
         else: return result, hidden
-
-    def init_hidden(self, bsz):
-        weight = next(self.parameters()).data
-        if self.rnn_type == 'LSTM':
-            return [(weight.new(1, bsz, self.nhid if l != self.nlayers - 1 else (
-                self.ninp if self.tie_weights else self.nhid)).zero_(),
-                     weight.new(1, bsz, self.nhid if l != self.nlayers - 1 else (
-                         self.ninp if self.tie_weights else self.nhid)).zero_())
-                    for l in range(self.nlayers)]
-        elif self.rnn_type == 'GRU':
-            return [weight.new(1, bsz, self.nhid if l != self.nlayers - 1 else (
-                self.ninp if self.tie_weights else self.nhid)).zero_()
-                    for l in range(self.nlayers)]
 
     def repackage_hidden(self, h):
         """Wraps hidden states in new Tensors,
@@ -777,10 +881,13 @@ class LearnerFactory:
 
     @staticmethod
     def _build_model(args, ntokens):
-        model = RNNModel(
+        encoder, rnns, decoder, init_hidden = RNNFactory.build(
             args.model, ntokens, args.emsize, args.nhid, args.nlayers,
-            args.dropout, args.dropouth, args.dropouti,
-            args.dropoute, args.wdrop, args.tied
+            wdrop=args.wdrop, tie_weights=args.tied,
+        )
+        model = RNNModel(
+            encoder, rnns, decoder, init_hidden,
+            args.dropout, args.dropouth, args.dropouti, args.dropoute,
         )
         return model.cuda() if args.cuda else model
 
@@ -806,5 +913,6 @@ class LearnerFactory:
 
 
 if __name__ == "__main__":
+    # TODO: test MILSTM, SCRNN
     learner = LearnerFactory.build_learner(parse_args())
     learner.train_end_to_end()
