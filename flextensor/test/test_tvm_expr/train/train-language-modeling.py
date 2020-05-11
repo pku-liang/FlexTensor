@@ -58,7 +58,7 @@ def parse_args():
                         help='test batch size')
 
     parser.add_argument('--model', type=str, default='LSTM',
-                        help='type of recurrent net (LSTM, QRNN, GRU)')
+                        help='type of recurrent net (LSTM, GRU, MILSTM, SCRNN)')
     parser.add_argument('--emsize', type=int, default=400,
                         help='size of word embeddings')
     parser.add_argument('--nhid', type=int, default=1150,
@@ -67,6 +67,10 @@ def parse_args():
                         help='number of layers')
     parser.add_argument('--bptt', type=int, default=70,
                         help='sequence length')
+    parser.add_argument('--fixed_seq_len', action='store_false',  # enabled by default
+                        help='fix sequence length')
+    parser.add_argument('--tied', action='store_false',
+                        help='tie weights')
 
     parser.add_argument('--optimizer', type=str, default='sgd',
                         help='optimizer to use (sgd, adam)')
@@ -88,6 +92,8 @@ def parse_args():
     parser.add_argument('--beta', type=float, default=1,
                         help='beta slowness regularization applied on RNN activiation (beta = 0 means no regularization)')
 
+    parser.add_argument('--lockdrop', action='store_false',  # enabled by default
+                        help='enable variational dropout')
     parser.add_argument('--dropout', type=float, default=0.4,
                         help='dropout applied to layers (0 = no dropout)')
     parser.add_argument('--dropouth', type=float, default=0.3,
@@ -112,13 +118,11 @@ def parse_args():
     parser.add_argument('--resume', type=str, default='',
                         help='path of model to resume')
 
-    args = parser.parse_args()
-    args.tied = True
-
+    args = parser.parse_known_args()[0]
     return args
 
 
-""" Model & Criterion """
+""" Dropout & Criterion """
 
 
 class SplitCrossEntropyLoss(nn.Module):
@@ -341,14 +345,15 @@ class WeightDrop(torch.nn.Module):
 
 
 class LockedDropout(nn.Module):
-    def __init__(self):
+    def __init__(self, dropout=0.5):
         super().__init__()
+        self.dropout = dropout
 
-    def forward(self, x, dropout=0.5):
-        if not self.training or not dropout:
+    def forward(self, x):
+        if not self.training or not self.dropout:
             return x
-        m = x.data.new(1, x.size(1), x.size(2)).bernoulli_(1 - dropout)
-        mask = m.requires_grad_(False) / (1 - dropout)
+        m = x.data.new(1, x.size(1), x.size(2)).bernoulli_(1 - self.dropout)
+        mask = m.requires_grad_(False) / (1 - self.dropout)
         mask = mask.expand_as(x)
         return mask * x
 
@@ -374,31 +379,55 @@ def embedded_dropout(embed, words, dropout=0.1, scale=None):
     return X
 
 
+""" Models """
+
+
+class RNNBuilder:
+    def __init__(self, ninp, nhid, nlayers, tie_weights):
+        self.ninp, self.nhid, self.nlayers = ninp, nhid, nlayers
+        self.tie_weights = tie_weights
+        self.rnns = list()
+
+    def init_hidden(self, batch_size):
+        raise NotImplementedError
+
+    @classmethod
+    def parse_arguments(cls):
+        parser = argparse.ArgumentParser(description=f'Hyperparameters for {cls.__name__}')
+        return parser.parse_known_args()[0]
+
+
 class RNNFactory:
-    _build_funcs = dict()
+    _rnn_builders = dict()
 
     @classmethod
     def register(cls, rnn_type):
-        def wrapper(build_func):
-            cls._build_funcs[rnn_type] = build_func
-            return build_func
+        def wrapper(build_cls: RNNBuilder):
+            cls._rnn_builders[rnn_type] = build_cls
+            return build_cls
         return wrapper
 
     @staticmethod
     def build(rnn_type, ntoken, ninp, nhid, nlayers,
-              tie_weights=False, wdrop=0.0, initrange=0.1, **kwargs):
+              tie_weights=False, wdrop=0.0, initrange=0.1):
 
         encoder = RNNFactory._build_encoder(ntoken, ninp, initrange)
         decoder = RNNFactory._build_decoder(nhid, ntoken, initrange)
         if tie_weights: decoder.weight = encoder.weight
 
         try:
-            rnns, init_hidden = RNNFactory._build_funcs[rnn_type](ninp, nhid, nlayers, tie_weights, **kwargs)
+            rnn_builder_cls: RNNBuilder = RNNFactory._rnn_builders[rnn_type]
+            model_specific_hparams: argparse.Namespace = rnn_builder_cls.parse_arguments()
+            rnn_builder = rnn_builder_cls(ninp, nhid, nlayers, tie_weights, **vars(model_specific_hparams))
+            rnns, init_hidden = rnn_builder.rnns, rnn_builder.init_hidden
         except KeyError:
             raise NotImplementedError('Unsupported rnn type: {}'.format(rnn_type))
 
         if wdrop:
-            rnns = [WeightDrop(rnn, ['weight_hh_l0'], dropout=wdrop) for rnn in rnns]
+            try:
+                rnns = [WeightDrop(rnn, ['weight_hh_l0'], dropout=wdrop) for rnn in rnns]
+            except:
+                warnings.warn(f'{rnn_type} does not support weight drop. skipping.')
 
         return encoder, nn.ModuleList(rnns), decoder, init_hidden
 
@@ -417,137 +446,162 @@ class RNNFactory:
 
 
 @RNNFactory.register(rnn_type='LSTM')
-def _build_stacked_lstm(ninp, nhid, nlayers, tie_weights):
-    rnns = list()
-    for l in range(nlayers):
-        input_size = ninp if l == 0 else nhid
-        if l != nlayers - 1 or not tie_weights:
-            hidden_size = nhid
-        else:
-            hidden_size = ninp
-        rnns.append(torch.nn.LSTM(input_size, hidden_size, num_layers=1, dropout=0))
-
-    def init_hidden(batch_size):
-        first_weight = next(rnns[0].parameters()).data
-        weights = list()
+class _StackedLSTMBuilder(RNNBuilder):
+    def __init__(self, ninp, nhid, nlayers, tie_weights):
+        super().__init__(ninp, nhid, nlayers, tie_weights)
         for l in range(nlayers):
+            input_size = ninp if l == 0 else nhid
             if l != nlayers - 1 or not tie_weights:
                 hidden_size = nhid
             else:
                 hidden_size = ninp
+            self.rnns.append(torch.nn.LSTM(input_size, hidden_size, num_layers=1, dropout=0))
+
+    def init_hidden(self, batch_size):
+        first_weight = next(self.rnns[0].parameters()).data
+        weights = list()
+        for l in range(self.nlayers):
+            if l != self.nlayers - 1 or not self.tie_weights:
+                hidden_size = self.nhid
+            else:
+                hidden_size = self.ninp
             weights.append([
                 first_weight.new_zeros(1, batch_size, hidden_size),
                 first_weight.new_zeros(1, batch_size, hidden_size)
             ])
         return weights
 
-    return rnns, init_hidden
-
 
 @RNNFactory.register(rnn_type='GRU')
-def _build_stacked_gru(ninp, nhid, nlayers, tie_weights):
-    rnns = list()
-    for l in range(nlayers):
-        input_size = ninp if l == 0 else nhid
-        hidden_size = nhid if l != nlayers - 1 else ninp
-        rnns.append(torch.nn.GRU(input_size, hidden_size, num_layers=1, dropout=0))
-
-    def init_hidden(batch_size):
-        first_weight = next(rnns[0].parameters()).data
-        weights = list()
+class _StackedGRUBuilder(RNNBuilder):
+    def __init__(self, ninp, nhid, nlayers, tie_weights):
+        super().__init__(ninp, nhid, nlayers, tie_weights)
         for l in range(nlayers):
-            if l != nlayers - 1 or not tie_weights:
-                hidden_size = nhid
+            input_size = ninp if l == 0 else nhid
+            hidden_size = nhid if l != nlayers - 1 else ninp
+            self.rnns.append(torch.nn.GRU(input_size, hidden_size, num_layers=1, dropout=0))
+
+    def init_hidden(self, batch_size):
+        first_weight = next(self.rnns[0].parameters()).data
+        weights = list()
+        for l in range(self.nlayers):
+            if l != self.nlayers - 1 or not self.tie_weights:
+                hidden_size = self.nhid
             else:
-                hidden_size = ninp
+                hidden_size = self.ninp
             weights.append([
                 first_weight.new_zeros(1, batch_size, hidden_size),
             ])
         return weights
 
-    return rnns, init_hidden
 
 @RNNFactory.register(rnn_type='MILSTM')
-def _build_mi_lstm(ninp, nhid, nlayers, tie_weights, forget_bias=0.0,
-                   bias_start=0.0, alpha_start=1.0, beta_start=1.0,
-                   activation=torch.tanh):
-    from mi_lstm_pytorch import MILSTMCell
-    rnns = list()
-    for l in range(nlayers):
-        input_size = ninp if l == 0 else nhid
-        if l != nlayers - 1 or not tie_weights:
-            hidden_size = nhid
-        else:
-            hidden_size = ninp
-        rnns.append(MILSTMCell(
-            input_size, hidden_size, forget_bias,
-            bias_start, alpha_start, beta_start, activation,
-        ))
+class _MILSTMBuilder(RNNBuilder):
+    def __init__(self, ninp, nhid, nlayers, tie_weights, forget_bias=0.0,
+                 bias_start=0.0, alpha_start=1.0, beta_start=1.0,
+                 activation=torch.tanh):
+        super().__init__(ninp, nhid, nlayers, tie_weights)
+        self.forget_bias = forget_bias
+        self.bias_start = bias_start
+        self.alpha_start = alpha_start
+        self.beta_start = beta_start
+        self.activation = activation
 
-    def init_hidden(batch_size):
-        first_weight = next(rnns[0].parameters()).data
-        weights = list()
+        from mi_lstm_pytorch import MILSTMCell
         for l in range(nlayers):
+            input_size = ninp if l == 0 else nhid
             if l != nlayers - 1 or not tie_weights:
                 hidden_size = nhid
             else:
                 hidden_size = ninp
+            self.rnns.append(MILSTMCell(
+                input_size, hidden_size, forget_bias,
+                bias_start, alpha_start, beta_start, activation,
+            ))
+
+    def init_hidden(self, batch_size):
+        first_weight = next(self.rnns[0].parameters()).data
+        weights = list()
+        for l in range(self.nlayers):
+            if l != self.nlayers - 1 or not self.tie_weights:
+                hidden_size = self.nhid
+            else:
+                hidden_size = self.ninp
             weights.append([
                 first_weight.new_zeros(1, batch_size, hidden_size),
                 first_weight.new_zeros(1, batch_size, hidden_size),
             ])
         return weights
 
-    return rnns, init_hidden
+    @classmethod
+    def parse_arguments(cls):
+        parser = argparse.ArgumentParser(description=f'Hyperparameters for {cls.__name__}')
+        parser.add_argument('--forget_bias', type=float, default=0.0)
+        parser.add_argument('--bias_start', type=float, default=0.0)
+        parser.add_argument('--alpha_start', type=float, default=1.0)
+        parser.add_argument('--beta_start', type=float, default=1.0)
+        def get_activation(parser, ns, v, opt=None): setattr(ns, 'activation', getattr(torch, v))
+        parser.add_argument('--activation', type=str, default='tanh', action=get_activation)
+        return parser.parse_known_args()[0]
 
 
 @RNNFactory.register(rnn_type='SCRNN')
-def _build_scrnn(ninp, nhid, nlayers, tie_weights, context_units, alpha):
-    from scrnn_pytorch import SCRNCell
-    rnns = list()
-    for l in range(nlayers):
-        input_size = ninp if l == 0 else nhid
-        if l != nlayers - 1 or not tie_weights:
-            hidden_size = nhid
-        else:
-            hidden_size = ninp
-        rnns.append(SCRNCell(
-            input_size, hidden_size, context_units, alpha,
-        ))
+class _SCRNNBuilder(RNNBuilder):
+    def __init__(self, ninp, nhid, nlayers, tie_weights, context_units=40, alpha=0.95):
+        super().__init__(ninp, nhid, nlayers, tie_weights)
+        self.context_units = context_units
+        self.alpha = alpha
 
-    def init_hidden(batch_size):
-        first_weight = next(rnns[0].parameters()).data
-        weights = list()
+        from scrnn_pytorch import SCRNCell
         for l in range(nlayers):
+            input_size = ninp if l == 0 else nhid
             if l != nlayers - 1 or not tie_weights:
                 hidden_size = nhid
             else:
                 hidden_size = ninp
-            weights.append([
-                first_weight.new_zeros(1, batch_size, hidden_size+context_units),
-            ])
+            self.rnns.append(SCRNCell(
+                input_size, hidden_size, context_units, alpha,
+            ))
+
+    def init_hidden(self, batch_size):
+        first_weight = next(self.rnns[0].parameters()).data
+        weights = list()
+        for l in range(self.nlayers):
+            if l != self.nlayers - 1 or not self.tie_weights:
+                hidden_size = self.nhid
+            else:
+                hidden_size = self.ninp
+            weights.append(
+                first_weight.new_zeros(1, batch_size, hidden_size+self.context_units),
+            )
         return weights
 
-    return rnns, init_hidden
+    @classmethod
+    def parse_arguments(cls):
+        parser = argparse.ArgumentParser(description=f'Hyperparameters for {cls.__name__}')
+        parser.add_argument('--context_units', type=int, default=40)
+        parser.add_argument('--alpha', type=float, default=0.95)
+        return parser.parse_known_args()[0]
 
 
 class RNNModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
     def __init__(self, encoder, rnns, decoder, init_hidden_func,
-                 dropout=0.5, dropouth=0.5, dropouti=0.5, dropoute=0.1):
+                 dropouto=0.5, dropouth=0.5, dropouti=0.5, dropoute=0.1, lockdrop=True):
 
         super(RNNModel, self).__init__()
 
-        self.dropout = dropout
-        self.dropouti = dropouti
-        self.dropouth = dropouth
-        self.dropoute = dropoute
+        self.dropouto = dropouto  # output dropout
+        self.dropouti = dropouti  # input dropout
+        self.dropouth = dropouth  # hidden dropout
+        self.dropoute = dropoute  # embedding dropout
 
-        self.lockdrop = LockedDropout()
-        self.idrop = nn.Dropout(dropouti)
-        self.hdrop = nn.Dropout(dropouth)
-        self.drop = nn.Dropout(dropout)
+        self.lockdrop = lockdrop
+        Dropout = nn.Dropout if not lockdrop else LockedDropout
+        self.idrop = Dropout(dropouti)
+        self.hdrop = Dropout(dropouth)
+        self.odrop = Dropout(dropouto)
 
         self.encoder = encoder
         self.rnns = rnns
@@ -556,7 +610,7 @@ class RNNModel(nn.Module):
 
     def forward(self, input, hidden, return_h=False):
         emb = embedded_dropout(self.encoder, input, dropout=self.dropoute if self.training else 0)
-        emb = self.lockdrop(emb, self.dropouti)
+        emb = self.idrop(emb)
 
         raw_output = emb
         new_hidden = []
@@ -568,11 +622,11 @@ class RNNModel(nn.Module):
             new_hidden.append(new_h)
             raw_outputs.append(raw_output)
             if l != len(self.rnns) - 1:
-                raw_output = self.lockdrop(raw_output, self.dropouth)
+                raw_output = self.hdrop(raw_output)
                 outputs.append(raw_output)
 
         hidden = new_hidden
-        output = self.lockdrop(raw_output, self.dropout)
+        output = self.odrop(raw_output)
         outputs.append(output)
         result = output.view(output.size(0) * output.size(1), output.size(2))
 
@@ -668,9 +722,9 @@ class Dataset:
 
     @staticmethod
     def get_batch(source, i, seq_len):
-        seq_len = min(seq_len, len(source) - 1 - i)
-        data = source[i:i + seq_len]
-        target = source[i + 1:i + 1 + seq_len].view(-1)
+        seq_len = min(seq_len, len(source)-1-i)
+        data = source[i: i+seq_len]
+        target = source[i+1: i+1+seq_len].view(-1)
         return data, target
 
 
@@ -679,7 +733,7 @@ class Dataset:
 
 LearnerConfig = namedtuple('LearnerConfig', [
     'bptt', 'clip', 'alpha', 'beta', 'log_interval',
-    'epochs', 'lr', 'save',
+    'epochs', 'lr', 'save', 'drop_last', 'variable_seq_len',
 ])
 
 
@@ -713,33 +767,45 @@ class Learner:
         batch, i = 0, 0
 
         while i < self.dataset.train.size(0) - 1 - 1:
-            bptt = self.config.bptt if np.random.random() < 0.95 else self.config.bptt / 2.
-            # Prevent excessively small or negative sequence lengths
-            seq_len = max(5, int(np.random.normal(bptt, 5)))
-            # There's a very small chance that it could select a very long sequence length resulting in OOM
-            # seq_len = min(seq_len, args.bptt + 10)
 
-            lr2 = self.optimizer.param_groups[0]['lr']
-            self.optimizer.param_groups[0]['lr'] = lr2 * seq_len / self.config.bptt
+            """ Variable Length Backpropagagtion Sequences """
+            if self.config.variable_seq_len:
+                bptt = self.config.bptt if np.random.random() < 0.95 else self.config.bptt / 2.
+                # Prevent excessively small or negative sequence lengths
+                seq_len = max(5, int(np.random.normal(bptt, 5)))
+                # There's a very small chance that it could select a very long sequence length resulting in OOM
+                seq_len = min(seq_len, self.config.bptt + 10)
+                # The learning rate is rescaled according to the ``seq_length`` being used
+                lr2 = self.optimizer.param_groups[0]['lr']
+                self.optimizer.param_groups[0]['lr'] = lr2 * seq_len / self.config.bptt
+            else:
+                seq_len = max(5, self.config.bptt)
+                lr2 = self.optimizer.param_groups[0]['lr']
+
             self.model.train()
             data, targets = Dataset.get_batch(self.dataset.train, i, seq_len)
+            # Drop last non-full batch of dataset
+            if data.shape[0] < seq_len and self.config.drop_last: break
 
             # Starting each batch, we detach the hidden state from how it was previously produced.
             # If we didn't, the model would try backpropagating all the way to start of the dataset.
             hidden = self.model.repackage_hidden(hidden)
             self.optimizer.zero_grad()
-
             output, hidden, rnn_hs, dropped_rnn_hs = self.model(data, hidden, return_h=True)
             raw_loss = self.criterion(self.model.decoder.weight, self.model.decoder.bias, output, targets)
-
             loss = raw_loss
 
+            """ Activation Regularization: penalizes activations that are significantly larger than 0 """
             if self.config.alpha:  # Activiation Regularization
                 loss = loss + sum(self.config.alpha * dropped_rnn_h.pow(2).mean() for dropped_rnn_h in dropped_rnn_hs[-1:])
+
+            """ Temporal Activation Regularization: penalizes producing large changes in the hidden state """
             if self.config.beta:  # Temporal Activation Regularization (slowness)
                 loss = loss + sum(self.config.beta * (rnn_h[1:] - rnn_h[:-1]).pow(2).mean() for rnn_h in rnn_hs[-1:])
+
             loss.backward()
 
+            """ Gradient Clipping Prevents the Unstable Gradient Problem """
             # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs
             params = list(self.model.parameters()) + list(self.criterion.parameters())
             if self.config.clip: torch.nn.utils.clip_grad_norm_(params, self.config.clip)
@@ -784,10 +850,14 @@ class Learner:
         hidden = self.model.init_hidden(batch_size)
         for i in range(0, data_source.size(0) - 1, self.config.bptt):
             data, targets = Dataset.get_batch(data_source, i, self.config.bptt)
+            if data.shape[0] < self.config.bptt and self.config.drop_last: break
             output, hidden = self.model(data, hidden)
             total_loss += len(data) * self.criterion(self.model.decoder.weight, self.model.decoder.bias, output, targets).data
             hidden = self.model.repackage_hidden(hidden)
-        return total_loss.item() / len(data_source)
+        if not self.config.drop_last:
+            return total_loss.item() / len(data_source)
+        else:  # take into account the dropped examples
+            return total_loss.item() / (len(data_source) // self.config.bptt * self.config.bptt)
 
     def model_save(self, fn=None):
         with open(fn or self.config.save, 'wb') as f:
@@ -848,10 +918,18 @@ class LearnerFactory:
 
     @staticmethod
     def _build_config(args):
+        if args.fixed_seq_len:
+            drop_last = True
+            variable_seq_len = False
+        else:
+            drop_last = False
+            variable_seq_len = True
+
         return LearnerConfig(
             bptt=args.bptt, clip=args.clip,
             alpha=args.alpha, beta=args.beta, log_interval=args.log_interval,
             epochs=args.epochs, lr=args.lr, save=args.save,
+            drop_last=drop_last, variable_seq_len=variable_seq_len,
         )
 
     @staticmethod
@@ -875,7 +953,6 @@ class LearnerFactory:
         elif ntokens > 75000:
             # WikiText-103
             splits = [2800, 20000, 76000]
-        print('Using', splits)
         criterion = SplitCrossEntropyLoss(args.emsize, splits=splits, verbose=False)
         return criterion.cuda() if args.cuda else criterion
 
@@ -883,11 +960,11 @@ class LearnerFactory:
     def _build_model(args, ntokens):
         encoder, rnns, decoder, init_hidden = RNNFactory.build(
             args.model, ntokens, args.emsize, args.nhid, args.nlayers,
-            wdrop=args.wdrop, tie_weights=args.tied,
+            args.tied, args.wdrop,
         )
         model = RNNModel(
             encoder, rnns, decoder, init_hidden,
-            args.dropout, args.dropouth, args.dropouti, args.dropoute,
+            args.dropout, args.dropouth, args.dropouti, args.dropoute, args.lockdrop
         )
         return model.cuda() if args.cuda else model
 
@@ -913,6 +990,5 @@ class LearnerFactory:
 
 
 if __name__ == "__main__":
-    # TODO: test MILSTM, SCRNN
     learner = LearnerFactory.build_learner(parse_args())
     learner.train_end_to_end()
