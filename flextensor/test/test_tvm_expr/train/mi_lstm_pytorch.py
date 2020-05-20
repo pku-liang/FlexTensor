@@ -21,30 +21,30 @@ class MultiplicativeIntegration(nn.Module):
         self.alpha_start = alpha_start
         self.beta_start = beta_start
         self.weights = nn.Parameter(torch.empty(total_input_size, total_output_size))
-        self.alphas = nn.Parameter(torch.empty([total_input_size]))
+        self.alphas = nn.Parameter(torch.empty([total_output_size]))
         self.betas = nn.Parameter(torch.empty([2*total_output_size]))
         self.biases = nn.Parameter(torch.empty([total_output_size])) if bias else None
         self.reset_parameters()
 
     def forward(self, input0, input1):
-        # input0.shape = (batch_size x input_size), input1.shape = (batch_size x num_units)
+        # input0.shape = (seq_len x batch_size x input_size), input1.shape = (seq_len x batch_size x num_units)
         # w1.shape = (input_size x 4 * num_units), w2.shape = (num_units x 4 * num_units)
-        w1, w2 = torch.split(self.weights, self.input_sizes, dim=0)
+        w1, w2 = torch.split(self.weights, self.inputs_sizes, dim=0)
         # b1.shape, b2.shape = (4 * num_units)
-        b1, b2 = torch.split(self.betas, 2, dim=0)
-        # wx1.shape = (batch_size x 4 * num_units), wx2.shape = (batch_size x 4 * num_units)
+        b1, b2 = torch.split(self.betas, sum(self.output_sizes), dim=0)
+        # wx1.shape = (seq_len x batch_size x 4 * num_units), wx2.shape = (seq_len x batch_size x 4 * num_units)
         wx1, wx2 = input0 @ w1, input1 @ w2
-        # res.shape = (batch_size x 4 * num_units)
+        # res.shape = (seq_len x batch_size x 4 * num_units)
         res = self.alphas * wx1 * wx2 + b1 * wx1 + b2 * wx2
-        if self.biases: res += self.biases
+        if self.biases is not None: res += self.biases
         return res
 
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.weights, gain=1.0)
-        self.alphas.fill_(self.alpha_start)
-        self.betas.fill_(self.beta_start)
-        if self.biases:
-            self.biases.fill_(self.bias_start)
+        nn.init.constant_(self.alphas, self.alpha_start)
+        nn.init.constant_(self.betas, self.beta_start)
+        if self.biases is not None:
+            nn.init.constant_(self.biases, self.bias_start)
 
 
 class MILSTMCell(nn.Module):
@@ -69,15 +69,15 @@ class MILSTMCell(nn.Module):
         )
 
     def forward(self, inputs, state):
-        # c/h.shape = (batch_size x num_units)
+        # c/h.shape = (seq_len x batch_size x num_units)
         c, h = state
         # i = input_gate, j = new_input, f = forget_gate, o = output_gate
         concat = self.mi_module(inputs, h)
-        # i/j/f/o.shape = (batch_size x num_units)
-        i, j, f, o = torch.split(concat, 4, dim=1)
-        # new_c.shape = (batch_size x num_units)
+        # i/j/f/o.shape = (seq_len x batch_size x num_units)
+        i, j, f, o = torch.split(concat, self._num_units, dim=2)
+        # new_c.shape = (seq_len x batch_size x num_units)
         new_c = c * torch.sigmoid(f + self._forget_bias) + torch.sigmoid(i + self._activation(j))
-        # new_h.shape = (batch_size x num_units)
+        # new_h.shape = (seq_len x batch_size x num_units)
         new_h = self._activation(new_c) * torch.sigmoid(o)
         new_state = new_c, new_h
         return new_h, new_state

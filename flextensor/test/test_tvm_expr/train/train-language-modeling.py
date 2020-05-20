@@ -540,9 +540,10 @@ class _MILSTMBuilder(RNNBuilder):
         parser.add_argument('--bias_start', type=float, default=0.0)
         parser.add_argument('--alpha_start', type=float, default=1.0)
         parser.add_argument('--beta_start', type=float, default=1.0)
-        def get_activation(parser, ns, v, opt=None): setattr(ns, 'activation', getattr(torch, v))
-        parser.add_argument('--activation', type=str, default='tanh', action=get_activation)
-        return parser.parse_known_args()[0]
+        parser.add_argument('--activation', type=str, default='tanh')
+        args = parser.parse_known_args()[0]
+        args.activation = getattr(torch, args.activation)
+        return args
 
 
 @RNNFactory.register(rnn_type='SCRNN')

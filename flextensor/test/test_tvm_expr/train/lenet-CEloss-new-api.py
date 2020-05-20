@@ -133,7 +133,6 @@ def flatten(inputs):
     inputs: [batch, channel, height, width]
     return: [batch, channel * height * width]
     """
-    # assert(inputs.shape[1].value*inputs.shape[2].value*inputs.shape[3].value == 400)
     return tvm.te.compute([inputs.shape[0], inputs.shape[1]*inputs.shape[2]*inputs.shape[3]],
                           lambda i, j: inputs[i, j//(inputs.shape[2]*inputs.shape[3]),
                                               (j % (inputs.shape[2]*inputs.shape[3])) // inputs.shape[3],
