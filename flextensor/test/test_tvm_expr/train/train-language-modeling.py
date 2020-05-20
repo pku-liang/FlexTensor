@@ -489,9 +489,9 @@ class _StackedGRUBuilder(RNNBuilder):
                 hidden_size = self.nhid
             else:
                 hidden_size = self.ninp
-            weights.append([
+            weights.append(
                 first_weight.new_zeros(1, batch_size, hidden_size),
-            ])
+            )
         return weights
 
 
