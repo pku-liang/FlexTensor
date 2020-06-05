@@ -1402,7 +1402,7 @@ def block_circulant_matrix(Input, factor):
             tvm.te.if_then_else(
                 tvm.te.all(i < (ROW // FFT) * FFT, j < (COL // FFT) * FFT),
                 Compress[i // FFT, (j // FFT) * FFT + ((j % FFT) + FFT - (i % FFT)) % FFT], 
-                tvm.const(0, Input.dtype)
+                tvm.tir.const(0, Input.dtype)
             )
         )
     )
