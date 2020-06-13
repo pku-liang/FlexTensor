@@ -1849,6 +1849,11 @@ class OpScheduler(Scheduler):
             return _cuda_schedule_split_reorder_fuse
         elif target == "llvm":
             return _cpu_schedule_simple
+        elif target[0] == "c":
+            # this is for c code generation
+            dev_keys = target.split()
+            if "-device=micro_dev" in dev_keys:
+                pass
         else:
             raise RuntimeError("Currently no support for target %s"%target)  
 
