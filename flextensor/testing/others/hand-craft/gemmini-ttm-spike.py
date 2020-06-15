@@ -22,14 +22,9 @@ if len(sys.argv) == 2:
         dim = int(sys.argv[1])
 
 N = 1
-RC = 128
-K = 128
-P = 28
-Q = 28
-R = 3
-S = 3
-H = (P+R//2*2)
-W = (Q+S//2*2)
+M = 32
+K = 32
+L = 32
 
 zynq_host = '127.0.0.1'
 micro_device_config = micro.device.riscv.spike.default_config(
@@ -54,25 +49,14 @@ min_input = -2
 max_input = 2
 
 
-def conv2d_rounding(A, B):
+def TTM_rounding(A, B):
     """
-    chunked conv2d which converts datatypes and filters values,
+    chunked TTM which converts datatypes and filters values,
     converting > 127 to 127 and < -128 to -128
     """
-    # C = np.zeros((N, P, Q, K)).astype("int32")  # output
-    # for b in range(N):
-    #     for p in range(P):
-    #         for q in range(Q):
-    #             for k in range(K):
-    #                 for rc in range(RC):
-    #                     for rr in range(R):
-    #                         for rs in range(S):
-    #                             C[b, p, q, k] += A[b, p+rr, q+rs, rc] * B[rr, rs, rc, k]
-    import torch
-    A = torch.tensor(A, dtype=torch.int32).permute(0, 3, 1, 2)
-    B = torch.tensor(B, dtype=torch.int32).permute(3, 2, 0, 1)
-    C = torch.nn.functional.conv2d(A, B, bias=None, stride=1, padding=0, dilation=1, groups=1)
-    C = C.permute(0, 2, 3, 1).numpy()
+    A = A.astype("int32")
+    B = B.astype("int32")
+    C = np.matmul(A, B)
     C[C > 127] = 127
     C[C < -128] = -128
     return C.astype(np.int8)
@@ -84,57 +68,48 @@ def print_nested(l, f):
             print(' '.join(map(lambda i: '%2d' % i, ll)), file=ff)
 
 
-def conv2d(N, RC, H, W, K, P, Q, R, S, dtype):
-    A = tvm.placeholder((N, H, W, RC), name='A', dtype=dtype)
-    B = tvm.placeholder((R, S, RC, K), name='B', dtype=dtype)
-    rc = tvm.reduce_axis((0, RC), name='rc')
-    rr = tvm.reduce_axis((0, R), name="rr")
-    rs = tvm.reduce_axis((0, S), name="rs")
-    C = tvm.compute((N, P, Q, K), lambda b, p, q, k:
-                    tvm.sum(A[b, p+rr, q+rs, rc] * B[rr, rs, rc, k], axis=[rr, rs, rc]), name='C')
+def TTM(N, M, K, L, dtype):
+    A = tvm.placeholder((N, M, K), name='A', dtype=dtype)
+    B = tvm.placeholder((K, L), name='B', dtype=dtype)
+    k = tvm.reduce_axis((0, K), name='k')
+    C = tvm.compute((N, M, L), lambda i, j, l:
+                    tvm.sum(A[i, j, k] * B[k, l], axis=[k]), name='C')
     s = tvm.create_schedule(C.op)
-    b, p, q, k = C.op.axis
-    rr, rs, rc = C.op.reduce_axis
+    b, m, l = C.op.axis
+    k, = C.op.reduce_axis
 
     b_factors = [1, 1]  # 1
-    k_factors = [4, 32]  # 128
-    p_factors = [1, 28]  # 28
-    q_factors = [4, 32]  # 128
-    rc_factors = [1, 28]  # 28
-    rr_factors = [1, 3]  # 1
-    rs_factors = [1, 3]  # 1
+    k_factors = [2, 16]  # 32
+    m_factors = [2, 16]  # 32
+    l_factors = [2, 16]  # 32
 
     bo, bi = s[C].split(b, factor=b_factors[1])
     ko, ki = s[C].split(k, factor=k_factors[1])
-    po, pi = s[C].split(p, factor=p_factors[1])
-    qo, qi = s[C].split(q, factor=q_factors[1])
-    rco, rci = s[C].split(rc, factor=rc_factors[1])
-    rro, rri = s[C].split(rr, factor=rr_factors[1])
-    rso, rsi = s[C].split(rs, factor=rs_factors[1])
+    mo, mi = s[C].split(m, factor=m_factors[1])
+    lo, li = s[C].split(l, factor=l_factors[1])
 
-    s[C].reorder(bo, ko, po, qo, bi, pi, rro, rso, rco, rri, rsi, qi, ki, rci)
+    s[C].reorder(bo, bi, mo, lo, ko, mi, li, ki)
 
     # use a different kernel size for the last iteration if
     # the input size is not divisible by the tiling factor
-    last_n = Q % q_factors[1]
-    nc = tvm.expr.EQ(qo, Q // q_factors[1]) if last_n != 0 else False
-    last_n = last_n if last_n != 0 else q_factors[1]
+    last_n = M % m_factors[1]
+    nc = tvm.expr.EQ(mo, M // m_factors[1]) if last_n != 0 else False
+    last_n = last_n if last_n != 0 else m_factors[1]
 
-    last_l = RC % rc_factors[1]
-    lc = tvm.expr.EQ(rco, RC // rc_factors[1]) if last_l != 0 else False
-    last_l = last_l if last_l != 0 else rc_factors[1]
+    last_l = K % k_factors[1]
+    lc = tvm.expr.EQ(ko, K // k_factors[1]) if last_l != 0 else False
+    last_l = last_l if last_l != 0 else k_factors[1]
 
-    last_m = K % k_factors[1]
-    mc = tvm.expr.EQ(ko, K // k_factors[1]) if last_m != 0 else False
-    last_m = last_m if last_m != 0 else k_factors[1]
+    last_m = L % l_factors[1]
+    mc = tvm.expr.EQ(lo, L // l_factors[1]) if last_m != 0 else False
+    last_m = last_m if last_m != 0 else l_factors[1]
 
-    print(q_factors[1], k_factors[1], rc_factors[1])
-    gemm = intrinsic_gemm(q_factors[1], k_factors[1], rc_factors[1], last_n,
+    gemm = intrinsic_gemm(m_factors[1], l_factors[1], k_factors[1], last_n,
                           last_m, last_l, nc, mc, lc)
     print(tvm.lower(s, [A, B, C], simple_mode=True))
-    s[C].tensorize(qi, gemm)
+    s[C].tensorize(mi, gemm)
     #s[C].pragma(xo, "prologue", "do_flush")
-    s[C].pragma(bo, "epilogue", "do_fence")
+    s[C].pragma(mi, "epilogue", "do_fence")
     print(tvm.lower(s, [A, B, C], simple_mode=True))
     return s, [A, B, C]
 
@@ -252,7 +227,7 @@ def main():
     intrinsic_filename = 'kernel.c'
     aux_sources = [f"{os.path.realpath(intrinsic_filename)}"]
     aux_options = [f"-I{os.path.dirname(os.path.realpath(intrinsic_filename))}"]
-    s, bufs = conv2d(N, RC, H, W, K, P, Q, R, S, dtype)
+    s, bufs = TTM(N, M, K, L, dtype)
     print("Build function...")
     func = tvm.build(s, bufs, target=target)
 
@@ -277,16 +252,16 @@ def main():
     time_f = func.time_evaluator(func.entry_name, ctx)
 
     print('Creating buffers on device')
-    A_np = np.random.uniform(min_input, max_input, [N, H, W, RC]).astype(dtype)
-    B_np = np.random.uniform(min_input, max_input, [R, S, RC, K]).astype(dtype)
-    # print("A input")
-    # print(A_np)
-    # print("B input")
-    # print(B_np)
+    A_np = np.random.uniform(min_input, max_input, [N, M, K]).astype(dtype)
+    B_np = np.random.uniform(min_input, max_input, [K, L]).astype(dtype)
+    print("A input")
+    print(A_np)
+    print("B input")
+    print(B_np)
 
     a = tvm.nd.array(A_np, ctx, copy=verify)
     b = tvm.nd.array(B_np, ctx, copy=verify)
-    c = tvm.nd.empty([N, P, Q, K], dtype, ctx)
+    c = tvm.nd.empty([N, M, L], dtype, ctx)
 
     print('Running function on device')
     costs = time_f(a, b, c).results
@@ -294,7 +269,11 @@ def main():
 
     if verify:
         print('Checking correctness...')
-        golden = conv2d_rounding(A_np, B_np)
+        golden = TTM_rounding(A_np, B_np)
+        print("C=")
+        print(c.asnumpy())
+        print("golden=")
+        print(golden)
         tvm.testing.assert_allclose(c.asnumpy(), golden)
 
         print('Micro correctness check passed.')
@@ -304,3 +283,35 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+"""
+for (int32_t j_outer = 0; j_outer < 2; ++j_outer) {
+    for (int32_t l_outer = 0; l_outer < 2; ++l_outer) {
+      (void)matmul_reset(((int8_t *)C + ((j_outer * 512) + (l_outer * 16))), 1, 1, 0, 0, 32);
+      for (int32_t k_outer = 0; k_outer < 2; ++k_outer) {
+        (void)matmul_kernel(((int8_t *)A + ((j_outer * 512) + (k_outer * 16))), ((int8_t *)B + ((k_outer * 512) + (l_outer * 16))), 1, ((int8_t *)C + ((j_outer * 512) + (l_outer * 16))), 1, 1, 1, 0, 0, 0, 32, 32, 0, 32, (bool)1, (bool)0);
+      }
+      (void)matmul_finalize(((int8_t *)C + ((j_outer * 512) + (l_outer * 16))), 1, 1, 0, 0, 32);
+    }
+    do_fence();
+  }
+"""
+
+"""
+for (int32_t j_outer = 0; j_outer < 2; ++j_outer) {
+    for (int32_t l_outer_init = 0; l_outer_init < 2; ++l_outer_init) {
+      (void)matmul_reset(((int8_t *)C + ((j_outer * 512) + (l_outer_init * 16))), 1, 1, 0, 0, 32);
+    }
+    do_fence();
+    for (int32_t k_outer = 0; k_outer < 2; ++k_outer) {
+      for (int32_t l_outer = 0; l_outer < 2; ++l_outer) {
+        (void)matmul_kernel(((int8_t *)A + ((j_outer * 512) + (k_outer * 16))), ((int8_t *)B + ((k_outer * 512) + (l_outer * 16))), 1, ((int8_t *)C + ((j_outer * 512) + (l_outer * 16))), 1, 1, 1, 0, 0, 0, 32, 32, 0, 32, (bool)1, (bool)0);
+      }
+      do_fence();
+    }
+    for (int32_t l_outer_init1 = 0; l_outer_init1 < 2; ++l_outer_init1) {
+      (void)matmul_finalize(((int8_t *)C + ((j_outer * 512) + (l_outer_init1 * 16))), 1, 1, 0, 0, 32);
+    }
+    do_fence();
+  }
+"""
