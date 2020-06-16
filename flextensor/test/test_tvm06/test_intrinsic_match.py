@@ -28,10 +28,10 @@ def test1():
   rc = tvm.reduce_axis([0, C], name="rc")
   rr = tvm.reduce_axis([0, R], name="rr")
   rs = tvm.reduce_axis([0, S], name="rs")
-  Out = tvm.compute([N, K, P, Q],
-    lambda b, k, p, q: tvm.sum(A[b, p+rr, q+rs, rc] * Weight[rr, rs, rc, k], axis=[rc, rr, rs]), name="Out")
+  Out = tvm.compute([N, P, Q, K],
+    lambda b, p, q, k: tvm.sum(A[b, p+rr, q+rs, rc] * Weight[rr, rs, rc, k], axis=[rc, rr, rs]), name="Out")
 
-  b, k, p, q = Out.op.axis
+  b, p, q, k = Out.op.axis
 
   intrin_t = gemm_intrinsic_compute()
 
