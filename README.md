@@ -154,3 +154,30 @@ from flextensor.scheduler import schedule_with_config
 s, bufs = schedule_with_config(task_key, configs)
 func = tvm.build(s, bufs, task.target)
 ```
+
+## Citing FlexTensor
+If you find FlexTensor useful for your project, please cite the following paper：
+
+@inproceedings{FlexTensor,
+  author    = {Size Zheng and
+               Yun Liang and
+               Shuo Wang and
+               Renze Chen and
+               Kaiwen Sheng},
+  editor    = {James R. Larus and
+               Luis Ceze and
+               Karin Strauss},
+  title     = {FlexTensor: An Automatic Schedule Exploration and Optimization Framework
+               for Tensor Computation on Heterogeneous System},
+  booktitle = {{ASPLOS} '20: Architectural Support for Programming Languages and
+               Operating Systems, Lausanne, Switzerland, March 16-20, 2020 {[ASPLOS}
+               2020 was canceled because of {COVID-19]}},
+  pages     = {859--873},
+  publisher = {{ACM}},
+  year      = {2020},
+  url       = {https://doi.org/10.1145/3373376.3378508},
+  doi       = {10.1145/3373376.3378508},
+  timestamp = {Mon, 16 Mar 2020 11:14:36 +0100},
+  biburl    = {https://dblp.org/rec/conf/asplos/Zheng0WCS20.bib},
+  bibsource = {dblp computer science bibliography, https://dblp.org}
+}
