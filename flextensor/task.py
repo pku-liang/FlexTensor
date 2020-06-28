@@ -135,9 +135,9 @@ def gemv(N, K):
     return [Output.op], [A, B, Output]
 
 
-def gemm(N, K, M):
-    A = tvm.placeholder((N, K))
-    B = tvm.placeholder((K, M))
+def gemm(N, K, M, dtype="float32"):
+    A = tvm.placeholder((N, K), dtype=dtype)
+    B = tvm.placeholder((K, M), dtype=dtype)
     Output = op_gemm(A, B)
     return [Output.op], [A, B, Output]
 
@@ -470,8 +470,9 @@ for shape in gemv_shapes:
 for shape in gemm_shapes:
     N, K, M = shape
     for j in range(4):
-        register_task(Task("gemm", "gemm", gemm, (N, K, M), "llvm", j))
-        register_task(Task("gemm", "gemm", gemm, (N, K, M), "cuda", j))
+        register_task(Task("gemm", "gemm", gemm, (N, K, M, "int8"), "micro", j))
+        register_task(Task("gemm", "gemm", gemm, (N, K, M, "float32"), "llvm", j))
+        register_task(Task("gemm", "gemm", gemm, (N, K, M, "float32"), "cuda", j))
 
 # for shape in test_gemm_shapes:
 #     N, K, M = shape

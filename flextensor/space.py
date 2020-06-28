@@ -3,7 +3,7 @@ import math
 import numpy as np
 from functools import reduce
 from itertools import permutations, product
-from flextensor.intrinsic import INTRIN_TABLE
+from flextensor.intrinsic import INTRIN_TABLE, target_embedding
 from flextensor.utils import (assert_print, gen_enum, any_factor_split, get_factor_lst, gen_group,
     is_power_of_x)
 
@@ -419,15 +419,16 @@ def generate_unroll_space(explicit=False):
 
 
 def generate_intrin_space(op, target):
-    if target not in INTRIN_TABLE:
+    key = target_embedding[target]
+    if key not in INTRIN_TABLE:
         raise RuntimeError("Can't find any pre-defined intrinsic for target %s." % target)
     assert op.num_outputs == 1, "Only support one output"
     out_t = op.output(0)
     
     candidates = []
-
-    for no, intrin in enumerate(INTRIN_TABLE[target]):
-        intrin_t = intrin.func(*intrin.args)
+    # key = target_embedding[target]
+    for no, intrin in enumerate(INTRIN_TABLE[key]):
+        intrin_t, _ = intrin.func(*intrin.args)
         intrin_axis = intrin_t.op.axis
         if hasattr(intrin_t.op, "reduce_axis"):
             intrin_reduce_axis = intrin_t.op.reduce_axis
@@ -445,10 +446,15 @@ def generate_intrin_space(op, target):
         for sp, re in product(permute_axis, permute_reduce_axis):
             axis = [op.axis[i].var for i in sp]
             reduce_axis = [op_reduce_axis[i].var for i in re]
-
+            
+            print(axis)
+            print(reduce_axis)
+            print("target:", out_t.op.body[0])
+            print("intrin:", intrin_t.op.body[0])
             match = tvm.ir_pass.intrinsic_match(out_t, intrin_t, axis, reduce_axis)
+            print(match)
             if match:
-                candidates.append((target, no, sp, re))
+                candidates.append((key, no, sp, re))
     
     if len(candidates) == 0:
         raise RuntimeError("Can't match any intrinsic for given compute %s." % (str(op.body)))

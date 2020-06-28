@@ -4,6 +4,9 @@ import tvm
 INTRIN_TABLE = {}
 
 
+target_embedding = {"c -device=micro_dev": 0}
+
+
 class Intrinsic(object):
     def __init__(self, category, name, func, args, intrin, target):
         self.key = "{}_{}_{}".format(category, name, target)
@@ -17,9 +20,10 @@ class Intrinsic(object):
 def register_intrin(intrin, override=False):
     if intrin.key in INTRIN_TABLE and not override:
         print("[Warning]: Same intrinsic occurs again %s" % intrin.key)
+    key = target_embedding[intrin.target]
     if intrin.target not in INTRIN_TABLE:
-      INTRIN_TABLE[intrin.target] = []
-    INTRIN_TABLE[intrin.target].append(intrin)
+      INTRIN_TABLE[key] = []
+    INTRIN_TABLE[key].append(intrin)
 
 
 def register(func, args, category, name, intrin, target, override=False):

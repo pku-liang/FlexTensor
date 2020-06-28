@@ -34,6 +34,16 @@ class Judger(torch.nn.Module):
         out = self.net(inputs)
         return out
 
+def flatten(x):
+    print("x=", x)
+    ret = []
+    for v in x:
+        if isinstance(v, (list, tuple)):
+            ret.extend(list(v))
+        else:
+            ret.append(v)
+    return ret
+
 
 class Walker(nn.Module):
     def __init__(self, name, subspace, input_len):
@@ -43,7 +53,9 @@ class Walker(nn.Module):
         self.post_judger = Judger(input_len, 64, 4, self.subspace.num_direction)     # post updated
         self.memory = []    # (pre_state, action, post_state, reward)
         self.mem_size = 0
-        self.inputs_to_judger = torch.FloatTensor(self.subspace.static_entities)
+        entities = [flatten(x) for x in self.subspace.static_entities]
+        print(entities)
+        self.inputs_to_judger = torch.FloatTensor(entities)
         self.model_path = global_walker_judger_model_path_prefix + name + ".pkl"
         self.data_path = global_walker_judger_data_path_prefix + name + ".txt"
     

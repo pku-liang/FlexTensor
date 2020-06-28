@@ -19,7 +19,7 @@ class RpcInfo(object):
         self.micro_device_config = None
         self.aux_sources = None
         self.aux_options = None
-        self.sever_ip = None
+        self.server_ip = None
         self.server_port = None
         self.device_key = None
 

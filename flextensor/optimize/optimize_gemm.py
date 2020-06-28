@@ -76,7 +76,7 @@ def evaluate(name, s, bufs, target, dev_id, number, rpc_info):
 
 
 def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, trials=100, parallel=1, 
-        method="searching", use_model=False, rpc_info=None, logfile=sys.stdout):
+        method="searching", use_model=False, rpc_info=None, logfile=sys.stdout, dtype="float32"):
     ret = dict()
     for i, shape in enumerate(shapes):
         print("Optimize gemm shape %s [%.6f]" % (str(shape), time.time()), flush=True)
@@ -86,7 +86,7 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
             "gemm",
             "gemm", 
             None, 
-            (N, K, M), 
+            (N, K, M, dtype), 
             target, 
             dev_id
             )
@@ -156,6 +156,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--target_host", type=str, default="llvm")
     parser.add_argument("--port", type=int, default=9090)
+    parser.add_argument("--dtype", type=str, default="float32")
     args = parser.parse_args()
     shapes = gemm_shapes
     rpc_info = RpcInfo(args.host, args.port, args.target_host)
@@ -168,7 +169,7 @@ if __name__ == "__main__":
                                             0x800000000, zynq_host, 6666)
         rpc_info.aux_sources = [f"{os.path.realpath(intrinsic_filename)}"]
         rpc_info.aux_options = [f"-I{os.path.dirname(os.path.realpath(intrinsic_filename))}"]
-        rpc_info.sever_ip = "127.0.0.1"
+        rpc_info.server_ip = "127.0.0.1"
         rpc_info.server_port = 9190
         rpc_info.device_key = "spike"
     elif args.micro == "zync":
@@ -179,7 +180,7 @@ if __name__ == "__main__":
                                             0x800000000, zynq_host, 6666)
         rpc_info.aux_sources = [f"{os.path.realpath(intrinsic_filename)}"]
         rpc_info.aux_options = [f"-I{os.path.dirname(os.path.realpath(intrinsic_filename))}"]
-        rpc_info.sever_ip = "127.0.0.1"
+        rpc_info.server_ip = "127.0.0.1"
         rpc_info.server_port = 9190
         rpc_info.device_key = "gemmini"
     elif args.micro != "":
@@ -212,7 +213,8 @@ if __name__ == "__main__":
                 use_model=args.use_model,
                 method=args.method,
                 logfile=flog,
-                rpc_info=rpc_info
+                rpc_info=rpc_info,
+                dtype=args.dtype
                 )
     else:
         ret = optimize(
@@ -227,5 +229,6 @@ if __name__ == "__main__":
             use_model=args.use_model,
             method=args.method,
             logfile=sys.stdout,
-            rpc_info=rpc_info
+            rpc_info=rpc_info,
+            dtype=args.dtype
             )
