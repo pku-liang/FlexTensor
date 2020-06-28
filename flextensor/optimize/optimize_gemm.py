@@ -120,9 +120,9 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
         string = json.dumps(configs)
         line = task.key + ":" + string
         print(line, file=logfile, flush=True)
-        s, bufs = schedule_with_config(task.key, configs)
-        time_cost = _evaluate(s, bufs, target, task.dev_id, 10)
-        print("Use", time_cost, "ms")
+        # s, bufs = schedule_with_config(task.key, configs)
+        # time_cost = _evaluate(s, bufs, target, task.dev_id, 10)
+        # print("Use", time_cost, "ms")
         print("Cost", end - beg, "s")
         print()
     return ret

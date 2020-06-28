@@ -2298,21 +2298,24 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
 
     #################################################
     # inter operations schedule decisions 
-    graph_scheduler = GraphScheduler(
-        task_key, 
-        graph_space, 
-        parallel=parallel, 
-        timeout=timeout, 
-        trial=graph_trial, 
-        number=number, 
-        early_stop=graph_stop,
-        rpc_info=rpc_info,
-        rewrite=rewrite
-        )
-    use_model = False if graph_perf_model_path is None else True
-    if len(graph_space) > 1:
-        graph_config = graph_scheduler.schedule(
-            configs, method=method, use_model=use_model, perf_path=graph_perf_model_path)
+    if schedule_graph:
+        graph_scheduler = GraphScheduler(
+            task_key, 
+            graph_space, 
+            parallel=parallel, 
+            timeout=timeout, 
+            trial=graph_trial, 
+            number=number, 
+            early_stop=graph_stop,
+            rpc_info=rpc_info,
+            rewrite=rewrite
+            )
+        use_model = False if graph_perf_model_path is None else True
+        if len(graph_space) > 1:
+            graph_config = graph_scheduler.schedule(
+                configs, method=method, use_model=use_model, perf_path=graph_perf_model_path)
+        else:
+            graph_config = {}
     else:
         graph_config = {}
     #################################################
