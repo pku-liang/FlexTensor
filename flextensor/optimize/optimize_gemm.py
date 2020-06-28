@@ -5,7 +5,7 @@ import time
 import json
 import tvm 
 import numpy as np
-from tvm import rpc
+from tvm import micro, rpc
 from flextensor.utils import Config, RpcInfo
 from flextensor.task import Task, TASK_TABLE
 from flextensor.scheduler import schedule, schedule_with_config
@@ -149,6 +149,7 @@ if __name__ == "__main__":
     parser.add_argument("--timeout", help="timeout", type=float, default=4.0)
     parser.add_argument("--parallel", help="parallel", type=int, default=1)
     parser.add_argument("--use_model", help="use performance model", action="store_true")
+    parser.add_argument("--micro", help="build for micro", default="")
     parser.add_argument("--method", help="how to schedule", type=str, default="searching")
     parser.add_argument("--slevel", type=int, default=4)
     parser.add_argument("--rlevel", type=int, default=3)
@@ -158,6 +159,32 @@ if __name__ == "__main__":
     args = parser.parse_args()
     shapes = gemm_shapes
     rpc_info = RpcInfo(args.host, args.port, args.target_host)
+    
+    if args.micro == "spike":
+        intrinsic_filename = "kernel.c"
+        zynq_host = "127.0.0.1"
+        rpc_info.target = "c -device=micro_dev"
+        rpc_info.micro_device_config = micro.device.riscv.spike.default_config(
+                                            0x800000000, zynq_host, 6666)
+        rpc_info.aux_sources = [f"{os.path.realpath(intrinsic_filename)}"]
+        rpc_info.aux_options = [f"-I{os.path.dirname(os.path.realpath(intrinsic_filename))}"]
+        rpc_info.sever_ip = "127.0.0.1"
+        rpc_info.server_port = 9190
+        rpc_info.device_key = "spike"
+    elif args.micro == "zync":
+        intrinsic_filename = "kernel.c"
+        zynq_host = "127.0.0.1"
+        rpc_info.target = "c -device=micro_dev"
+        rpc_info.micro_device_config = micro.device.riscv.rocketchip_zynq.default_config(
+                                            0x800000000, zynq_host, 6666)
+        rpc_info.aux_sources = [f"{os.path.realpath(intrinsic_filename)}"]
+        rpc_info.aux_options = [f"-I{os.path.dirname(os.path.realpath(intrinsic_filename))}"]
+        rpc_info.sever_ip = "127.0.0.1"
+        rpc_info.server_port = 9190
+        rpc_info.device_key = "gemmini"
+    elif args.micro != "":
+        raise ValueError("Not support micro %s" % args.micro)
+
     if args.to < 0:
         end = len(shapes)
     else:

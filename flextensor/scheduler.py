@@ -14,13 +14,16 @@ from tvm import rpc
 from collections import deque
 from queue import Empty
 from functools import reduce
+from tvm.micro.base import compile_micro_mod
 from flextensor.task import TASK_TABLE
+from flextensor.intrinsic import INTRIN_TABLE
 try:
     from flextensor.model import WalkerGroup
 except ImportError:
     print("[Warning] Import model module failed, please check if PyTorch is installed.")
-from flextensor.space import generate_space_inter_op, generate_space_intra_op
-from flextensor.utils import assert_print, to_tuple, Config, RpcInfo
+from flextensor.space import generate_space_inter_op, generate_space_intra_op, \
+                             generate_empty_space_inter_op, generate_intrin_space
+from flextensor.utils import assert_print, to_int, to_tuple, Config, RpcInfo
 try:
     import psutil
 except ImportError:
@@ -85,23 +88,45 @@ def build_func(func_name, task_key, configs, op_pos=None, rpc_info=None, rewrite
     if not valid:
         raise RuntimeError("Invalid %s(%d) kernel"%(task.target, task.dev_id))
     if target_host is not None:
-        func = tvm.build(s, bufs, target=task.target, target_host=target_host)
+        if task.target == "micro":
+            target = rpc_info.target  # can be "c -device=micro_dev"
+            micro_device_config = rpc_info.micro_device_config
+            aux_sources = rpc_info.aux_sources
+            aux_options = rpc_info.aux_options
+            func = tvm.build(s, bufs, target=target)
+            mod_path = os.path.join(LIB_DIR, func_name)
+            compile_micro_mod(mod_path,
+                    func, micro_device_config,
+                    aux_sources=aux_sources,
+                    aux_options=aux_options)
+        else:
+            func = tvm.build(s, bufs, target=task.target, target_host=target_host)
+            func.export_library(os.path.join(LIB_DIR, func_name))
     else:
         func = tvm.build(s, bufs, target=task.target)
-    func.export_library(os.path.join(LIB_DIR, func_name))
+        func.export_library(os.path.join(LIB_DIR, func_name))
     result = ([to_tuple(x.shape) for x in bufs], [buf.dtype for buf in bufs])
     return result
 
 
 def eval_func(func_file, bufs_shape, dtype, target, number=100, dev_id=0, rpc_info=None):
+    """
+    the target is preprocessed
+    """
     if rpc_info is not None:
         host = rpc_info.host
         port = rpc_info.port
+        server_ip = rpc_info.server_ip
+        sever_port = rpc_info.server_port
+        device_key = rpc_info.device_key
     else:
         # local
         host = "0.0.0.0"
         port = 9090     # default port
-    if host == "0.0.0.0":
+        server_ip = "127.0.0.1"
+        server_port = 9190
+        device_key = "local"
+    if device_key == "local":
         if LOCAL_RPC:
             use_rpc = True
         else:
@@ -109,7 +134,10 @@ def eval_func(func_file, bufs_shape, dtype, target, number=100, dev_id=0, rpc_in
     else:
         use_rpc = True
     if use_rpc:
-        remote = rpc.connect(host, port)
+        # remote = rpc.connect(host, port)
+        tracker = rpc.connect_tracker(server_ip, server_port)
+        remote = tracker.request(device_key, priority=1,
+                             session_timeout=10000)
         ctx = remote.context(target, dev_id)
     else:
         ctx = tvm.context(target, dev_id)
@@ -520,6 +548,10 @@ class Scheduler(object):
         # # print("check config", old_configs, new_configs)
         # print("parallel_evaluate begins...")
         target = self.task.target
+        if target == "micro":
+            assert self.rpc_info is not None
+            target = self.rpc_info.target
+        
         total_configs = len(new_configs)
         total_res_lst = []
         try:
@@ -661,7 +693,10 @@ class OpScheduler(Scheduler):
         #     wanted_types = ["fuse", "reorder", "spatial", "reduce", "unroll"]
         # else:
         #     raise RuntimeError("Unknown hint: %s" % hint)
-        wanted_types = ["fuse", "reorder", "spatial", "reduce", "unroll"]
+        if self.task.target == "micro":
+            wanted_types = ["spatial", "reduce", "intrin"]
+        else:
+            wanted_types = ["fuse", "reorder", "spatial", "reduce", "unroll"]
         if perf_path is not None:
             self.walker_group.model_path = perf_path
         if method == "searching":
@@ -1835,7 +1870,143 @@ class OpScheduler(Scheduler):
                 #     if config["reduce"][count][-2] > 1:
                 #         print("unroll cache write", hybrid_fuse_lsts[-2][count + num_spatial_axes])
                 #         s[write_cache].unroll(hybrid_fuse_lsts[-2][count + num_spatial_axes])
-                
+        
+        def _micro_schedule_simple(s, op, op_state):
+            # prepare extents
+            sp_extents = [to_int(x.dom.extent) for x in op.axis]
+            if hasattr(op, "reduce_axis"):
+                re_extents = [to_int(x.dom.extent) for x in op.reduce_axis]
+            else:
+                re_extents = []
+
+            if "intrin" in config:
+                target, ind, slist, rlist = config["intrin"]
+                intrin = INTRIN_TABLE[target][ind]
+            else:
+                intrin = None
+                s_list = []
+                r_list = []
+
+            sp_factors = []
+            re_factors = []
+            
+            # spatial split
+            if "spatial" in config:
+                sub_sp_axis_list = []
+                for axis, f_list in zip(s[op].axis, config["spatial"]):
+                    split_list = []
+                    for factor in f_list[:-1]:
+                        outer, axis = s[op].split(axis, nparts=factor)
+                        split_list.append(outer)
+                    sp_factors.append(f_list[-1])
+                    split_list.append(axis)
+                    sub_sp_axis_list.append(split_list)
+            else:
+                sub_sp_axis_list = [[axis] for axis in s[op].axis]
+                sp_factors = sp_extents
+
+            # reduce split
+            if "reduce" in config and hasattr(op, "reduce_axis"):
+                sub_re_axis_list = []
+                for axis, f_list in zip(s[op].reduce_axis, config["reduce"]):
+                    split_list = []
+                    for factor in f_list[:-1]:
+                        outer, axis = s[op].split(axis, nparts=factor)
+                        split_list.append(outer)
+                    re_factors.append(f_list[-1])
+                    split_list.append(axis)
+                    sub_re_axis_list.append(split_list)
+            elif hasattr(op, "reduce_axis"):
+                sub_re_axis_list = [[axis] for axis in s[op].reduce_axis]
+                re_factors = re_extents
+            else:
+                sub_re_axis_list = []
+            
+            # match intrinsic
+            def rearrange(lst):
+                return list(zip(*lst))
+
+            sub_sp_axis_list = rearrange(sub_sp_axis_list)
+            sub_re_axis_list = rearrange(sub_re_axis_list)
+
+            num_sp = len(sub_sp_axis_list) - 1
+            num_re = len(sub_re_axis_list) - 1
+            
+            # inner-most
+            inner_most = [sub_sp_axis_list[num_sp]]
+            if num_re >= 0:
+                inner_most.append(sub_re_axis_list[num_re])
+
+            # do intrinsic
+            if intrin is not None:
+                visit_sp = [False for x in inner_most[0]]
+                if num_re >= 0:
+                    visit_re = [False for x in inner_most[1]]
+                else:
+                    visit_re = []
+                intrin_sp_list = []
+                intrin_re_list = []
+                intrin_sp_extents = []
+                intrin_re_extents = []
+                intrin_sp_factors = []
+                intrin_re_factors = []
+                for ind in slist:
+                    intrin_sp_list.append(inner_most[0][ind])
+                    visit_sp[ind] = True
+                    intrin_sp_extents.append(sp_extents[ind])
+                    intrin_sp_factors.append(sp_factors[ind])
+                for ind in rlist:
+                    intrin_re_list.append(inner_most[1][ind])
+                    visit_re[ind] = True
+                    intrin_re_factors.append(re_extents[ind])
+                    intrin_re_factors.append(re_factors[ind])
+                left_sp_axis_list = []
+                for i, val in enumerate(visit_sp):
+                    if not val:
+                        left_sp_axis_list.append(inner_most[0][i])
+                left_re_axis_list = []
+                for i, val in enumerate(visit_re):
+                    if not val:
+                        left_re_axis_list.append(inner_most[1][i])
+                # reorder
+                # spatial must before reduce
+                to_reorder = []
+                for parts in sub_sp_axis_list[:-1]:
+                    to_reorder.extend(parts)
+                to_reorder.extend(left_sp_axis_list)
+                for parts in sub_re_axis_list[:-1]:
+                    to_reorder.extend(parts)
+                to_reorder.extend(left_re_axis_list)
+                to_reorder.extend(intrin_sp_list)
+                to_reorder.extend(intrin_re_list)
+                s[op].reorder(*to_reorder)
+
+                # tensorize
+                intrinsic = intrin.intrin(*(
+                    intrin_sp_extents + 
+                    intrin_re_extents + 
+                    intrin_sp_factors + 
+                    intrin_re_factors + 
+                    intrin_sp_list + 
+                    intrin_re_list))
+                s[op].tensorize(intrin_sp_list[0], intrinsic)
+
+                # do fence
+                s[C].pragma(to_reorder[0], "epilogue", "do_fence")
+            else:
+                to_reorder = []
+                while num_sp >= 0 and num_re >= 0:
+                    to_reorder.append(sub_sp_axis_list[num_sp] + sub_re_axis_list[num_re])
+                    num_sp -= 1
+                    num_re -= 1
+                while num_sp >= 0:
+                    to_reorder.append(sub_sp_axis_list[num_sp])
+                    num_sp -= 1
+                while num_re >= 0:
+                    to_reorder.append(sub_re_axis_list[num_re])
+                    num_re -= 1
+                to_reorder = reduce(lambda x, y: x + y, reversed(to_reorder), [])
+                s[op].reorder(*to_reorder)
 
         if target == "cuda":
             # if hint == "split_fuse":
@@ -1849,6 +2020,8 @@ class OpScheduler(Scheduler):
             return _cuda_schedule_split_reorder_fuse
         elif target == "llvm":
             return _cpu_schedule_simple
+        elif target == "micro":
+            return _micro_schedule_simple
         else:
             raise RuntimeError("Currently no support for target %s"%target)  
 
@@ -1947,7 +2120,6 @@ class GraphScheduler(Scheduler):
             raise RuntimeError("Currently no support for phase %s" %phase)
         
 
-
 class Result(object):
     def __init__(self, p, q):
         self.p = p
@@ -2042,7 +2214,15 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
         rpc_info = kwargs["rpc_info"]
     ##################################################
     # first generate graph space
-    graph_space = generate_space_inter_op(op_lst, down_graph, force_inline=force_inline, special_space=task.special_space)
+    if task.target == "cuda" or task.target == "llvm":
+        schedule_graph = True
+        graph_space = generate_space_inter_op(
+            op_lst, down_graph, force_inline=force_inline, special_space=task.special_space)
+    elif task.target == "micro":
+        schedule_graph = False
+        graph_space = generate_empty_space_inter_op()
+    else:
+        raise RuntimeError("Currently no support for target %s"%task.target)
 
     graph_space_size = len(graph_space)
     print("graph space size", graph_space_size)
@@ -2051,7 +2231,7 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
     ##################################################
     # intra operations schedule decisionss
     op_space_lst = []
-    if force_inline:
+    if force_inline and "inline" in graph_space.subspaces:
         configs = Config([], {"inline": [graph_space.subspaces["inline"].static_entities[0]]})
     else:
         configs = Config([], None)
@@ -2064,6 +2244,8 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
             space = generate_space_intra_op(op, down_graph, slevel=rslevel, rlevel=rslevel, 
                                             unroll_policy="off", fuse_policy="off",
                                             reorder_policy="off")
+        elif task.target == "micro":
+            space = generate_op_space_with_inrin(op, rpc_info.target)
         else:
             raise RuntimeError("Currently no support for target %s"%task.target)
         total_size *= len(space)
@@ -2085,7 +2267,8 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
         # print("Scheduling", op)
         use_model = False if op_perf_model_path_lst[pos] is None else True
         perf_path = op_perf_model_path_lst[pos]
-        if force_inline and graph_space.subspaces["inline"].able_inline(pos):
+        if force_inline and "inline" in graph_space.subspaces \
+            and graph_space.subspaces["inline"].able_inline(pos):
             op_config = {}
         else:
             op_config = op_scheduler.schedule(
@@ -2112,7 +2295,11 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
         rewrite=rewrite
         )
     use_model = False if graph_perf_model_path is None else True
-    graph_config = graph_scheduler.schedule(configs, method=method, use_model=use_model, perf_path=graph_perf_model_path)
+    if len(graph_space) > 1:
+        graph_config = graph_scheduler.schedule(
+            configs, method=method, use_model=use_model, perf_path=graph_perf_model_path)
+    else:
+        graph_config = {}
     #################################################
     # combine the configs
     configs = Config(configs.op_config_lst, graph_config)

@@ -15,6 +15,13 @@ class RpcInfo(object):
         self.host = host
         self.port = port
         self.target_host = target_host
+        self.target = None
+        self.micro_device_config = None
+        self.aux_sources = None
+        self.aux_options = None
+        self.sever_ip = None
+        self.server_port = None
+        self.device_key = None
 
 
 def to_int(expr):

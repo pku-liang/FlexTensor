@@ -2,6 +2,8 @@ import tvm
 import math
 import numpy as np
 from functools import reduce
+from itertools import permutations, product
+from flextensor.intrinsic import INTRIN_TABLE
 from flextensor.utils import (assert_print, gen_enum, any_factor_split, get_factor_lst, gen_group,
     is_power_of_x)
 
@@ -47,7 +49,8 @@ class Space(object):
     def __init__(self):
         self.subspaces = {}
         self.types = {}
-        self.valid_type_keys = ["fuse", "spatial", "reduce", "reorder", "inline", "unroll", "merge", "special"]
+        self.valid_type_keys = [
+            "fuse", "spatial", "reduce", "reorder", "inline", "unroll", "merge", "special", "intrin"]
         for type_key in self.valid_type_keys:
             self.types[type_key] = []
         self.dim = 0
@@ -365,6 +368,27 @@ class EnumSpace(SubSpace):
         return self.directions[num % self.num_direction]
 
 
+class IntrinSpace(SubSpace):
+    def __init__(self, lst):
+        self.dim = 1
+        self.static_entities = lst
+        self.size = len(self.static_entities)
+        self.num_direction = 2
+        self.directions = [(-1,), (1,)]
+    
+    def next_entity(self, pos, d):
+        # d is tuple
+        if len(d) == 1:
+            pos = (pos + d[0]) % self.size
+            return pos
+        else:
+            raise RuntimeError(
+                "Not support for direction more than one dim: {}".format(d))
+
+    def get_direction(self, num):
+        return self.directions[num % self.num_direction]
+
+
 def generate_inline_space(op_lst, down_graph, force_inline=False):
     inline_op_pos = []
     for i, op in enumerate(op_lst):
@@ -392,6 +416,43 @@ def generate_reorder_space(num_spatial_axis):
 
 def generate_unroll_space(explicit=False):
     return UnrollSpace([0, 1, 512, 1500], explicit=explicit)
+
+
+def generate_intrin_space(op, target):
+    if target not in INTRIN_TABLE:
+        raise RuntimeError("Can't find any pre-defined intrinsic for target %s." % target)
+    assert op.num_outputs == 1, "Only support one output"
+    out_t = op.output(0)
+    
+    candidates = []
+
+    for no, intrin in enumerate(INTRIN_TABLE[target]):
+        intrin_t = intrin.func(*intrin.args)
+        intrin_axis = intrin_t.op.axis
+        if hasattr(intrin_t.op, "reduce_axis"):
+            intrin_reduce_axis = intrin_t.op.reduce_axis
+        else:
+            intrin_reduce_axis = []
+
+        permute_axis = permutations(range(len(op.axis)), r=len(intrin_axis))
+        if hasattr(op, "reduce_axis"):
+            op_reduce_axis = op.reduce_axis
+            permute_reduce_axis = permutations(range(len(op_reduce_axis)), r=len(intrin_reduce_axis))
+        else:
+            op_reduce_axis = []
+            permute_reduce_axis = []
+
+        for sp, re in product(permute_axis, permute_reduce_axis):
+            axis = [op.axis[i].var for i in sp]
+            reduce_axis = [op_reduce_axis[i].var for i in re]
+
+            match = tvm.ir_pass.intrinsic_match(out_t, intrin_t, axis, reduce_axis)
+            if match:
+                candidates.append((target, no, sp, re))
+    
+    if len(candidates) == 0:
+        raise RuntimeError("Can't match any intrinsic for given compute %s." % (str(op.body)))
+    return IntrinSpace(candidates)
 
 
 def generate_space_intra_op(op, down_graph, slevel=4, rlevel=3, groups=3, split_policy="off", 
@@ -432,6 +493,33 @@ def generate_space_intra_op(op, down_graph, slevel=4, rlevel=3, groups=3, split_
     return schedule_space
 
 
+def generate_op_space_with_intrin(op, target, slevel=2, rlevel=2, split_policy="off"):
+    spatial_axis_names = [x.var.name for x in op.axis]
+    spatial_axis_extents = [x.dom.extent.value for x in op.axis]
+    reduced_axis_names = [x.var.name for x in op.reduce_axis]
+    reduced_axis_extents = [x.dom.extent.value for x in op.reduce_axis]
+
+    ##############################################################
+    # generate space: 
+    schedule_space = Space()
+
+    # - split space
+    for i, (name, extent) in enumerate(zip(spatial_axis_names, spatial_axis_extents)):
+        split_space = generate_split_space(extent, slevel, allow_non_divisible=split_policy)
+        schedule_space.add_subspace("split_{}_{}".format(name, i), split_space, "spatial")
+    for i, (name, extent) in enumerate(zip(reduced_axis_names, reduced_axis_extents)):
+        split_space = generate_split_space(extent, rlevel, allow_non_divisible=split_policy)
+        schedule_space.add_subspace("split_{}_{}".format(name, i), split_space, "reduce")
+
+    # - intrin space
+    intrin_space = generate_intrin_space(op, target)
+    schedule_space.add_subspace("intrinsic", intrin_space, "intrin")
+    
+    # - other special spaces can be added   
+
+    return schedule_space
+
+
 def generate_space_inter_op(op_lst, down_graph, force_inline=False, force_merge=False, special_space=None):
 
     ##############################################################
@@ -448,5 +536,14 @@ def generate_space_inter_op(op_lst, down_graph, force_inline=False, force_merge=
     special_space = {} if special_space is None else special_space
     for key, sspace in special_space.items():
         schedule_space.add_subspace(key, sspace, "special")
+
+    return schedule_space
+
+
+def generate_empty_space_inter_op():
+  
+    ##############################################################
+    # generate space:
+    schedule_space = Space()
 
     return schedule_space
