@@ -35,7 +35,6 @@ class Judger(torch.nn.Module):
         return out
 
 def flatten(x):
-    print("x=", x)
     ret = []
     for v in x:
         if isinstance(v, (list, tuple)):
@@ -54,7 +53,6 @@ class Walker(nn.Module):
         self.memory = []    # (pre_state, action, post_state, reward)
         self.mem_size = 0
         entities = [flatten(x) for x in self.subspace.static_entities]
-        print(entities)
         self.inputs_to_judger = torch.FloatTensor(entities)
         self.model_path = global_walker_judger_model_path_prefix + name + ".pkl"
         self.data_path = global_walker_judger_data_path_prefix + name + ".txt"
