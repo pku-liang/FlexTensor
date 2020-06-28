@@ -81,13 +81,13 @@ def build_func(func_name, task_key, configs, op_pos=None, rpc_info=None, rewrite
         target_host = rpc_info.target_host
     else:
         target_host = None
-    print("in build function")
+
     task = TASK_TABLE[task_key]
     try:
         s, bufs = schedule_with_config(task_key, configs, op_pos=op_pos, rewrite=rewrite)
     except Exception as e:
         print(e)
-    print("after schedule with config")
+
     stmt = tvm.lower(s, bufs, simple_mode=True)
     valid = verify_code(stmt, task.target, task.dev_id)
     if not valid:
@@ -98,9 +98,9 @@ def build_func(func_name, task_key, configs, op_pos=None, rpc_info=None, rewrite
             micro_device_config = rpc_info.micro_device_config
             aux_sources = rpc_info.aux_sources
             aux_options = rpc_info.aux_options
-            print("begin build", aux_sources)
+
             func = tvm.build(s, bufs, target=target)
-            print("end build", func)
+
             mod_path = os.path.join(LIB_DIR, func_name + ".obj")
             compile_micro_mod(mod_path,
                     func, micro_device_config,
@@ -141,15 +141,15 @@ def eval_func(func_file, bufs_shape, dtype, target, number=100, dev_id=0, rpc_in
             use_rpc = False
     else:
         use_rpc = True
-    print("use rpc=", use_rpc)
+
     if use_rpc:
         # remote = rpc.connect(host, port)
-        print("begin to connect")
+
         tracker = rpc.connect_tracker(server_ip, server_port)
-        print("get tracker")
+
         remote = tracker.request(device_key, priority=1,
                              session_timeout=10000)
-        print("connected!")
+
         ctx = remote.context(target, dev_id)
     else:
         ctx = tvm.context(target, dev_id)
@@ -165,15 +165,15 @@ def eval_func(func_file, bufs_shape, dtype, target, number=100, dev_id=0, rpc_in
                 post_fix = ".obj"
             else:
                 post_fix = ""
-            print("begin upload")
+
             remote.upload(os.path.join(LIB_DIR, func_file + post_fix))
-            print("after upload")
+
             func = remote.load_module(func_file + ".obj")
         else:
             func = tvm.module.load(os.path.join(LIB_DIR, func_file))
-        print("begin to run")
+
         evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
-        print("run")
+
         time_cost = evaluator(*tvm_arys).mean * 1e3
     except Exception as e:
         print(e)
@@ -612,17 +612,15 @@ class Scheduler(object):
                 build_res_lst.append(res)
 
             # time.sleep(self.timeout)
-            print("############### after build ####################3")    
             eval_res_lst = []
             for i, build_res in enumerate(build_res_lst):
-                print("build result get begins...")
+                # print("build result get begins...")
                 final_res = build_res.get(timeout=self.timeout)
-                print("build resutl get done.")
+                # print("build resutl get done.")
                 func_name = func_name_lst[i]
                 if isinstance(final_res, Exception):
-                    print("check 1")
                     msg = mode + " build fail:"
-                    print(final_res.__class__)
+                    # print(final_res.__class__)
                     if isinstance(final_res, multi.TimeoutError):
                         msg = msg + "Timeout"
                     elif isinstance(final_res, tvm._ffi.base.TVMError):
@@ -636,11 +634,10 @@ class Scheduler(object):
                             break
                     if not found:
                         msg = msg + error_str
-                    print(msg)
+                    # print(msg)
                     eval_res_lst.append(float("inf"))
-                    print("check 2")
+
                 else:
-                    print("check 3")
                     res = parallel_execute(
                         eval_func,
                         self.timeout,
@@ -652,9 +649,7 @@ class Scheduler(object):
                         dev_id=self.task.dev_id,
                         rpc_info=self.rpc_info
                     )
-                    print("check 3.9")
                     eval_res_lst.append(res)
-                    print("check 4")
 
             # time.sleep(self.timeout)
 
@@ -663,12 +658,12 @@ class Scheduler(object):
                 if isinstance(eval_res, float):
                     ret_lst.append(eval_res)
                 else:
-                    print("evluate result getting...")
+                    # print("evluate result getting...")
                     final_res = eval_res.get(timeout=self.timeout)
-                    print("evlaute result get done.")
+                    # print("evlaute result get done.")
                     if isinstance(final_res, Exception):
                         msg = mode + " run fail:"
-                        print(final_res.__class__)
+                        # print(final_res.__class__)
                         if isinstance(final_res, multi.TimeoutError):
                             msg = msg + " Timeout "
                         elif isinstance(final_res, tvm._ffi.base.TVMError):
@@ -682,7 +677,7 @@ class Scheduler(object):
                                 break
                         if not found:
                             msg = msg + error_str
-                        print(msg)
+                        # print(msg)
                         ret_lst.append(float("inf"))
                     else:
                         ret_lst.append(final_res)
@@ -1911,7 +1906,6 @@ class OpScheduler(Scheduler):
 
             sp_factors = []
             re_factors = []
-            print(1) 
             # spatial split
             if "spatial" in config:
                 sub_sp_axis_list = []
@@ -1926,7 +1920,6 @@ class OpScheduler(Scheduler):
             else:
                 sub_sp_axis_list = [[axis] for axis in s[op].op.axis]
                 sp_factors = sp_extents
-            print(2)
             # reduce split
             if "reduce" in config and hasattr(op, "reduce_axis"):
                 sub_re_axis_list = []
@@ -1943,7 +1936,6 @@ class OpScheduler(Scheduler):
                 re_factors = re_extents
             else:
                 sub_re_axis_list = []
-            print(3)
             # match intrinsic
             def rearrange(lst):
                 return list(zip(*lst))
@@ -1958,7 +1950,6 @@ class OpScheduler(Scheduler):
             inner_most = [sub_sp_axis_list[num_sp]]
             if num_re >= 0:
                 inner_most.append(sub_re_axis_list[num_re])
-            print(4)
             # do intrinsic
             if intrin is not None:
                 visit_sp = [False for x in inner_most[0]]
@@ -1972,7 +1963,7 @@ class OpScheduler(Scheduler):
                 intrin_re_extents = []
                 intrin_sp_factors = []
                 intrin_re_factors = []
-                print("lists=", slist, rlist)
+    
                 for ind in slist:
                     intrin_sp_list.append(inner_most[0][ind])
                     visit_sp[ind] = True
@@ -1991,7 +1982,7 @@ class OpScheduler(Scheduler):
                 for i, val in enumerate(visit_re):
                     if not val:
                         left_re_axis_list.append(inner_most[1][i])
-                print(intrin_sp_list, intrin_re_list)
+
                 # reorder
                 # spatial must before reduce
                 to_reorder = []
@@ -2004,8 +1995,7 @@ class OpScheduler(Scheduler):
                 to_reorder.extend(intrin_sp_list)
                 to_reorder.extend(intrin_re_list)
                 s[op].reorder(*to_reorder)
-                print(intrin_sp_extents, intrin_re_extents)
-                print(intrin_sp_factors, intrin_re_factors)
+
                 # tensorize
                 intrinsic = intrin.intrin(*(
                     intrin_sp_extents + 
@@ -2015,7 +2005,7 @@ class OpScheduler(Scheduler):
                     intrin_sp_list + 
                     intrin_re_list))
                 s[op].tensorize(intrin_sp_list[0], intrinsic)
-                print(4.9)
+
                 # do fence
                 s[op].pragma(to_reorder[0], "epilogue", "do_fence")
             else:
@@ -2032,7 +2022,6 @@ class OpScheduler(Scheduler):
                     num_re -= 1
                 to_reorder = reduce(lambda x, y: x + y, reversed(to_reorder), [])
                 s[op].reorder(*to_reorder)
-            print(5)
 
         if target == "cuda":
             # if hint == "split_fuse":
@@ -2374,7 +2363,6 @@ def schedule_with_config_ops(ops, bufs, configs, op_pos=None, target="llvm"):
 
     perform sequential schedule
     """
-    print("in schedule with config ops")
     # sort the ops, so that we can distinguish each op
     op_lst, down_graph = flatten_graph(ops)
     # state of ops
@@ -2387,7 +2375,7 @@ def schedule_with_config_ops(ops, bufs, configs, op_pos=None, target="llvm"):
         op_states[count_op].consumer_lst = list(set(consumer_lst))
 
     op_config_lst = configs.op_config_lst
-    print("21")
+
     if op_pos is not None:
         assert_print(isinstance(op_pos, int), "op_pos should be int")
         assert_print(op_pos < len(op_lst) and op_pos < len(op_config_lst), "op_pos too big")
@@ -2397,34 +2385,29 @@ def schedule_with_config_ops(ops, bufs, configs, op_pos=None, target="llvm"):
         assert_print(len(op_config_lst) <= len(op_lst), "config length exceed op_lst")
         loop_length = len(op_config_lst)
         s = tvm.create_schedule(ops)
-    print(22)
+
     ###################################################
     # perform inter operations schedule first for inline
     graph_config = configs.graph_config
     if graph_config is not None:
         graph_template = GraphScheduler.generate_graph_schedule(graph_config, phase="inline")
         graph_template(s, op_lst, op_states)
-    print(23)
+
     ###################################################
     # perform intra operations schedule    
     for i in range(loop_length):
         # mask inlined ops
         if not op_states[i].inline:
             op = op_lst[i]
-            print(231)
             config = op_config_lst[i]
-            print(232)
             template = OpScheduler.generate_op_schedule(target, config)
-            print(233)
             template(s, op, op_states[i])
-            print("after", i) 
-    print("after op")
+
     ###################################################
     # perform inter operations schedule again for compute at
     if graph_config is not None:
         graph_template = GraphScheduler.generate_graph_schedule(graph_config, phase="at")
         graph_template(s, op_lst, op_states)
-    print("after schedule op")
     return s, bufs
 
 

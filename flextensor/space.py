@@ -447,12 +447,7 @@ def generate_intrin_space(op, target):
             axis = [op.axis[i].var for i in sp]
             reduce_axis = [op_reduce_axis[i].var for i in re]
             
-            print(axis)
-            print(reduce_axis)
-            print("target:", out_t.op.body[0])
-            print("intrin:", intrin_t.op.body[0])
             match = tvm.ir_pass.intrinsic_match(out_t, intrin_t, axis, reduce_axis)
-            print(match)
             if match:
                 candidates.append((key, no, sp, re))
     

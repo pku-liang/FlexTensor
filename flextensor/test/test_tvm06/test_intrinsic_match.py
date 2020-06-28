@@ -43,9 +43,30 @@ def test1():
 
   print("match = ", tvm.ir_pass.intrinsic_match(Out, intrin_t, [q.var, k.var], [rc.var]))
 
+
+def test2():
+  A = tvm.placeholder([H, C], dtype=dtype)
+  Weight = tvm.placeholder([C, W], dtype=dtype)
+  rc = tvm.reduce_axis([0, C], name="rc")
+  Out = tvm.compute([H, W],
+    lambda i, j: tvm.sum(A[i, rc] * Weight[rc, j], axis=[rc]))
+
+  i, j = Out.op.axis
+
+  intrin_t = gemm_intrinsic_compute()
+
+  print("Target compute:")
+  print(Out.op.body[0])
+
+  print("Intrin compute:")
+  print(intrin_t.op.body[0])
+
+  print("match = ", tvm.ir_pass.intrinsic_match(Out, intrin_t, [i.var, j.var], [rc.var]))
+
   
 
 
 
 if __name__ == "__main__":
   test1()
+  test2()
