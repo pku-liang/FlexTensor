@@ -22,7 +22,7 @@ try:
 except ImportError:
     print("[Warning] Import model module failed, please check if PyTorch is installed.")
 from flextensor.space import generate_space_inter_op, generate_space_intra_op, \
-                             generate_empty_space_inter_op, generate_intrin_space
+                             generate_empty_space_inter_op, generate_op_space_with_intrin
 from flextensor.utils import assert_print, to_int, to_tuple, Config, RpcInfo
 try:
     import psutil
