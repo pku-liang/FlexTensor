@@ -1634,7 +1634,6 @@ class OpScheduler(Scheduler):
             # if op.num_outputs > 1:
             #     raise RuntimeWarning("Too many outputs in one operation!")
             write_cache = s.cache_write(op.output(0), "global")
-
             # spatial split
             spatial_axes = s[op].op.axis
             splited_spatial_axes = []
@@ -1692,15 +1691,16 @@ class OpScheduler(Scheduler):
             kernel_scope = fused_spatial_axes[0]
             if len(spatial_fuse_lsts) > 1:
                 count = 0
-                while config["spatial"][count][1] == 1:
+                while count < len(config["spatial"]) and config["spatial"][count][1] == 1:
                     count += 1
+                if count == len(config["spatial"]):
+                    count -= 1
                 next_pos_for_comptue_at = spatial_fuse_lsts[1][count]
             else:
                 next_pos_for_comptue_at = kernel_scope 
             
             # always parallel here
             s[op].parallel(kernel_scope)
-
             # vectorize
             if len(spatial_fuse_lsts) == 2:
                 count = len(spatial_fuse_lsts[1]) - 1
@@ -1718,7 +1718,6 @@ class OpScheduler(Scheduler):
                         s[op].vectorize(spatial_fuse_lsts[-1][count])
                         break
                     count -= 1
-
             # always compute at here
             # print("compute at", next_pos_for_comptue_at)
             s[write_cache].compute_at(s[op], next_pos_for_comptue_at)
@@ -1755,7 +1754,6 @@ class OpScheduler(Scheduler):
                 for axis in spatial_axes:
                     splited_spatial_axes.append([axis])
             assert_print(len(splited_spatial_axes) > 0, "empty spatial axes")     # must be non-empty
-
             # reduce_split for write cache
             reduced_axes = s[write_cache].op.reduce_axis
             num_reduce_axes = len(reduced_axes)
@@ -1787,11 +1785,9 @@ class OpScheduler(Scheduler):
             else:
                 for axis in reduced_axes:
                     splited_reduced_axes.append([axis])
-
             # for easy align
-            reduce_split_num_parts = len(splited_reduced_axes[0])
-            assert reduce_split_num_parts == spatial_split_num_parts
-
+            # reduce_split_num_parts = len(splited_reduced_axes[0])
+            # assert reduce_split_num_parts == spatial_split_num_parts
             # reorder hybrid for spatial and reduce
             hybrid_axes = splited_spatial_axes + splited_reduced_axes
             hybrid_fuse_lsts = []
@@ -1809,7 +1805,6 @@ class OpScheduler(Scheduler):
             hybrid_reorder_lst_without_none = list(filter(lambda x: x is not None, hybrid_reorder_lst))
             # print("reorder cache write", hybrid_reorder_lst_without_none)
             s[write_cache].reorder(*hybrid_reorder_lst_without_none)
-
             # fuse without reduce axes
             # assert len(hybrid_fuse_lsts) > 0
             # s[write_cache].fuse(*hybrid_fuse_lsts[0][:-num_reduce_axes])
@@ -1817,7 +1812,7 @@ class OpScheduler(Scheduler):
             # unroll and vectorize without reduce axes
             if len(hybrid_fuse_lsts) > 1:
                 rcount = num_spatial_axes - 1
-                while config["spatial"][rcount][-1] == 1:
+                while rcount >= 0 and config["spatial"][rcount][-1] == 1:
                     rcount -= 1
                 if rcount >= 0:
                     # print("vectorize cache write", hybrid_fuse_lsts[-1][rcount])
@@ -1835,7 +1830,6 @@ class OpScheduler(Scheduler):
                 #     if config["reduce"][count][-2] > 1:
                 #         print("unroll cache write", hybrid_fuse_lsts[-2][count + num_spatial_axes])
                 #         s[write_cache].unroll(hybrid_fuse_lsts[-2][count + num_spatial_axes])
-                
 
         if target == "cuda":
             # if hint == "split_fuse":
