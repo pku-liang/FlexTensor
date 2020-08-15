@@ -2,6 +2,8 @@
 
 ## Usage
 
+(the following example is from `flextensor/example/conv2d_micro.py`)
+
 ### 1. Write compute in Python
 
 The compute accepts some arguments (usually the input shape), and return a list of output's operators and a list of buffers
