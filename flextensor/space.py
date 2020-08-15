@@ -3,9 +3,9 @@ import math
 import numpy as np
 from functools import reduce
 from itertools import permutations, product
-from flextensor.intrinsic import INTRIN_TABLE, target_embedding
+from flextensor.intrinsic import INTRIN_TABLE, target_embedding, DIM
 from flextensor.utils import (assert_print, gen_enum, any_factor_split, get_factor_lst, gen_group,
-    is_power_of_x)
+                              is_power_of_x)
 
 
 def able_inline(op, down_graph):
@@ -127,7 +127,7 @@ class SplitSpace(SubSpace):
                 if i != j:
                     self.directions.append((i, j))
         self.type_key = "split"
-    
+
     def next_entity(self, pos, d):
         # d is tuple
         if len(d) == 1:
@@ -170,6 +170,34 @@ class SplitSpace(SubSpace):
         return self.directions[num % self.num_direction]
 
 
+class IntrinSplitSpace(SubSpace):
+    def gen_pow2_factors(self, dim):
+        dim = max(dim, DIM)
+        low, high = int(math.log2(DIM)), math.ceil(math.log2(dim)) + 1
+        res = map(lambda i: 2 ** i, range(low, high))
+        return [[int(math.ceil(dim / x)), x] for x in res]
+
+    def __init__(self, length):
+        super(IntrinSplitSpace, self).__init__()
+        self.dim = 2
+        self.static_entities = self.gen_pow2_factors(length)
+        self.num_direction = 2
+        self.directions = [(1, 0), (0, 1)]
+        self.size = len(self.static_entities)
+        self.type_key = "split"
+
+    def next_entity(self, pos, d):
+        if len(d) == 1:
+            next_pos = (pos + d[0]) % self.size
+            return next_pos
+        else:
+            next_pos = max(0, min(self.size - 1, pos + d[0] - d[1]))
+            return next_pos
+
+    def get_direction(self, num):
+        return self.directions[num % self.num_direction]
+
+
 class FuseSpace(SubSpace):
     def __init__(self, dim, elements):
         self.dim = dim
@@ -178,7 +206,7 @@ class FuseSpace(SubSpace):
         self.num_direction = 2
         self.directions = [(-1,), (1,)]
         self.type_key = "fuse"
-    
+
     def next_entity(self, pos, d):
         # d is tuple
         if len(d) == 1:
@@ -191,7 +219,7 @@ class FuseSpace(SubSpace):
     def get_direction(self, num):
         return self.directions[num % self.num_direction]
 
-    
+
 class ReorderSpace(SubSpace):
     def __init__(self, num_spatial_axis):
         self.dim = 1
@@ -200,7 +228,7 @@ class ReorderSpace(SubSpace):
         self.num_direction = 2
         self.directions = [(-1,), (1,)]
         self.type_key = "reorder"
-    
+
     def next_entity(self, pos, d):
         # d is tuple
         if len(d) == 1:
@@ -375,7 +403,7 @@ class IntrinSpace(SubSpace):
         self.size = len(self.static_entities)
         self.num_direction = 2
         self.directions = [(-1,), (1,)]
-    
+
     def next_entity(self, pos, d):
         # d is tuple
         if len(d) == 1:
@@ -424,7 +452,7 @@ def generate_intrin_space(op, target):
         raise RuntimeError("Can't find any pre-defined intrinsic for target %s." % target)
     assert op.num_outputs == 1, "Only support one output"
     out_t = op.output(0)
-    
+
     candidates = []
     # key = target_embedding[target]
     for no, intrin in enumerate(INTRIN_TABLE[key]):
@@ -446,17 +474,17 @@ def generate_intrin_space(op, target):
         for sp, re in product(permute_axis, permute_reduce_axis):
             axis = [op.axis[i].var for i in sp]
             reduce_axis = [op_reduce_axis[i].var for i in re]
-            
+
             match = tvm.ir_pass.intrinsic_match(out_t, intrin_t, axis, reduce_axis)
             if match:
                 candidates.append((key, no, sp, re))
-    
+
     if len(candidates) == 0:
         raise RuntimeError("Can't match any intrinsic for given compute %s." % (str(op.body)))
     return IntrinSpace(candidates)
 
 
-def generate_space_intra_op(op, down_graph, slevel=4, rlevel=3, groups=3, split_policy="off", 
+def generate_space_intra_op(op, down_graph, slevel=4, rlevel=3, groups=3, split_policy="off",
                             unroll_policy="off", fuse_policy="fuse_spatial", reorder_policy="last"):
     spatial_axis_names = [x.var.name for x in op.axis]
     spatial_axis_extents = [x.dom.extent.value for x in op.axis]
@@ -488,7 +516,7 @@ def generate_space_intra_op(op, down_graph, slevel=4, rlevel=3, groups=3, split_
     # -unroll space
     unroll_space = generate_unroll_space(explicit=(unroll_policy == "explicit"))
     schedule_space.add_subspace("unroll", unroll_space, "unroll")
-    
+
     # - other special spaces can be added   
 
     return schedule_space
@@ -504,25 +532,41 @@ def generate_op_space_with_intrin(op, target, slevel=2, rlevel=2, split_policy="
     # generate space: 
     schedule_space = Space()
 
-    # - split space
-    for i, (name, extent) in enumerate(zip(spatial_axis_names, spatial_axis_extents)):
-        split_space = generate_split_space(extent, slevel, allow_non_divisible=split_policy)
-        schedule_space.add_subspace("split_{}_{}".format(name, i), split_space, "spatial")
-    for i, (name, extent) in enumerate(zip(reduced_axis_names, reduced_axis_extents)):
-        split_space = generate_split_space(extent, rlevel, allow_non_divisible=split_policy)
-        schedule_space.add_subspace("split_{}_{}".format(name, i), split_space, "reduce")
-
     # - intrin space
     intrin_space = generate_intrin_space(op, target)
     schedule_space.add_subspace("intrinsic", intrin_space, "intrin")
-    
+
+    sp_intrin_idx_lst = reduce(lambda a, b: a + b, [cfg[2] for cfg in intrin_space.static_entities])
+    re_intrin_idx_lst = reduce(lambda a, b: a + b, [cfg[3] for cfg in intrin_space.static_entities])
+
+    # - split space
+    for i, (name, extent) in enumerate(zip(spatial_axis_names, spatial_axis_extents)):
+        # split_space = generate_split_space(extent, slevel if i in re_intrin_idx_lst else 1,
+        #                                    allow_non_divisible=split_policy)
+        if i in sp_intrin_idx_lst:
+            split_space = IntrinSplitSpace(extent)
+        else:
+            split_space = generate_split_space(extent, 1, allow_non_divisible=split_policy)
+        schedule_space.add_subspace("split_{}_{}".format(name, i), split_space, "spatial")
+    for i, (name, extent) in enumerate(zip(reduced_axis_names, reduced_axis_extents)):
+        # split_space = generate_split_space(extent, rlevel if i in re_intrin_idx_lst else 1,
+        #                                    allow_non_divisible=split_policy)
+        if i in re_intrin_idx_lst:
+            split_space = IntrinSplitSpace(extent)
+        else:
+            split_space = generate_split_space(extent, 1, allow_non_divisible=split_policy)
+        schedule_space.add_subspace("split_{}_{}".format(name, i), split_space, "reduce")
+
+    # - reorder space
+    reorder_space = generate_reorder_space(len(op.axis) + len(op.reduce_axis))
+    schedule_space.add_subspace("reorder", reorder_space, "reorder")
+
     # - other special spaces can be added   
 
     return schedule_space
 
 
 def generate_space_inter_op(op_lst, down_graph, force_inline=False, force_merge=False, special_space=None):
-
     ##############################################################
     # generate space:
     schedule_space = Space()
@@ -532,7 +576,7 @@ def generate_space_inter_op(op_lst, down_graph, force_inline=False, force_merge=
     # - merge space
     # merge_space = generate_merge_space(op_lst, down_graph, force_merge=force_merge)
     # schedule_space.add_subspace("merge", merge_space, "merge")
-    
+
     # - other special spaces can be added   
     special_space = {} if special_space is None else special_space
     for key, sspace in special_space.items():
@@ -542,7 +586,6 @@ def generate_space_inter_op(op_lst, down_graph, force_inline=False, force_merge=
 
 
 def generate_empty_space_inter_op():
-  
     ##############################################################
     # generate space:
     schedule_space = Space()

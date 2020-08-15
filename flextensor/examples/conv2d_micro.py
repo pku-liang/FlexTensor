@@ -1,13 +1,8 @@
 import tvm
-
-INTRIN_TABLE = {}
-
-target_embedding = {"c -device=micro_dev": 0}
-
-# alternative config
-# DIM = 8
-# sp_kb = 128
-# acc_kb = 32
+from flextensor.micro_scheduler import gen_micro_schedule
+from flextensor.intrinsic import Intrinsic
+from flextensor.task import Task
+from flextensor.ppa_model import measure_latency
 
 # default config
 DIM = 16
@@ -15,28 +10,24 @@ sp_kb = 256
 acc_kb = 64
 
 
-class Intrinsic(object):
-    def __init__(self, category, name, func, args, intrin, target):
-        self.key = "{}_{}_{}".format(category, name, target)
-        self.func = func
-        self.args = args
-        self.intrin = intrin
-        self.target = target
-        self.category = category
+def conv2d_micro(N, C, H, W, K, Hk, Wk, S=1, P=0, D=1, dtype="int8"):
+    H += 2 * P
+    W += 2 * P
+    Ho = (H - (Hk - 1) * D - 1) // S + 1
+    Wo = (W - (Wk - 1) * D - 1) // S + 1
+    Input = tvm.placeholder((N, H, W, C), name="Input", dtype=dtype)
+    Filter = tvm.placeholder((Hk, Wk, C, K), name="Filter", dtype=dtype)
+    rh = tvm.reduce_axis((0, Hk), name="rh")
+    rw = tvm.reduce_axis((0, Wk), name="rw")
+    rc = tvm.reduce_axis((0, C), name="rc")
+    Output = tvm.compute(
+        (N, Ho, Wo, K),
+        lambda n, h, w, k: tvm.sum(
+            Input[n, h + rh, w + rw, rc] * Filter[rh, rw, rc, k],
+            axis=[rh, rw, rc]
+        ), name="Output")
 
-
-def register_intrin(intrin, override=False):
-    if intrin.key in INTRIN_TABLE and not override:
-        print("[Warning]: Same intrinsic occurs again %s" % intrin.key)
-    key = target_embedding[intrin.target]
-    if key not in INTRIN_TABLE:
-        INTRIN_TABLE[key] = []
-    INTRIN_TABLE[key].append(intrin)
-
-
-def register(func, args, category, name, intrin, target, override=False):
-    intrinsic = Intrinsic(category, name, func, args, intrin, target)
-    register_intrin(intrinsic, override=override)
+    return [Output.op], [Input, Filter, Output]
 
 
 def intrinsic_gemm_int8_compute(i, j, k):
@@ -44,7 +35,7 @@ def intrinsic_gemm_int8_compute(i, j, k):
     b = tvm.placeholder((k, j), name='b', dtype="int8")
     kk = tvm.reduce_axis((0, k), name='k')
     c = tvm.compute((i, j), lambda ii, jj:
-    tvm.sum(a[ii, kk] * b[kk, jj], axis=kk), name='c')
+                    tvm.sum(a[ii, kk] * b[kk, jj], axis=kk), name='c')
 
     return c, [a, b, c]
 
@@ -178,12 +169,14 @@ def generate_intrinsic_gemm_int8_dim16(N, M, K, fN, fM, fK, axisN, axisM, axisK)
     return gemm
 
 
-register(
-    intrinsic_gemm_int8_compute,
-    # (32, 32, 32),
-    (0, 0, 0),
-    "gemmini",
-    "gemm_size16",
-    generate_intrinsic_gemm_int8_dim16,
-    "c -device=micro_dev"
-)
+# build a task
+shape = (1, 64, 56, 56, 256, 1, 1, 1, 0, 1)
+task = Task("conv2d", "conv2d", conv2d_micro, shape, "micro", 0)
+# build a intrinsic
+intrin = Intrinsic("gemmini", "gemmini_size16", intrinsic_gemm_int8_compute, (0, 0, 0),
+                   generate_intrinsic_gemm_int8_dim16, "c -device=micro_dev")
+# generate schedule
+info = gen_micro_schedule(task, intrin)
+
+print(info)
+print(measure_latency(info))

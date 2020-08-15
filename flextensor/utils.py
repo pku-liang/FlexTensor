@@ -4,7 +4,7 @@ import tvm
 import numpy as np
 import math
 from collections import namedtuple
-
+from functools import reduce
 
 class Config(namedtuple("Config", ("op_config_lst", "graph_config"))):
     pass
@@ -323,6 +323,72 @@ def test_any_factor_split():
     ret = any_factor_split(448, 4, 'power2')
     print(ret)
     print("length=", len(ret))
+
+
+def get_iter_info(s: tvm.schedule.Schedule):
+    # get output buffer and its iter_vars
+    out = next(stg for stg in s.stages if stg.is_output)
+    ivs = list(out.leaf_iter_vars)
+
+    # get the split relations and iter_vars' length
+    rels = list(out.relations)
+    iv2org, iv2bro, iv2len = {}, {}, {}
+    for sp in rels:
+        if type(sp) == tvm.schedule.Split:
+            iv2org[sp.inner], iv2org[sp.outer] = sp.parent, sp.parent
+            iv2bro[sp.inner], iv2bro[sp.outer] = sp.outer, sp.inner
+            ext = int(sp.parent.dom.extent)
+            iv2len[sp.inner] = int(
+                sp.factor) if sp.factor is not None else int(math.ceil(ext / int(sp.nparts)))
+            iv2len[sp.outer] = int(
+                sp.nparts) if sp.nparts is not None else int(math.ceil(ext / int(sp.factor)))
+
+    # get the inner iter_vars mapping to intrinsic and its surrounding outer iter_vars
+    attrs = out.iter_var_attrs
+    intrin_idx = next(i for i, iv in enumerate(ivs)
+                      if iv in attrs and repr(attrs[iv]) == "Tensorized")
+    inner_ivs = ivs[intrin_idx:]
+    outer_ivs = ivs[:intrin_idx]
+
+    # collect infomations, using dict and list for serializability　(dumping to json for example)
+    info = {
+        "outer": [{
+            "iter_var": iv,
+            "origin": iv2org[iv] if iv in iv2org else iv,
+            "brother": iv2bro[iv] if iv in iv2bro else None,
+            "length": iv2len[iv] if iv in iv2len else int(iv.dom.extent),
+        } for iv in outer_ivs],
+        "inner": [{
+            "iter_var": iv,
+            "origin": iv2org[iv] if iv in iv2org else iv,
+            "brother": iv2bro[iv] if iv in iv2bro else None,
+            "length": iv2len[iv] if iv in iv2len else int(iv.dom.extent),
+        } for iv in inner_ivs],
+    }
+
+    # change IterVar to str to be serializable
+    for ivs in info.values():
+        for iv in ivs:
+            iv['iter_var'] = iv['iter_var'].var.name
+            iv['origin'] = iv['origin'].var.name
+            iv['brother'] = iv['brother'].var.name if iv['brother'] is not None else None
+
+    return info
+
+
+def shift(l1, l2, step):
+    if step < len(l1):
+        part1 = l1[:-step] if step > 0 else l1
+        part2 = list(reduce(lambda a, b: a + b,
+                            zip(l2[:step], l1[-step:]), ()))
+        part3 = l2[step:]
+    else:
+        step = step + 1 - len(l1)
+        part1 = l2[:step]
+        part2 = list(reduce(lambda a, b: a + b,
+                            zip(l1[:len(l2)-step], l2[step:]), ()))
+        part3 = l1[len(l2)-step:]
+    return part1 + part2 + part3
 
 
 if __name__ == "__main__":
