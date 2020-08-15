@@ -176,7 +176,7 @@ task = Task("conv2d", "conv2d", conv2d_micro, shape, "micro", 0)
 intrin = Intrinsic("gemmini", "gemmini_size16", intrinsic_gemm_int8_compute, (0, 0, 0),
                    generate_intrinsic_gemm_int8_dim16, "c -device=micro_dev")
 # generate schedule
-info = gen_micro_schedule(task, intrin)
+info = gen_micro_schedule(task, intrin, measure_latency)
 
 print(info)
 print(measure_latency(info))
