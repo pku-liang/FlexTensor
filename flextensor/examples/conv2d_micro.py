@@ -4,11 +4,6 @@ from flextensor.intrinsic import Intrinsic
 from flextensor.task import Task
 from flextensor.ppa_model import measure_latency
 
-# default config
-DIM = 16
-sp_kb = 256
-acc_kb = 64
-
 
 def conv2d_micro(N, C, H, W, K, Hk, Wk, S=1, P=0, D=1, dtype="int8"):
     H += 2 * P
@@ -38,6 +33,12 @@ def intrinsic_gemm_int8_compute(i, j, k):
                     tvm.sum(a[ii, kk] * b[kk, jj], axis=kk), name='c')
 
     return c, [a, b, c]
+
+
+# default config
+DIM = 16
+sp_kb = 256
+acc_kb = 64
 
 
 def intrinsic_gemm_int8(i, j, k, il, jl, kl, ic, jc, kc, dim):
