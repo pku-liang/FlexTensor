@@ -2,7 +2,7 @@
 
 ## Usage
 
-(the following example is from `flextensor/example/conv2d_micro.py`)
+(the following example is from `flextensor/examples/conv2d_micro.py`)
 
 ### 1. Write compute in Python
 
