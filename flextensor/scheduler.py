@@ -5,6 +5,7 @@ import shutil
 import math
 import tvm
 import numpy as np
+
 try:
     import torch.multiprocessing as _multi
 except ImportError:
@@ -15,12 +16,14 @@ from collections import deque
 from queue import Empty
 from functools import reduce
 from flextensor.task import TASK_TABLE
+
 try:
     from flextensor.model import WalkerGroup
 except ImportError:
     print("[Warning] Import model module failed, please check if PyTorch is installed.")
 from flextensor.space import generate_space_inter_op, generate_space_intra_op
 from flextensor.utils import assert_print, to_tuple, Config, RpcInfo
+
 try:
     import psutil
 except ImportError:
@@ -28,7 +31,7 @@ except ImportError:
 
 
 LIB_DIR = "lib"
-LOCAL_RPC = False
+# LOCAL_RPC = True
 
 
 def flatten_graph(ops):
@@ -52,9 +55,10 @@ def flatten_graph(ops):
             down_graph[t].append(cur)
     return list(reversed(bfs_order)), down_graph
 
+
 def verify_code(stmt, target, dev_id):
     if target == "cuda":
-        ctx = tvm.nd.context(target, dev_id)     # just use device 0
+        ctx = tvm.nd.context(target, dev_id)  # just use device 0
         if not ctx.exist:
             # print("Fail to get device %s devid=%d"%(target, dev_id))
             return False
@@ -68,7 +72,7 @@ def verify_code(stmt, target, dev_id):
         }
         valid = tvm.tir.ir_pass.VerifyGPUCode(stmt, check_gpu)
         return valid
-    else: 
+    else:
         # no barrier for other targets
         return True
 
@@ -76,49 +80,49 @@ def verify_code(stmt, target, dev_id):
 def build_func(func_name, task_key, configs, op_pos=None, rpc_info=None, rewrite=False):
     if rpc_info is not None and rpc_info.target_host is not None:
         target_host = rpc_info.target_host
+        fcompile = rpc_info.fcompile
     else:
-        target_host = None
+        target_host, fcompile = None, None
     task = TASK_TABLE[task_key]
     s, bufs = schedule_with_config(task_key, configs, op_pos=op_pos, rewrite=rewrite)
     stmt = tvm.lower(s, bufs, simple_mode=True)
     valid = verify_code(stmt, task.target, task.dev_id)
     if not valid:
-        raise RuntimeError("Invalid %s(%d) kernel"%(task.target, task.dev_id))
-    if target_host is not None:
-        func = tvm.build(s, bufs, target=task.target, target_host=target_host)
-    else:
-        func = tvm.build(s, bufs, target=task.target)
-    func.export_library(os.path.join(LIB_DIR, func_name))
+        raise RuntimeError("Invalid %s(%d) kernel" % (task.target, task.dev_id))
+    func = tvm.build(s, bufs, target=task.target, target_host=target_host)
+    func.export_library(os.path.join(LIB_DIR, func_name), fcompile)
     result = ([to_tuple(x.shape) for x in bufs], [buf.dtype for buf in bufs])
     return result
 
 
-def eval_func(func_file, bufs_shape, dtype, target, number=100, dev_id=0, rpc_info=None):
+def eval_func(func_file, bufs_shape, dtype, target, number=1, dev_id=0, rpc_info=None):
     if rpc_info is not None:
         host = rpc_info.host
         port = rpc_info.port
+        dev_key = rpc_info.device_key
+        use_rpc = rpc_info.use_rpc
     else:
-        # local
-        host = "0.0.0.0"
-        port = 9090     # default port
-    if host == "0.0.0.0":
-        if LOCAL_RPC:
-            use_rpc = True
-        else:
-            use_rpc = False
-    else:
-        use_rpc = True
+        host, port, dev_key, use_rpc = (None for _ in range(4))
+
     if use_rpc:
-        remote = rpc.connect(host, port)
+        if use_rpc == "tracker":
+            tracker = rpc.connect_tracker(host, port)
+            remote = tracker.request(dev_key, session_timeout=10)
+        else:
+            assert use_rpc == "server"
+            remote = rpc.connect(host, port)
         ctx = remote.context(target, dev_id)
     else:
+        remote = None
         ctx = tvm.context(target, dev_id)
+
     tvm_arys = []
     for i, shape in enumerate(bufs_shape):
         shape = to_tuple(shape)
         tmp = np.random.uniform(0, 1, size=shape).astype(dtype[i])
         tmp = tvm.nd.array(tmp, ctx)
         tvm_arys.append(tmp)
+
     try:
         if use_rpc:
             remote.upload(os.path.join(LIB_DIR, func_file))
@@ -130,6 +134,7 @@ def eval_func(func_file, bufs_shape, dtype, target, number=100, dev_id=0, rpc_in
     finally:
         while len(tvm_arys) > 0:
             del tvm_arys[-1]
+
     return time_cost
 
 
@@ -158,7 +163,7 @@ def exec_func(func, queue, args, kwargs):
 def parallel_execute(func, timeout, *args, **kwargs):
     q = multi.Queue()
     p = multi.Process(
-        target=call_with_timeout, 
+        target=call_with_timeout,
         args=(func, q, timeout, args, kwargs))
     p.start()
     return Result(p, q)
@@ -195,14 +200,15 @@ def find_idle_device(target):
     elif target == "cuda":
         return find_idle_gpu()
     else:
-        raise RuntimeError("Currently no support for target %s"%target)
+        raise RuntimeError("Currently no support for target %s" % target)
 
 
 class Scheduler(object):
-    def __init__(self, name, task_key, space, parallel=2, timeout=4.0, trial=100, number=10, early_stop=30, rpc_info=None, rewrite=False):
+    def __init__(self, name, task_key, space, parallel=2, timeout=4.0, trial=100, number=1, early_stop=30,
+                 rpc_info=None, rewrite=False):
         self.task_key = task_key
         self.space = space
-        self.parallel = max(parallel, 1)    # at least 1
+        self.parallel = max(parallel, 1)  # at least 1
         self.timeout = timeout
         self.trial = trial
         self.number = number
@@ -224,15 +230,15 @@ class Scheduler(object):
         while not warm_up_enough:
             for ep in range(warm_up_epoches):
                 warm_up_ret = self.walker_group.forward(warm_up_trials, policy="random")
-                warm_up_configs = [{} for i in range(warm_up_trials)]   # empty configs
-                warm_up_indices = [{} for i in range(warm_up_trials)]   # the indices
+                warm_up_configs = [{} for i in range(warm_up_trials)]  # empty configs
+                warm_up_indices = [{} for i in range(warm_up_trials)]  # the indices
                 for count in range(warm_up_trials):
                     config = warm_up_configs[count]
                     for type_key in type_keys:
                         config[type_key] = []
                         for name in self.space.types[type_key]:
                             entity = warm_up_ret[name][0][count]
-                            warm_up_indices[count][name] =  warm_up_ret[name][1][count]
+                            warm_up_indices[count][name] = warm_up_ret[name][1][count]
                             config[type_key].append(entity)
                     # hack here
                     # if self.op_pos == 1:
@@ -256,11 +262,11 @@ class Scheduler(object):
                 print("warm up [%.6f] %s" % (time.time(), string))
                 for count in range(warm_up_trials):
                     if warm_up_results[count] < float("inf"):
-                        self.walker_group.record(warm_up_indices[count], warm_up_results[count])                    
-            # if not found valid config
+                        self.walker_group.record(warm_up_indices[count], warm_up_results[count])
+                        # if not found valid config
             if not self.walker_group.top1():
                 print("Warning: No valid schedule found in warm up process, please use more trials")
-                print("Now automatically use more trials, increase %d" % warm_up_trials) 
+                print("Now automatically use more trials, increase %d" % warm_up_trials)
                 warm_up_epoches = 1
                 count_repeat += 1
                 self.timeout = min(2 * self.timeout, 40)
@@ -290,10 +296,10 @@ class Scheduler(object):
         warm_up_epoches = self.warm_up_number
         warm_up_trials = self.warm_up_number
         self._warm_up(warm_up_epoches, warm_up_trials, configs, type_keys, use_model=use_model)
-        
+
         # tune
-        minimal = [{}, float("inf")]    # the minimal point found before
-        retired_indices = []            # list of local minimals
+        minimal = [{}, float("inf")]  # the minimal point found before
+        retired_indices = []  # list of local minimals
 
         part = math.ceil(self.trial / 20)
         value_early_stop = self.walker_group.top1_value()
@@ -333,12 +339,12 @@ class Scheduler(object):
             is_local_minimal = True
             for indices, action, reward, result in zip(next_indices_lst, action_lst, rewards, results):
                 self.walker_group.add_data(
-                                        action[0],      # name
-                                        from_indices,   # pre_state
-                                        action[1],      # action
-                                        indices,        # post_state 
-                                        reward          # reward
-                                        )
+                    action[0],  # name
+                    from_indices,  # pre_state
+                    action[1],  # action
+                    indices,  # post_state
+                    reward  # reward
+                )
                 self.walker_group.record(indices, result, random_reject=True)
                 if result < self.walker_group.top1_value():
                     is_local_minimal = False
@@ -372,8 +378,8 @@ class Scheduler(object):
                 early_stop_count = 0
             if early_stop_count >= self.early_stop:
                 print("Early stop with value %f repeats %d times" % (value_early_stop, early_stop_count))
-                break 
-            # train and re-evaluate
+                break
+                # train and re-evaluate
             if (trial + 1) % part == 0:
                 if not use_model:
                     # re-evaluate
@@ -391,7 +397,7 @@ class Scheduler(object):
                     if self.task.target == "cuda":
                         self.parallel = 1
                     else:
-                        self.parallel = 1 # min(self.parallel, os.cpu_count())
+                        self.parallel = 1  # min(self.parallel, os.cpu_count())
                     results = self.parallel_evaluate(configs, next_configs, number=self.number)
                     # recover parallel number
                     self.parallel = old_parallel
@@ -416,7 +422,7 @@ class Scheduler(object):
         if self.walker_group.top1_value() < minimal[1]:
             best = self.walker_group.top1()
         else:
-            best = minimal[0]         
+            best = minimal[0]
         return self.walker_group.to_config(best)
 
     def _q_schedule(self, configs, type_keys, use_model=False):
@@ -450,12 +456,12 @@ class Scheduler(object):
             for indices, action, (from_indices, from_value), result in zip(next_points, action_lst, from_lst, results):
                 reward = np.tanh(max(from_value - result, 0.0))
                 self.walker_group.add_data(
-                                        action[0],      # name
-                                        from_indices,   # pre_state
-                                        action[1],      # action
-                                        indices,        # post_state 
-                                        reward          # reward
-                                        )
+                    action[0],  # name
+                    from_indices,  # pre_state
+                    action[1],  # action
+                    indices,  # post_state
+                    reward  # reward
+                )
                 self.walker_group.record(indices, result, random_reject=True)
             # update best
             if self.walker_group.top1_value() < best_value:
@@ -470,14 +476,14 @@ class Scheduler(object):
                 early_stop_count = 0
             if early_stop_count >= self.early_stop:
                 print("Early stop with value %f repeats %d times" % (value_early_stop, early_stop_count))
-                break 
-            # empty, stop
+                break
+                # empty, stop
             if not self.walker_group.has_more():
                 print("No more points, end of scheduling")
                 break
             # reload next points
             retired_indices.extend(cur_lst)
-            cur_lst = self.walker_group.topk(self.parallel, modify=True, with_value=True)    
+            cur_lst = self.walker_group.topk(self.parallel, modify=True, with_value=True)
             if (trial + 1) % part == 0:
                 self.walker_group.train_walkers()
                 if not use_model:
@@ -512,7 +518,7 @@ class Scheduler(object):
         # self.walker_group.dump_data()
         self.walker_group.clear_data()
         return self.walker_group.to_config(best)
-    
+
     def parallel_evaluate(self, old_configs, new_configs, number=1):
         raise NotImplementedError()
 
@@ -535,7 +541,7 @@ class Scheduler(object):
             build_res_lst = []
             func_name_lst = []
             for config in part_configs:
-                func_name = "flextensor_built_function_{}_{}.tar".format(time.time(), np.random.randint(1000, 10000))
+                func_name = "flextensor_built_function_{}_{}.so".format(time.time(), np.random.randint(1000, 10000))
                 func_name_lst.append(func_name)
                 if mode == "op":
                     build_config = Config(old_configs.op_config_lst + [config], old_configs.graph_config)
@@ -546,19 +552,19 @@ class Scheduler(object):
                 else:
                     raise RuntimeError("Unknown mode %s" % mode)
                 res = parallel_execute(
-                    build_func, 
-                    self.timeout, 
+                    build_func,
+                    self.timeout,
                     func_name,
-                    self.task_key, 
-                    build_config, 
+                    self.task_key,
+                    build_config,
                     op_pos,
                     rpc_info=self.rpc_info,
                     rewrite=self.rewrite
-                    )
+                )
                 build_res_lst.append(res)
 
             # time.sleep(self.timeout)
-            
+
             eval_res_lst = []
             for i, build_res in enumerate(build_res_lst):
                 # print("build result get begins...")
@@ -650,8 +656,10 @@ class Scheduler(object):
 
 
 class OpScheduler(Scheduler):
-    def __init__(self, task_key, op_pos, space, decay=0.7, parallel=1, timeout=4.0, trial=100, number=10, early_stop=30, rpc_info=None, rewrite=False):
-        super(OpScheduler, self).__init__("op" + str(op_pos), task_key, space, parallel, timeout, trial, number, early_stop, rpc_info, rewrite=rewrite)
+    def __init__(self, task_key, op_pos, space, decay=0.7, parallel=1, timeout=4.0, trial=100, number=1, early_stop=30,
+                 rpc_info=None, rewrite=False):
+        super(OpScheduler, self).__init__("op" + str(op_pos), task_key, space, parallel, timeout, trial, number,
+                                          early_stop, rpc_info, rewrite=rewrite)
         self.op_pos = op_pos
 
     def schedule(self, configs, method="searching", use_model=False, perf_path=None):
@@ -711,7 +719,7 @@ class OpScheduler(Scheduler):
             else:
                 for axis in spatial_axes:
                     splited_spatial_axes.append([axis])
-            assert_print(len(splited_spatial_axes) > 0, "empty spatial axes")     # must be non-empty
+            assert_print(len(splited_spatial_axes) > 0, "empty spatial axes")  # must be non-empty
 
             # always reorder and fuse here
             spatial_fuse_lsts = []
@@ -729,7 +737,7 @@ class OpScheduler(Scheduler):
                 fused = s[op].fuse(*fuse_lst)
                 fused_spatial_axes.append(fused)
             kernel_scope = fused_spatial_axes[0]
-            
+
             # always bind here
             length = len(fused_spatial_axes)
             thread_extents = 1
@@ -773,7 +781,7 @@ class OpScheduler(Scheduler):
                 reduced_nonfuse_lsts = []
                 reorder_lst = []
                 length = len(splited_reduced_axes[0])
-                
+
                 for count in range(length):
                     tmp_buffer = [x[count] for x in splited_reduced_axes]
                     reduced_nonfuse_lsts.append(tmp_buffer)
@@ -801,7 +809,7 @@ class OpScheduler(Scheduler):
             else:
                 for local in read_cache_local_lst:
                     s[local].compute_inline()
-            
+
             # always cooperative fetching
             if share_pos is not None:
                 for share in read_cache_share_lst:
@@ -809,14 +817,14 @@ class OpScheduler(Scheduler):
                     fused = s[share].fuse(*fuse_lst)
                     outer, inner = s[share].split(fused, nparts=thread_extents)
                     s[share].bind(outer, tvm.te.thread_axis("threadIdx.x"))
-            
+
             # unroll
             if "unroll" in config and len(config["unroll"]) > 0:
                 step = config["unroll"][0][0]
                 explicit = config["unroll"][0][1]
                 s[op].pragma(kernel_scope, 'auto_unroll_max_step', step)
                 s[op].pragma(kernel_scope, 'unroll_explicit', explicit)
-        
+
         def _cuda_schedule_fuse_split(s, op, op_state):
             # assert_print(op in s)
 
@@ -833,7 +841,7 @@ class OpScheduler(Scheduler):
                 read_cache_share_lst.append(share)
                 # local = s.cache_read(share, "local", [write_cache])
                 # read_cache_local_lst.append(local)
-            
+
             # spatial fuse
             spatial_axes = s[op].op.axis
             fused_spatial_axes = []
@@ -879,7 +887,7 @@ class OpScheduler(Scheduler):
             else:
                 for axis in fused_spatial_axes:
                     splited_spatial_axes.append([axis])
-            assert len(splited_spatial_axes) > 0, "empty spatial axes"     # must be non-empty
+            assert len(splited_spatial_axes) > 0, "empty spatial axes"  # must be non-empty
 
             # always reorder here
             reorder_lst = []
@@ -890,7 +898,7 @@ class OpScheduler(Scheduler):
 
             # fix kernel scope
             kernel_scope = reorder_lst[0]
-            
+
             # always bind here
             # - prepare thread axis
             bx = tvm.te.thread_axis("blockIdx.x")
@@ -907,7 +915,7 @@ class OpScheduler(Scheduler):
             threads = [tz, ty, tx]
             vthreads = [vz, vy, vx]
 
-            block_extents = [-1, -1, -1]    # z, y, x
+            block_extents = [-1, -1, -1]  # z, y, x
             virtual_extents = [-1, -1, -1]
             thread_extents = [-1, -1, -1]
 
@@ -1023,7 +1031,7 @@ class OpScheduler(Scheduler):
             # else:
             #     for local in read_cache_local_lst:
             #         s[local].compute_inline()
-            
+
             # always cooperative fetching
             if share_pos is not None:
                 for share in read_cache_share_lst:
@@ -1045,14 +1053,14 @@ class OpScheduler(Scheduler):
                         fused, inner = s[share].split(fused, factor=factor)
                         s[share].bind(inner, threads[count])
                         count -= 1
-            
+
             # unroll
             if "unroll" in config and len(config["unroll"]) > 0:
                 step = config["unroll"][0][0]
                 explicit = config["unroll"][0][1]
                 s[op].pragma(kernel_scope, 'auto_unroll_max_step', step)
                 s[op].pragma(kernel_scope, 'unroll_explicit', explicit)
-        
+
         def _cuda_schedule_split_reorder_fuse(s, op, op_state):
             # assert_print(op in s)
 
@@ -1074,7 +1082,7 @@ class OpScheduler(Scheduler):
 
             # spatial split
             spatial_axes = [axis for axis in s[op].op.axis]
-            assert len(spatial_axes) > 0, "empty spatial axes"     # must be non-empty
+            assert len(spatial_axes) > 0, "empty spatial axes"  # must be non-empty
             n = spatial_axes[0]
             kernel_scope, n = s[op].split(n, nparts=1)
             spatial_axes[0] = n
@@ -1154,7 +1162,7 @@ class OpScheduler(Scheduler):
             # record op state
             op_state.loop_lst = loop_lst
             op_state.loop_idx = loop_idx
-      
+
             # always bind here
             # - prepare thread axis
             bx = tvm.te.thread_axis("blockIdx.x")
@@ -1171,7 +1179,7 @@ class OpScheduler(Scheduler):
             threads = [tz, ty, tx]
             vthreads = [vz, vy, vx]
 
-            block_extents = [-1, -1, -1]    # z, y, x
+            block_extents = [-1, -1, -1]  # z, y, x
             virtual_extents = [-1, -1, -1]
             thread_extents = [-1, -1, -1]
 
@@ -1296,7 +1304,7 @@ class OpScheduler(Scheduler):
             # else:
             #     for local in read_cache_local_lst:
             #         s[local].compute_inline()
-            
+
             # always cooperative fetching
             if share_pos is not None:
                 for share in read_cache_share_lst:
@@ -1318,7 +1326,265 @@ class OpScheduler(Scheduler):
                         fused, inner = s[share].split(fused, factor=factor)
                         s[share].bind(inner, threads[count])
                         count -= 1
-            
+
+            # unroll
+            if "unroll" in config and len(config["unroll"]) > 0:
+                step = config["unroll"][0][0]
+                explicit = config["unroll"][0][1]
+                s[op].pragma(kernel_scope, 'auto_unroll_max_step', step)
+                s[op].pragma(kernel_scope, 'unroll_explicit', explicit)
+
+        def _opencl_schedule(s, op, op_state):
+            # assert_print(op in s)
+
+            loop_lst = []
+            loop_idx = []
+
+            # always cache write here
+            # if op.num_outputs > 1:
+            #     raise RuntimeWarning("Too many outputs in one operation!")
+            write_cache = s.cache_write(op.output(0), "local")
+            # always cache read here
+            read_cache_share_lst = []
+            # read_cache_local_lst = []
+            for t in op.input_tensors:
+                share = s.cache_read(t, "shared", [write_cache])
+                read_cache_share_lst.append(share)
+                # local = s.cache_read(share, "local", [write_cache])
+                # read_cache_local_lst.append(local)
+
+            # spatial split
+            spatial_axes = [axis for axis in s[op].op.axis]
+            assert len(spatial_axes) > 0, "empty spatial axes"  # must be non-empty
+            n = spatial_axes[0]
+            kernel_scope, n = s[op].split(n, nparts=1)
+            spatial_axes[0] = n
+            splited_spatial_axes = []
+            splited_spatial_extents = []
+            if "spatial" in config and len(config["spatial"]) > 0:
+                # to align each axis
+                assert len(config["spatial"]) == len(spatial_axes), "align failed"
+                for axis, nparts in zip(spatial_axes, config["spatial"]):
+                    axes, exts = [], []
+                    for count in range(len(nparts) - 1):
+                        outer, axis = s[op].split(axis, nparts=nparts[count])
+                        axes.append(outer)
+                        exts.append(nparts[count])
+                    axes.append(axis)
+                    exts.append(nparts[-1])
+                    splited_spatial_axes.append(axes)
+                    splited_spatial_extents.append(exts)
+            else:
+                for axis in spatial_axes:
+                    splited_spatial_axes.append([axis])
+                    splited_spatial_extents.append([axis.dom.extent.value])
+
+            # always reorder here
+            reorder_lst = []
+            reorder_parts = []
+            reorder_part_extents = []
+            for count in range(len(splited_spatial_axes[0])):
+                axes = [x[count] for x in splited_spatial_axes]
+                exts = [x[count] for x in splited_spatial_extents]
+                reorder_lst.extend(axes)
+                reorder_parts.append(axes)
+                reorder_part_extents.append(exts)
+            s[op].reorder(*reorder_lst)
+            # handle fuse request
+            fused_parts = []
+            fused_part_extents = []
+            fused_part_idx = []
+            if "fuse" in config and len(config["fuse"]) > 0:
+                base_id = 0
+                for part, extents in zip(reorder_parts, reorder_part_extents):
+                    tmp_part, exts, tmp_idx, idx, beg = [], [], [], 0, 0
+                    for end in config["fuse"][0]:
+                        if end - beg > 1:
+                            fuse_lst = part[beg:end]
+                            fused = s[op].fuse(*fuse_lst)
+                            tmp_part.append(fused)
+                            extent = reduce(lambda x, y: x * y, extents[beg:end], 1)
+                            tmp_idx.extend([idx] * (end - beg))
+                            idx += 1
+                            exts.append(extent)
+                        elif end - beg == 1:
+                            tmp_part.append(part[beg])
+                            exts.append(extents[beg])
+                            tmp_idx.append(idx)
+                            idx += 1
+                        beg = end
+                    fused_parts.append(tmp_part)
+                    fused_part_extents.append(exts)
+                    fused_part_idx.append(tmp_idx)
+
+                    loop_lst.extend(tmp_part)
+                    loop_idx.extend([x + base_id for x in tmp_idx])
+                    base_id += len(tmp_part)
+            else:
+                fused_parts = reorder_parts
+                fused_part_extents = reorder_part_extents
+                fused_part_idx = [list(range(len(x))) for x in reorder_parts]
+
+                loop_lst = reorder_lst
+                loop_idx = list(range(len(reorder_lst)))
+            # record op state
+            op_state.loop_lst = loop_lst
+            op_state.loop_idx = loop_idx
+
+            # always bind here
+            # - prepare thread axis
+            blocks = [tvm.te.thread_axis(f"blockIdx.{x}") for x in "xyz"]
+            threads = [tvm.te.thread_axis(f"threadIdx.{x}") for x in "xyz"]
+            vthreads = [tvm.te.thread_axis("vthread") for _ in "xyz"]
+
+            block_extents = [-1, -1, -1]  # z, y, x
+            virtual_extents = [-1, -1, -1]
+            thread_extents = [-1, -1, -1]
+
+            bind_option = [None, None, None]
+            bind_candidate = [blocks, vthreads, threads]
+            candiate_extents = [block_extents, virtual_extents, thread_extents]
+
+            # - bind
+            num_parts = len(fused_parts)
+            if num_parts == 1:
+                bind_option[0] = (fused_parts[0], fused_part_extents[0])
+                local_pos = fused_parts[0][:len(bind_candidate[0])][-1]
+            elif num_parts == 2:
+                bind_option[0] = (fused_parts[0], fused_part_extents[0])
+                bind_option[2] = (fused_parts[1], fused_part_extents[1])
+                local_pos = fused_parts[1][:len(bind_candidate[2])][-1]
+            else:
+                bind_option[0] = (fused_parts[0], fused_part_extents[0])
+                bind_option[1] = (fused_parts[1], fused_part_extents[1])
+                bind_option[2] = (fused_parts[2], fused_part_extents[2])
+                local_pos = fused_parts[2][:len(bind_candidate[2])][-1]
+            for option, candidate, extents in zip(bind_option, bind_candidate, candiate_extents):
+                if option is not None:
+                    for i, axis in enumerate(option[0][:len(candidate)]):
+                        s[op].bind(axis, candidate[i])
+                        extents[i] = option[1][i]
+            # compute at
+            if "local_pos" in config and len(config["local_pos"]) > 0:
+                local_at_part = config["local_pos"][0][0]
+                local_at_idx = config["local_pos"][0][1]
+                # index changed because of fusion
+                cur_idx = fused_part_idx[local_at_part][local_at_idx]
+                local_pos = fused_parts[local_at_part][cur_idx]
+
+            # always compute at here
+            s[write_cache].compute_at(s[op], local_pos)
+
+            # reduce_split
+            reduced_axes = s[write_cache].op.reduce_axis
+            splited_reduced_axes = []
+            if "reduce" in config and len(config["reduce"]) > 0:
+                # to align each axis
+                assert_print(len(config["reduce"]) == len(reduced_axes), "align reduce failed")
+                for axis, nparts in zip(reduced_axes, config["reduce"]):
+                    axes = []
+                    for count in range(len(nparts) - 1):
+                        outer, axis = s[write_cache].split(axis, nparts=nparts[count])
+                        axes.append(outer)
+                    axes.append(axis)
+                    splited_reduced_axes.append(axes)
+            else:
+                for axis in reduced_axes:
+                    splited_reduced_axes.append([axis])
+            share_pos = None
+            # local_pos = None
+            # if has reduce axes
+            if len(splited_reduced_axes) > 0:
+                # always reorder here
+                reduced_nonfuse_lsts = []
+                reorder_lst = []
+                length = len(splited_reduced_axes[0])
+                # leave the last part
+                for count in range(length - 1):
+                    axes = [x[count] for x in splited_reduced_axes]
+                    reduced_nonfuse_lsts.append(axes)
+                    reorder_lst.extend(axes)
+                # the last part
+                last_part = [x[length - 1] for x in splited_reduced_axes]
+                spatial_remainder = s[write_cache].op.axis
+                # change the order of reduce axes and spatial axes
+                if "reorder" in config and len(config["reorder"]) > 0:
+                    pos = config["reorder"][0][0]
+                    assert pos < len(spatial_remainder)
+                    axes = []
+                    count = len(spatial_remainder) - 1
+                    while count > pos:
+                        axes.append(spatial_remainder[count])
+                        count -= 1
+                    p = pos
+                    q = len(last_part) - 1
+                    while p >= 0 and q >= 0:
+                        axes.append(spatial_remainder[p])
+                        axes.append(last_part[q])
+                        p -= 1
+                        q -= 1
+                    while p >= 0:
+                        axes.append(spatial_remainder[p])
+                        p -= 1
+                    while q >= 0:
+                        axes.append(last_part[q])
+                        q -= 1
+                    axes = list(reversed(axes))
+                    reorder_lst.extend(axes)
+                else:
+                    reorder_lst.extend(last_part)
+                    reorder_lst.extend(spatial_remainder)
+                s[write_cache].reorder(*reorder_lst)
+                # decide where to compute at
+                if "share_pos" in config and len(config["share_pos"]) > 0:
+                    share_at = config["share_pos"][0][0]
+                    share_idx = config["share_pos"][0][1]
+                    reduced_nonfuse_lsts.append(last_part)
+                    share_pos = reduced_nonfuse_lsts[share_at][share_idx]
+                else:
+                    if length == 1:
+                        share_pos = last_part[-1]
+                    else:
+                        mid = math.ceil(length / 2.0) - 1
+                        share_pos = reduced_nonfuse_lsts[mid][-1]
+                        # local_pos = last_part[-1]
+
+            # always cache read here
+            if share_pos is not None:
+                for share in read_cache_share_lst:
+                    s[share].compute_at(s[write_cache], share_pos)
+            else:
+                for share in read_cache_share_lst:
+                    s[share].compute_inline()
+            # if local_pos is not None:
+            #     for local in read_cache_local_lst:
+            #         s[local].compute_at(s[write_cache], local_pos)
+            # else:
+            #     for local in read_cache_local_lst:
+            #         s[local].compute_inline()
+
+            # always cooperative fetching
+            if share_pos is not None:
+                for share in read_cache_share_lst:
+                    fuse_lst = s[share].op.axis
+                    fused = s[share].fuse(*fuse_lst)
+                    count = 2
+                    cur = 1
+                    limit = 1024
+                    while count >= 0:
+                        factor = thread_extents[count]
+                        if factor < 0:
+                            defined = False
+                            factor = 16
+                        else:
+                            defined = True
+                        cur *= factor
+                        if not defined and cur > limit:
+                            break
+                        fused, inner = s[share].split(fused, factor=factor)
+                        s[share].bind(inner, threads[count])
+                        count -= 1
+
             # unroll
             if "unroll" in config and len(config["unroll"]) > 0:
                 step = config["unroll"][0][0]
@@ -1348,7 +1614,7 @@ class OpScheduler(Scheduler):
             else:
                 for axis in spatial_axes:
                     splited_spatial_axes.append([axis])
-            assert_print(len(splited_spatial_axes) > 0, "empty spatial axes")     # must be non-empty
+            assert_print(len(splited_spatial_axes) > 0, "empty spatial axes")  # must be non-empty
 
             # always reorder and fuse here
             spatial_fuse_lsts = []
@@ -1366,7 +1632,7 @@ class OpScheduler(Scheduler):
                 fused = s[op].fuse(*fuse_lst)
                 fused_spatial_axes.append(fused)
             kernel_scope = fused_spatial_axes[0]
-            
+
             # always parallel here
             length = len(fused_spatial_axes)
             assert_print(length > 0, "empty spatial axes!")
@@ -1404,7 +1670,7 @@ class OpScheduler(Scheduler):
                 reduced_nonfuse_lsts = []
                 reorder_lst = []
                 length = len(splited_reduced_axes[0])
-                
+
                 for count in range(length):
                     tmp_buffer = [x[count] for x in splited_reduced_axes]
                     reduced_nonfuse_lsts.append(tmp_buffer)
@@ -1413,7 +1679,7 @@ class OpScheduler(Scheduler):
                 rlength = len(splited_reduced_axes)
                 if rlength > 1:
                     reorder_lst.extend(s[write_cache].op.axis)
-                elif rlength == 1:   # in this case, have to interleave otherwise the reorder is of no use
+                elif rlength == 1:  # in this case, have to interleave otherwise the reorder is of no use
                     tmp_order = []
                     p_spatial = len(s[write_cache].op.axis) - 1
                     p_reduce = len(reorder_lst) - 1
@@ -1431,15 +1697,15 @@ class OpScheduler(Scheduler):
                     tmp_order = list(reversed(tmp_order))
                     reorder_lst = tmp_order
                 s[write_cache].reorder(*reorder_lst)
-            
+
             # unroll
             if "unroll" in config and len(config["unroll"]) > 0:
                 step = config["unroll"][0][0]
                 s[op].pragma(kernel_scope, 'auto_unroll_max_step', step)
-            
+
             # always vectorize here
             s[write_cache].vectorize(s[write_cache].op.axis[-1])
-        
+
         def _cpu_schedule_split_reorder_fuse(s, op, op_state):
             # assert_print(op in s)
 
@@ -1453,7 +1719,7 @@ class OpScheduler(Scheduler):
 
             # spatial split
             spatial_axes = [axis for axis in s[op].op.axis]
-            assert len(spatial_axes) > 0, "empty spatial axes"     # must be non-empty
+            assert len(spatial_axes) > 0, "empty spatial axes"  # must be non-empty
             n = spatial_axes[0]
             kernel_scope, n = s[op].split(n, nparts=1)
             spatial_axes[0] = n
@@ -1542,15 +1808,15 @@ class OpScheduler(Scheduler):
             # parallel
             fused = s[op].fuse(*fused_parts[0])
             s[op].parallel(fused)
-     
+
             # compute at
             num_parts = len(fused_parts)
             if num_parts == 1:
                 local_pos = fused
             elif num_parts == 2:
-                local_pos = fused_parts[num_parts-1][0]
+                local_pos = fused_parts[num_parts - 1][0]
             else:
-                local_pos = fused_parts[num_parts-2][-1]
+                local_pos = fused_parts[num_parts - 2][-1]
 
             if "local_pos" in config and len(config["local_pos"]) > 0:
                 local_at_part = config["local_pos"][0][0]
@@ -1621,7 +1887,7 @@ class OpScheduler(Scheduler):
                     reorder_lst.extend(last_part)
                     reorder_lst.extend(spatial_remainder)
                 s[write_cache].reorder(*reorder_lst)
-            
+
             # unroll
             if "unroll" in config and len(config["unroll"]) > 0:
                 step = config["unroll"][0][0]
@@ -1664,7 +1930,7 @@ class OpScheduler(Scheduler):
             else:
                 for axis in spatial_axes:
                     splited_spatial_axes.append([axis])
-            assert_print(len(splited_spatial_axes) > 0, "empty spatial axes")     # must be non-empty
+            assert_print(len(splited_spatial_axes) > 0, "empty spatial axes")  # must be non-empty
 
             # always reorder and fuse here
             # this part actually suppose there is "spatial" in config
@@ -1697,9 +1963,9 @@ class OpScheduler(Scheduler):
                     count -= 1
                 next_pos_for_comptue_at = spatial_fuse_lsts[1][count]
             else:
-                next_pos_for_comptue_at = kernel_scope 
-            
-            # always parallel here
+                next_pos_for_comptue_at = kernel_scope
+
+                # always parallel here
             s[op].parallel(kernel_scope)
             # vectorize
             if len(spatial_fuse_lsts) == 2:
@@ -1753,7 +2019,7 @@ class OpScheduler(Scheduler):
             else:
                 for axis in spatial_axes:
                     splited_spatial_axes.append([axis])
-            assert_print(len(splited_spatial_axes) > 0, "empty spatial axes")     # must be non-empty
+            assert_print(len(splited_spatial_axes) > 0, "empty spatial axes")  # must be non-empty
             # reduce_split for write cache
             reduced_axes = s[write_cache].op.reduce_axis
             num_reduce_axes = len(reduced_axes)
@@ -1797,8 +2063,8 @@ class OpScheduler(Scheduler):
                 hybrid_fuse_lsts.append(tmp_buffer)
                 hybrid_reorder_lst.extend(tmp_buffer)
             if len(hybrid_fuse_lsts) > 1:
-                last_parts = hybrid_reorder_lst[-num_spatial_axes-num_reduce_axes:]
-                hybrid_reorder_lst = hybrid_reorder_lst[:-num_spatial_axes-num_reduce_axes]
+                last_parts = hybrid_reorder_lst[-num_spatial_axes - num_reduce_axes:]
+                hybrid_reorder_lst = hybrid_reorder_lst[:-num_spatial_axes - num_reduce_axes]
                 tmp_buffer = last_parts[-num_reduce_axes:]
                 tmp_buffer.extend(last_parts[:-num_reduce_axes])
                 hybrid_reorder_lst.extend(tmp_buffer)
@@ -1808,7 +2074,7 @@ class OpScheduler(Scheduler):
             # fuse without reduce axes
             # assert len(hybrid_fuse_lsts) > 0
             # s[write_cache].fuse(*hybrid_fuse_lsts[0][:-num_reduce_axes])
-            
+
             # unroll and vectorize without reduce axes
             if len(hybrid_fuse_lsts) > 1:
                 rcount = num_spatial_axes - 1
@@ -1843,18 +2109,20 @@ class OpScheduler(Scheduler):
             return _cuda_schedule_split_reorder_fuse
         elif target == "llvm":
             return _cpu_schedule_simple
+        elif target == "opencl":
+            return _opencl_schedule
         elif target[0] == "c":
             # this is for c code generation
             dev_keys = target.split()
             if "-device=micro_dev" in dev_keys:
                 pass
         else:
-            raise RuntimeError("Currently no support for target %s"%target)  
+            raise RuntimeError("Currently no support for target %s" % target)
 
 
 class Rewriter(object):
     def __init__(self, configs):
-        self.graph_config= configs.graph_config
+        self.graph_config = configs.graph_config
         self.op_config_lst = configs.op_config_lst
 
     def rewrite(self, task):
@@ -1891,8 +2159,10 @@ class Rewriter(object):
 
 
 class GraphScheduler(Scheduler):
-    def __init__(self, task_key, space, decay=0.7, parallel=10, timeout=4.0, trial=100, number=10, early_stop=30, rpc_info=None, rewrite=False):
-        super(GraphScheduler, self).__init__("graph", task_key, space, parallel, timeout, trial, number, early_stop, rpc_info, rewrite=rewrite)
+    def __init__(self, task_key, space, decay=0.7, parallel=10, timeout=4.0, trial=100, number=1, early_stop=30,
+                 rpc_info=None, rewrite=False):
+        super(GraphScheduler, self).__init__("graph", task_key, space, parallel, timeout, trial, number, early_stop,
+                                             rpc_info, rewrite=rewrite)
 
     def schedule(self, configs, method="searching", use_model=False, perf_path=None):
         if perf_path is not None:
@@ -1908,7 +2178,7 @@ class GraphScheduler(Scheduler):
 
     def parallel_evaluate(self, configs, graph_configs, number=1):
         return self._parallel_evaluate(configs, graph_configs, mode="graph", number=number)
-    
+
     @staticmethod
     def generate_graph_schedule(config, phase="inline"):
         def _inline_schedule(s, op_lst, op_states):
@@ -1932,7 +2202,7 @@ class GraphScheduler(Scheduler):
                             consumer_id = op_states[count].consumer_lst[0]
                             consumer_state = op_states[consumer_id]
                             if consumer_state.inline:
-                                continue    # do not compute at inlined ops
+                                continue  # do not compute at inlined ops
                             consumer_loop_idx = consumer_state.loop_idx
                             at_pos = consumer_state.loop_lst[consumer_loop_idx[entity[count]]]
                             s[op_lst[count]].compute_at(s[op_lst[consumer_id]], at_pos)
@@ -1943,8 +2213,7 @@ class GraphScheduler(Scheduler):
         elif phase == "at":
             return _at_schedule
         else:
-            raise RuntimeError("Currently no support for phase %s" %phase)
-        
+            raise RuntimeError("Currently no support for phase %s" % phase)
 
 
 class Result(object):
@@ -1993,8 +2262,8 @@ class OpState(object):
         self.consumer_lst = []
 
 
-def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=15, graph_stop=5, 
-        number=10, timeout=5.0, parallel=8, method="searching", **kwargs):
+def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=15, graph_stop=5,
+             number=1, timeout=5.0, parallel=8, method="searching", **kwargs):
     """Schedule a task
 
     perform sequential schedule
@@ -2041,7 +2310,8 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
         rpc_info = kwargs["rpc_info"]
     ##################################################
     # first generate graph space
-    graph_space = generate_space_inter_op(op_lst, down_graph, force_inline=force_inline, special_space=task.special_space)
+    graph_space = generate_space_inter_op(op_lst, down_graph, force_inline=force_inline,
+                                          special_space=task.special_space)
 
     graph_space_size = len(graph_space)
     print("graph space size", graph_space_size)
@@ -2054,32 +2324,32 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
         configs = Config([], {"inline": [graph_space.subspaces["inline"].static_entities[0]]})
     else:
         configs = Config([], None)
-    
+
     for pos, op in enumerate(op_lst):
-        if task.target == "cuda":
+        if task.target == "cuda" or task.target == "opencl":
             space = generate_space_intra_op(op, down_graph, slevel=slevel, rlevel=rlevel, groups=3)
         elif task.target == "llvm":
             rslevel = max(slevel, rlevel)
-            space = generate_space_intra_op(op, down_graph, slevel=rslevel, rlevel=rslevel, 
+            space = generate_space_intra_op(op, down_graph, slevel=rslevel, rlevel=rslevel,
                                             unroll_policy="off", fuse_policy="off",
                                             reorder_policy="off")
         else:
-            raise RuntimeError("Currently no support for target %s"%task.target)
+            raise RuntimeError("Currently no support for target %s" % task.target)
         total_size *= len(space)
         print("op", pos, "space size:", len(space))
         op_space_lst.append(space)
         op_scheduler = OpScheduler(
-            task_key, 
-            pos, 
-            space, 
-            parallel=parallel, 
-            timeout=timeout, 
-            trial=force_trials[pos], 
-            number=number, 
+            task_key,
+            pos,
+            space,
+            parallel=parallel,
+            timeout=timeout,
+            trial=force_trials[pos],
+            number=number,
             early_stop=op_stop,
             rpc_info=rpc_info,
             rewrite=rewrite
-            )
+        )
         # print("###########################################")
         # print("Scheduling", op)
         use_model = False if op_perf_model_path_lst[pos] is None else True
@@ -2088,34 +2358,35 @@ def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=
             op_config = {}
         else:
             op_config = op_scheduler.schedule(
-                configs, 
-                method=method, 
-                use_model=use_model, 
+                configs,
+                method=method,
+                use_model=use_model,
                 perf_path=perf_path,
-                )
+            )
         configs.op_config_lst.append(op_config)
-    
+
     print("space size", total_size)
 
     #################################################
     # inter operations schedule decisions 
     graph_scheduler = GraphScheduler(
-        task_key, 
-        graph_space, 
-        parallel=parallel, 
-        timeout=timeout, 
-        trial=graph_trial, 
-        number=number, 
+        task_key,
+        graph_space,
+        parallel=parallel,
+        timeout=timeout,
+        trial=graph_trial,
+        number=number,
         early_stop=graph_stop,
         rpc_info=rpc_info,
         rewrite=rewrite
-        )
+    )
     use_model = False if graph_perf_model_path is None else True
-    graph_config = graph_scheduler.schedule(configs, method=method, use_model=use_model, perf_path=graph_perf_model_path)
+    graph_config = graph_scheduler.schedule(configs, method=method, use_model=use_model,
+                                            perf_path=graph_perf_model_path)
     #################################################
     # combine the configs
     configs = Config(configs.op_config_lst, graph_config)
-    
+
     #################################################
     # final schedule
     # s = tvm.te.create_schedule(ops)
@@ -2150,10 +2421,10 @@ def schedule_with_config(task_key, configs, op_pos=None, rewrite=False):
         func = task.func
         args = task.args
         ops, bufs = func(*args)
-        
+
     s, bufs = schedule_with_config_ops(ops, bufs, configs, op_pos=op_pos, target=task.target)
     return s, bufs
-    
+
 
 def schedule_with_config_ops(ops, bufs, configs, op_pos=None, target="llvm"):
     """Schedule a task with given configs
@@ -2198,9 +2469,9 @@ def schedule_with_config_ops(ops, bufs, configs, op_pos=None, target="llvm"):
             op = op_lst[i]
             config = op_config_lst[i]
             template = OpScheduler.generate_op_schedule(target, config)
-            template(s, op, op_states[i])   
+            template(s, op, op_states[i])
 
-    ###################################################
+            ###################################################
     # perform inter operations schedule again for compute at
     if graph_config is not None:
         graph_template = GraphScheduler.generate_graph_schedule(graph_config, phase="at")
@@ -2238,6 +2509,6 @@ def schedule_ops_with_config(s, op_lst, configs, target):
             op = op_lst[i]
             config = op_config_lst[i]
             template = OpScheduler.generate_op_schedule(target, config)
-            template(s, op, op_states[i])   
+            template(s, op, op_states[i])
 
     return s

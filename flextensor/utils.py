@@ -4,6 +4,7 @@ import tvm
 import numpy as np
 import math
 from collections import namedtuple
+from tvm.contrib import ndk
 
 
 class Config(namedtuple("Config", ("op_config_lst", "graph_config"))):
@@ -11,10 +12,13 @@ class Config(namedtuple("Config", ("op_config_lst", "graph_config"))):
 
 
 class RpcInfo(object):
-    def __init__(self, host, port, target_host=None):
+    def __init__(self, host, port, target_host=None, device_key="", use_rpc=None, fcompile=None):
         self.host = host
         self.port = port
         self.target_host = target_host
+        self.device_key = device_key
+        self.use_rpc = use_rpc
+        self.fcompile = ndk.create_shared if fcompile == "ndk" else None
 
 
 def to_int(expr):
@@ -265,7 +269,8 @@ def free_cuda():
     if torch.cuda.is_available():
         filename = "flextensor_check_cuda_free_memory_{}".format(time.time())
         os.system("nvidia-smi -q -d Memory | grep -A4 GPU | grep Free > {}".format(filename))
-        memory_gpu = list(filter(lambda x: x[0] > 0, [(int(x.split()[2]), i) for i, x in enumerate(open(filename, 'r').readlines())]))
+        memory_gpu = list(
+            filter(lambda x: x[0] > 0, [(int(x.split()[2]), i) for i, x in enumerate(open(filename, 'r').readlines())]))
         memory_gpu = sorted(memory_gpu, key=lambda x: x[0], reverse=True)
         os.remove(filename)
         return [x[1] for x in memory_gpu]
