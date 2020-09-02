@@ -19,26 +19,14 @@ LIB_DIR = "."
 
 def evaluate(name, s, bufs, target, dev_id, number=3, rpc_info=None):
     if rpc_info is not None:
-        host = rpc_info.host
-        port = rpc_info.port
         use_rpc = rpc_info.use_rpc
         target_host = rpc_info.target_host
-        dev_key = rpc_info.device_key
         fcompile = rpc_info.fcompile
     else:
         host, port, use_rpc, target_host, dev_key, fcompile = (None for _ in range(6))
 
-    if use_rpc:
-        if use_rpc == "tracker":
-            tracker = rpc.connect_tracker(host, port)
-            remote = tracker.request(dev_key)
-        else:
-            assert use_rpc == "server"
-            remote = rpc.connect(host, port)
-        ctx = remote.context(target, dev_id)
-    else:
-        ctx = tvm.context(target, dev_id)
-        remote = None
+    remote = rpc_info.get_remote()
+    ctx = (remote if remote else tvm).context(target, dev_id)
 
     tvm_arys = []
     for buf in bufs:

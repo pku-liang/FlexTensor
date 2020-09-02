@@ -5,6 +5,7 @@ import numpy as np
 import math
 from collections import namedtuple
 from tvm.contrib import ndk
+from tvm import rpc
 
 
 class Config(namedtuple("Config", ("op_config_lst", "graph_config"))):
@@ -19,6 +20,15 @@ class RpcInfo(object):
         self.device_key = device_key
         self.use_rpc = use_rpc
         self.fcompile = ndk.create_shared if fcompile == "ndk" else None
+
+    def get_remote(self):
+        remote = None
+        if self.use_rpc == "tracker":
+            tracker = rpc.connect_tracker(self.host, self.port)
+            remote = tracker.request(self.device_key)
+        elif self.use_rpc == "server":
+            remote = rpc.connect(self.host, self.port)
+        return remote
 
 
 def to_int(expr):
@@ -270,7 +280,8 @@ def free_cuda():
         filename = "flextensor_check_cuda_free_memory_{}".format(time.time())
         os.system("nvidia-smi -q -d Memory | grep -A4 GPU | grep Free > {}".format(filename))
         memory_gpu = list(
-            filter(lambda x: x[0] > 0, [(int(x.split()[2]), i) for i, x in enumerate(open(filename, 'r').readlines())]))
+            filter(lambda x: x[0] > 0,
+                   [(int(x.split()[2]), i) for i, x in enumerate(open(filename, 'r').readlines())]))
         memory_gpu = sorted(memory_gpu, key=lambda x: x[0], reverse=True)
         os.remove(filename)
         return [x[1] for x in memory_gpu]

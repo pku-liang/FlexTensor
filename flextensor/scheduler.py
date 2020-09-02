@@ -29,8 +29,9 @@ try:
 except ImportError:
     raise RuntimeError("psutil not found, please install it [Hint: `pip install psutil`]")
 
-
 LIB_DIR = "lib"
+
+
 # LOCAL_RPC = True
 
 
@@ -95,26 +96,14 @@ def build_func(func_name, task_key, configs, op_pos=None, rpc_info=None, rewrite
     return result
 
 
-def eval_func(func_file, bufs_shape, dtype, target, number=1, dev_id=0, rpc_info=None):
+def eval_func(func_file, bufs_shape, dtype, target, number=1, dev_id=0, rpc_info: RpcInfo = None):
     if rpc_info is not None:
-        host = rpc_info.host
-        port = rpc_info.port
-        dev_key = rpc_info.device_key
         use_rpc = rpc_info.use_rpc
     else:
-        host, port, dev_key, use_rpc = (None for _ in range(4))
+        use_rpc = None
 
-    if use_rpc:
-        if use_rpc == "tracker":
-            tracker = rpc.connect_tracker(host, port)
-            remote = tracker.request(dev_key, session_timeout=10)
-        else:
-            assert use_rpc == "server"
-            remote = rpc.connect(host, port)
-        ctx = remote.context(target, dev_id)
-    else:
-        remote = None
-        ctx = tvm.context(target, dev_id)
+    remote = rpc_info.get_remote()
+    ctx = (remote if remote else tvm).context(target, dev_id)
 
     tvm_arys = []
     for i, shape in enumerate(bufs_shape):
@@ -204,7 +193,8 @@ def find_idle_device(target):
 
 
 class Scheduler(object):
-    def __init__(self, name, task_key, space, parallel=2, timeout=4.0, trial=100, number=1, early_stop=30,
+    def __init__(self, name, task_key, space, parallel=2, timeout=4.0, trial=100, number=1,
+                 early_stop=30,
                  rpc_info=None, rewrite=False):
         self.task_key = task_key
         self.space = space
@@ -222,7 +212,8 @@ class Scheduler(object):
         self.warm_up_epoch = 20
         self.warm_up_number = 20
 
-    def _warm_up(self, warm_up_epoches, warm_up_trials, configs, type_keys, max_repeat=20, use_model=False):
+    def _warm_up(self, warm_up_epoches, warm_up_trials, configs, type_keys, max_repeat=20,
+                 use_model=False):
         # perform warmup
         warm_up_enough = False
         count_repeat = 0
@@ -252,7 +243,8 @@ class Scheduler(object):
                 if use_model:
                     warm_up_results = self.walker_group.query_performance(warm_up_indices)
                 else:
-                    warm_up_results = self.parallel_evaluate(configs, warm_up_configs, number=self.number)
+                    warm_up_results = self.parallel_evaluate(configs, warm_up_configs,
+                                                             number=self.number)
                     # the results are really measured
                     self.walker_group.add_perf_data(warm_up_indices, warm_up_results)
                 string = "[ "
@@ -310,7 +302,8 @@ class Scheduler(object):
                 # nothing to tune, re-warm up
                 warm_up_epoches = 1
                 warm_up_trials = self.parallel
-                self._warm_up(warm_up_epoches, warm_up_trials, configs, type_keys, use_model=use_model)
+                self._warm_up(warm_up_epoches, warm_up_trials, configs, type_keys,
+                              use_model=use_model)
                 continue
             from_indices, from_value = self.walker_group.top_random(with_value=True)
             # # print("check from", from_indices)
@@ -337,7 +330,8 @@ class Scheduler(object):
             rewards = [np.tanh(max(from_value - result, 0.0)) for result in results]
 
             is_local_minimal = True
-            for indices, action, reward, result in zip(next_indices_lst, action_lst, rewards, results):
+            for indices, action, reward, result in zip(next_indices_lst, action_lst, rewards,
+                                                       results):
                 self.walker_group.add_data(
                     action[0],  # name
                     from_indices,  # pre_state
@@ -365,10 +359,12 @@ class Scheduler(object):
             else:
                 cur_best_value = minimal[1]
                 cur_best = minimal[0]
-            print("No. %d | [%.6f] The best currently %.6f" % (trial, time.time(), cur_best_value), cur_best)
+            print("No. %d | [%.6f] The best currently %.6f" % (trial, time.time(), cur_best_value),
+                  cur_best)
             # early stop becasue of lasting empty trials
             if count_incessant_empty_trial >= self.early_stop:
-                print("Early stop after continuous no trials %d times" % (count_incessant_empty_trial))
+                print("Early stop after continuous no trials %d times" % (
+                    count_incessant_empty_trial))
                 break
             # early stop because of repeating value
             if math.fabs(cur_best_value - value_early_stop) < 0.02:
@@ -377,7 +373,8 @@ class Scheduler(object):
                 value_early_stop = cur_best_value
                 early_stop_count = 0
             if early_stop_count >= self.early_stop:
-                print("Early stop with value %f repeats %d times" % (value_early_stop, early_stop_count))
+                print("Early stop with value %f repeats %d times" % (
+                    value_early_stop, early_stop_count))
                 break
                 # train and re-evaluate
             if (trial + 1) % part == 0:
@@ -453,7 +450,8 @@ class Scheduler(object):
                 next_configs = [self.walker_group.to_config(indices) for indices in next_points]
                 results = self.parallel_evaluate(configs, next_configs, number=self.number)
                 self.walker_group.add_perf_data(next_points, results)
-            for indices, action, (from_indices, from_value), result in zip(next_points, action_lst, from_lst, results):
+            for indices, action, (from_indices, from_value), result in zip(next_points, action_lst,
+                                                                           from_lst, results):
                 reward = np.tanh(max(from_value - result, 0.0))
                 self.walker_group.add_data(
                     action[0],  # name
@@ -467,7 +465,8 @@ class Scheduler(object):
             if self.walker_group.top1_value() < best_value:
                 best_value = self.walker_group.top1_value()
                 best = self.walker_group.top1()
-            print("No. %d | [%.6f] The best currently %.6f" % (trial, time.time(), best_value), best)
+            print("No. %d | [%.6f] The best currently %.6f" % (trial, time.time(), best_value),
+                  best)
             # early stop
             if math.fabs(best_value - value_early_stop) < 0.02:
                 early_stop_count += 1
@@ -475,7 +474,8 @@ class Scheduler(object):
                 value_early_stop = best_value
                 early_stop_count = 0
             if early_stop_count >= self.early_stop:
-                print("Early stop with value %f repeats %d times" % (value_early_stop, early_stop_count))
+                print("Early stop with value %f repeats %d times" % (
+                    value_early_stop, early_stop_count))
                 break
                 # empty, stop
             if not self.walker_group.has_more():
@@ -509,7 +509,8 @@ class Scheduler(object):
                 # re-warm up
                 warm_up_epoches = 1
                 warm_up_trials = self.parallel
-                self._warm_up(warm_up_epoches, warm_up_trials, configs, type_keys, use_model=use_model)
+                self._warm_up(warm_up_epoches, warm_up_trials, configs, type_keys,
+                              use_model=use_model)
                 # update best
                 if self.walker_group.top1_value() < best_value:
                     best_value = self.walker_group.top1_value()
@@ -541,10 +542,13 @@ class Scheduler(object):
             build_res_lst = []
             func_name_lst = []
             for config in part_configs:
-                func_name = "flextensor_built_function_{}_{}.so".format(time.time(), np.random.randint(1000, 10000))
+                func_name = "flextensor_built_function_{}_{}.so".format(time.time(),
+                                                                        np.random.randint(1000,
+                                                                                          10000))
                 func_name_lst.append(func_name)
                 if mode == "op":
-                    build_config = Config(old_configs.op_config_lst + [config], old_configs.graph_config)
+                    build_config = Config(old_configs.op_config_lst + [config],
+                                          old_configs.graph_config)
                     op_pos = self.op_pos
                 elif mode == "graph":
                     build_config = Config(old_configs.op_config_lst, config)
@@ -581,7 +585,8 @@ class Scheduler(object):
                         msg = msg + " TVMError "
                     error_str = str(final_res)
                     found = False
-                    for key_word in ["TVMError", "Error", "error", "Fail", "fail", "Invalid", "invalid"]:
+                    for key_word in ["TVMError", "Error", "error", "Fail", "fail", "Invalid",
+                                     "invalid"]:
                         if key_word in error_str:
                             msg = msg + error_str[error_str.index(key_word):1000]
                             found = True
@@ -656,9 +661,11 @@ class Scheduler(object):
 
 
 class OpScheduler(Scheduler):
-    def __init__(self, task_key, op_pos, space, decay=0.7, parallel=1, timeout=4.0, trial=100, number=1, early_stop=30,
+    def __init__(self, task_key, op_pos, space, decay=0.7, parallel=1, timeout=4.0, trial=100,
+                 number=1, early_stop=30,
                  rpc_info=None, rewrite=False):
-        super(OpScheduler, self).__init__("op" + str(op_pos), task_key, space, parallel, timeout, trial, number,
+        super(OpScheduler, self).__init__("op" + str(op_pos), task_key, space, parallel, timeout,
+                                          trial, number,
                                           early_stop, rpc_info, rewrite=rewrite)
         self.op_pos = op_pos
 
@@ -1979,7 +1986,8 @@ class OpScheduler(Scheduler):
             elif len(spatial_fuse_lsts) > 2:
                 count = len(spatial_fuse_lsts[-1]) - 1
                 while count >= 0:
-                    if spatial_fuse_lsts[-1][count] is not None and config["spatial"][count][-1] > 1:
+                    if spatial_fuse_lsts[-1][count] is not None and config["spatial"][count][
+                        -1] > 1:
                         # print("vectorize op", spatial_fuse_lsts[-1][count])
                         s[op].vectorize(spatial_fuse_lsts[-1][count])
                         break
@@ -2068,7 +2076,8 @@ class OpScheduler(Scheduler):
                 tmp_buffer = last_parts[-num_reduce_axes:]
                 tmp_buffer.extend(last_parts[:-num_reduce_axes])
                 hybrid_reorder_lst.extend(tmp_buffer)
-            hybrid_reorder_lst_without_none = list(filter(lambda x: x is not None, hybrid_reorder_lst))
+            hybrid_reorder_lst_without_none = list(
+                filter(lambda x: x is not None, hybrid_reorder_lst))
             # print("reorder cache write", hybrid_reorder_lst_without_none)
             s[write_cache].reorder(*hybrid_reorder_lst_without_none)
             # fuse without reduce axes
@@ -2159,9 +2168,11 @@ class Rewriter(object):
 
 
 class GraphScheduler(Scheduler):
-    def __init__(self, task_key, space, decay=0.7, parallel=10, timeout=4.0, trial=100, number=1, early_stop=30,
+    def __init__(self, task_key, space, decay=0.7, parallel=10, timeout=4.0, trial=100, number=1,
+                 early_stop=30,
                  rpc_info=None, rewrite=False):
-        super(GraphScheduler, self).__init__("graph", task_key, space, parallel, timeout, trial, number, early_stop,
+        super(GraphScheduler, self).__init__("graph", task_key, space, parallel, timeout, trial,
+                                             number, early_stop,
                                              rpc_info, rewrite=rewrite)
 
     def schedule(self, configs, method="searching", use_model=False, perf_path=None):
