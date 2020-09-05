@@ -8,7 +8,7 @@ import numpy as np
 from tvm import rpc
 from flextensor.utils import Config, RpcInfo
 from flextensor.task import Task, TASK_TABLE
-from flextensor.scheduler import schedule, schedule_with_config, build_func, eval_func
+from flextensor.scheduler import schedule, schedule_with_config
 from flextensor.measure import _evaluate
 from flextensor.utils import to_tuple
 from flextensor.configs.gemm_config import gemm_shapes

@@ -1,99 +1,29 @@
 import tvm
-import signal
-import psutil
-import time
+import os
 import numpy as np
-try:
-    import torch.multiprocessing as multi
-except ImportError:
-    import multiprocessing as multi
-from flextensor.utils import to_tuple
+import multiprocessing as mp
+from flextensor.utils import RpcInfo, to_tuple
 
 
-def kill_child_processes(parent_pid, sig=signal.SIGTERM):
-    """kill all child processes recursively"""
-    try:
-        parent = psutil.Process(parent_pid)
-    except psutil.NoSuchProcess:
-        return
-    children = parent.children(recursive=True)
-    for process in children:
-        try:
-            process.send_signal(sig)
-        except psutil.NoSuchProcess:
-            return
-
-
-def parallel_evaluate(s, bufs, target, dev_id, number=10, timeout=10.0):
-    proc = []
-    q = multi.Queue()
-    for i in range(number):
-        p = multi.Process(target=_evaluate, args=(s, bufs, target, dev_id, 1, q))
-        p.start()
-        proc.append(p)
-    beg = time.time()
-    while time.time() - beg < timeout:
-        if any(p.is_alive() for p in proc):
-            time.sleep(.1)
-        else:
-            break
+def verify_code(mod, target, dev_id):
+    if target == "cuda":
+        ctx = tvm.nd.context(target, dev_id)  # just use device 0
+        if not ctx.exist:
+            # print("Fail to get device %s devid=%d"%(target, dev_id))
+            return False
+        max_dims = ctx.max_thread_dimensions
+        check_gpu = {
+            "max_shared_memory_per_block": ctx.max_shared_memory_per_block,
+            "max_threads_per_block": ctx.max_threads_per_block,
+            "max_thread_x": max_dims[0],
+            "max_thread_y": max_dims[1],
+            "max_thread_z": max_dims[2]
+        }
+        valid = tvm.tir.ir_pass.VerifyGPUCode(mod, check_gpu)
+        return valid
     else:
-        for p in proc:
-            p.terminate()
-            p.join()
-    count = 0
-    sum = 0
-    while not q.empty():
-        sum += q.get()
-        count += 1
-    while count < number:
-        sum += timeout * 1e3
-        count += 1
-    return sum / count
-
-
-def serial_evaluate(s, bufs, target, dev_id, number=10, timeout=10.0):
-    que = multi.Queue()
-    total_timeout = timeout * number
-
-    def _evaluate_loop(q):
-        ret = []
-        for i in range(number):
-            cost = _evaluate(s, bufs, target, dev_id)
-            ret.append(cost)
-        q.put(ret)
-
-    p = multi.Process(target=_evaluate_loop, args=(que, ))
-    p.start()
-    beg = time.time()
-    while time.time() - beg < total_timeout:
-        if p.is_alive():
-            time.sleep(.1)
-        else:
-            break
-    else:
-        p.terminate()
-        p.join()
-    mean_val = timeout * 1e3
-    if not que.empty():
-        mean_val = np.mean(np.array(que.get()))
-    return mean_val
-
-
-def batch_evaluate(s, bufs, target, dev_id, number=10, timeout=10.0):
-    que = multi.Queue()
-    total_timeout = timeout * number
-
-    p = multi.Process(target=_evaluate, args=(s, bufs, target, dev_id, number, que))
-    p.start()
-    p.join(timeout=total_timeout)
-    kill_child_processes(p.pid)
-    p.terminate()
-    p.join()
-    mean_val = timeout * 1e3
-    if not que.empty():
-        mean_val = que.get(block=True)
-    return mean_val
+        # no barrier for other targets
+        return True
 
 
 def _evaluate(s, bufs, target, dev_id, number=1, q=None):
@@ -122,24 +52,55 @@ def _evaluate(s, bufs, target, dev_id, number=1, q=None):
         raise e
 
 
-def __evaluate(s, bufs, target, dev_id, number=1, q=None):
-    beg = time.time()
-    for i in range(number):
-        ctx = tvm.context(target, dev_id)
-        tvm_arys = []
-        for arg in bufs:
-            shape = to_tuple(arg.shape)
-            tmp = np.random.uniform(-10, 10, size=shape).astype(arg.dtype)
-            tmp = tvm.nd.array(tmp, ctx)
-            tvm_arys.append(tmp)
-        try:
-            func = tvm.build(s, bufs, target)
-            func(*tvm_arys)
-        except Exception as e:
-            print("Oops")
-            print(e)
-    end = time.time()
-    time_cost = (end - beg) * 1e3 / number
-    if q:
-        q.put(time_cost)
+def servant_routine(func, que, *args, **kwargs):
+    try:
+        ret = func(*args, **kwargs)
+    except Exception as e:
+        ret = e
+    que.put(ret)
+
+
+def master_routine(timeout, func, *args, **kwargs):
+    que = mp.Queue()
+    servant = mp.Process(target=servant_routine, args=(func, que, *args), kwargs=kwargs)
+    servant.start()
+    try:
+        ret = que.get(block=True, timeout=timeout)
+    except Exception as e:
+        ret = e
+    servant.kill()
+    return ret
+
+
+def build_and_eval(lib, s, bufs, target, dev_id, rpc_info: RpcInfo = None, number=1):
+    if rpc_info is not None:
+        target_host = rpc_info.target_host
+        fcompile = rpc_info.fcompile
+        use_rpc = rpc_info.use_rpc
+    else:
+        target_host, fcompile, use_rpc = None, None, None
+
+    mod = tvm.lower(s, bufs)
+    func = tvm.build(mod, target=target, target_host=target_host)
+
+    tvm_arys = []
+    try:
+        func.export_library(lib, fcompile)
+        remote = rpc_info.get_remote()
+        ctx = (remote if remote else tvm).context(target, dev_id)
+        for buf in bufs:
+            ary = tvm.nd.empty(buf.shape, buf.dtype, ctx)
+            tvm_arys.append(ary)
+
+        if use_rpc:
+            remote.upload(lib)
+            func = remote.load_module(os.path.split(lib)[-1])
+        else:
+            func = tvm.runtime.module.load_module(lib)
+        evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
+        time_cost = evaluator(*tvm_arys).mean * 1e3
+    finally:
+        while len(tvm_arys) > 0:
+            del tvm_arys[-1]
+
     return time_cost
