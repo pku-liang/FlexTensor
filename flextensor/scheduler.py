@@ -4,6 +4,8 @@ import shutil
 import math
 import tvm
 import numpy as np
+import signal
+from queue import Empty
 
 from concurrent.futures import ProcessPoolExecutor
 from collections import deque
@@ -26,6 +28,8 @@ try:
 except ImportError:
     raise RuntimeError("psutil not found, please install it [Hint: `pip install psutil`]")
 
+LIB_DIR = "./lib"
+
 
 def flatten_graph(ops):
     bfs_order = []
@@ -47,6 +51,124 @@ def flatten_graph(ops):
                 down_graph[t] = []
             down_graph[t].append(cur)
     return list(reversed(bfs_order)), down_graph
+
+
+def verify_code(mod, target, dev_id):
+    if target == "cuda":
+        ctx = tvm.nd.context(target, dev_id)  # just use device 0
+        if not ctx.exist:
+            # print("Fail to get device %s devid=%d"%(target, dev_id))
+            return False
+        max_dims = ctx.max_thread_dimensions
+        check_gpu = {
+            "max_shared_memory_per_block": ctx.max_shared_memory_per_block,
+            "max_threads_per_block": ctx.max_threads_per_block,
+            "max_thread_x": max_dims[0],
+            "max_thread_y": max_dims[1],
+            "max_thread_z": max_dims[2]
+        }
+        valid = tvm.tir.ir_pass.VerifyGPUCode(mod, check_gpu)
+        return valid
+    else:
+        # no barrier for other targets
+        return True
+
+
+def build_func(func_name, task_key, configs, op_pos=None, rpc_info=None, rewrite=False):
+    if rpc_info is not None and rpc_info.target_host is not None:
+        target_host = rpc_info.target_host
+        fcompile = rpc_info.fcompile
+    else:
+        target_host, fcompile = None, None
+    task = TASK_TABLE[task_key]
+    s, bufs = schedule_with_config(task_key, configs, op_pos=op_pos, rewrite=rewrite)
+    stmt = tvm.lower(s, bufs, simple_mode=True)
+    valid = verify_code(stmt, task.target, task.dev_id)
+    if not valid:
+        raise RuntimeError("Invalid %s(%d) kernel" % (task.target, task.dev_id))
+    func = tvm.build(s, bufs, target=task.target, target_host=target_host)
+    func.export_library(os.path.join(LIB_DIR, func_name), fcompile)
+    result = ([to_tuple(x.shape) for x in bufs], [buf.dtype for buf in bufs])
+    return result
+
+
+def eval_func(func_file, bufs_shape, dtype, target, number=1, dev_id=0, rpc_info: RpcInfo = None):
+    if rpc_info is not None:
+        use_rpc = rpc_info.use_rpc
+    else:
+        use_rpc = None
+
+    remote = rpc_info.get_remote()
+    ctx = (remote if remote else tvm).context(target, dev_id)
+
+    tvm_arys = []
+    for i, shape in enumerate(bufs_shape):
+        shape = to_tuple(shape)
+        tmp = np.random.uniform(0, 1, size=shape).astype(dtype[i])
+        tmp = tvm.nd.array(tmp, ctx)
+        tvm_arys.append(tmp)
+
+    try:
+        if use_rpc:
+            remote.upload(os.path.join(LIB_DIR, func_file))
+            func = remote.load_module(func_file)
+        else:
+            func = tvm.runtime.module.load_module(os.path.join(LIB_DIR, func_file))
+        evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
+        time_cost = evaluator(*tvm_arys).mean * 1e3
+    finally:
+        while len(tvm_arys) > 0:
+            del tvm_arys[-1]
+
+    return time_cost
+
+
+def kill_child_processes(parent_pid, sig=signal.SIGTERM):
+    """kill all child processes recursively"""
+    try:
+        parent = psutil.Process(parent_pid)
+    except psutil.NoSuchProcess:
+        return
+    children = parent.children(recursive=True)
+    for process in children:
+        try:
+            process.send_signal(sig)
+        except psutil.NoSuchProcess:
+            return
+
+
+def exec_func(func, queue, args, kwargs):
+    try:
+        res = func(*args, **kwargs)
+    except Exception as e:
+        res = RuntimeError(str(e))
+    queue.put(res)
+
+
+def parallel_execute(func, timeout, *args, **kwargs):
+    q = mp.Queue()
+    p = mp.Process(
+        target=call_with_timeout,
+        args=(func, q, timeout, args, kwargs))
+    p.start()
+    return Result(p, q)
+
+
+def call_with_timeout(func, queue, timeout, args, kwargs):
+    q = mp.Queue()
+    p = mp.Process(target=exec_func, args=(func, q, args, kwargs))
+    p.start()
+    try:
+        res = q.get(block=True, timeout=timeout)
+    except Empty:
+        res = mp.TimeoutError()
+    except Exception as e:
+        print("Exception in process {}: {}".format(os.getpid(), str(e)))
+        res = e
+    kill_child_processes(p.pid)
+    p.terminate()
+    p.join()
+    queue.put(res)
 
 
 def find_idle_cpu():
@@ -408,78 +530,222 @@ class Scheduler(object):
 
     def _parallel_evaluate(self, old_configs, new_configs, mode="op", number=1):
         # print("check config", old_configs, new_configs)
+        def _old_ver():
+            target = self.task.target
+            total_configs = len(new_configs)
+            total_res_lst = []
+            try:
+                os.mkdir(LIB_DIR)
+            except OSError as e:
+                if os.path.exists(LIB_DIR) and os.path.isdir(LIB_DIR):
+                    print("[Warning] Directory %s is not empty, but reusing it" % LIB_DIR)
+                else:
+                    print("[Error] Fail to create directory %s\nReason: %s" % (LIB_DIR, str(e)))
+                    exit(1)
+            for ep in range(math.ceil(total_configs / self.parallel)):
+                part_configs = new_configs[ep * self.parallel:(ep + 1) * self.parallel]
+                build_res_lst = []
+                func_name_lst = []
+                for config in part_configs:
+                    func_name = "flextensor_built_function_{}_{}.so".format(time.time(),
+                                                                            np.random.randint(1000,
+                                                                                              10000))
+                    func_name_lst.append(func_name)
+                    if mode == "op":
+                        build_config = Config(old_configs.op_config_lst + [config],
+                                              old_configs.graph_config)
+                        op_pos = self.op_pos
+                    elif mode == "graph":
+                        build_config = Config(old_configs.op_config_lst, config)
+                        op_pos = None
+                    else:
+                        raise RuntimeError("Unknown mode %s" % mode)
+                    res = parallel_execute(
+                        build_func,
+                        self.timeout,
+                        func_name,
+                        self.task_key,
+                        build_config,
+                        op_pos,
+                        rpc_info=self.rpc_info,
+                        rewrite=self.rewrite
+                    )
+                    build_res_lst.append(res)
 
-        res_lst = []
-        lib_dir = mkdtemp(prefix="flextensor_lib_")
-        task_key = self.task_key
-        rpc_info = self.rpc_info
-        rewrite = self.rewrite
+                # time.sleep(self.timeout)
 
-        def _fetch_config(self, config):
-            if mode == "op":
-                build_config = Config(old_configs.op_config_lst + [config],
-                                      old_configs.graph_config)
-                op_pos = self.op_pos
-            elif mode == "graph":
-                build_config = Config(old_configs.op_config_lst, config)
-                op_pos = None
-            else:
-                raise RuntimeError("Unknown mode %s" % mode)
-            return build_config, op_pos
+                eval_res_lst = []
+                for i, build_res in enumerate(build_res_lst):
+                    # print("build result get begins...")
+                    final_res = build_res.get(timeout=self.timeout)
+                    # print("build resutl get done.")
+                    func_name = func_name_lst[i]
+                    if isinstance(final_res, Exception):
+                        # print("check 1")
+                        msg = mode + " build fail:"
+                        # print(final_res.__class__)
+                        if isinstance(final_res, mp.TimeoutError):
+                            msg = msg + "Timeout"
+                        elif isinstance(final_res, tvm._ffi.base.TVMError):
+                            msg = msg + " TVMError "
+                        error_str = str(final_res)
+                        found = False
+                        for key_word in ["TVMError", "Error", "error", "Fail", "fail", "Invalid",
+                                         "invalid"]:
+                            if key_word in error_str:
+                                msg = msg + error_str[error_str.index(key_word):1000]
+                                found = True
+                                break
+                        if not found:
+                            msg = msg + error_str
+                        # print(msg)
+                        eval_res_lst.append(float("inf"))
+                        # print("check 2")
+                    else:
+                        # print("check 3")
+                        res = parallel_execute(
+                            eval_func,
+                            self.timeout,
+                            func_name,
+                            final_res[0],
+                            final_res[1],
+                            target,
+                            number=number,
+                            dev_id=self.task.dev_id,
+                            rpc_info=self.rpc_info
+                        )
+                        # print("check 3.9")
+                        eval_res_lst.append(res)
+                        # print("check 4")
 
-        def _serial_eval():
-            for config in new_configs:
-                build_config, op_pos = _fetch_config(self, config)
-                fd, lib = mkstemp(prefix="flextensor_builtin_function_", suffix=".so",
-                                  dir=lib_dir)
-                os.close(fd)
-                try:
-                    res = build_and_eval_wrapper(lib, task_key, build_config, op_pos,
-                                                 rpc_info, rewrite, number)
-                except Exception as e:
-                    res = float("inf")
-                res_lst.append(res)
+                # time.sleep(self.timeout)
 
-        def _par_eval():
-            if self._pool is None:
-                self._pool = ProcessPoolExecutor(
-                    max_workers=self.parallel,
-                    mp_context=mp.get_context())
-            fut_lst = []
-            for config in new_configs:
-                build_config, op_pos = _fetch_config(self, config)
-                fd, lib = mkstemp(prefix="flextensor_builtin_function_", suffix=".so",
-                                  dir=lib_dir)
-                os.close(fd)
-                fut_lst.append(self._pool.submit(
-                    master_routine,
-                    self.timeout,
-                    build_and_eval_wrapper,
-                    lib, self.task_key, build_config,
-                    op_pos, self.rpc_info, self.rewrite, number
-                ))
-            broken = False
-            for fut in fut_lst:
-                try:
-                    res = fut.result()
-                    if isinstance(res, Exception):
+                ret_lst = []
+                for eval_res in eval_res_lst:
+                    if isinstance(eval_res, float):
+                        ret_lst.append(eval_res)
+                    else:
+                        # print(print("evluate result getting...")
+                        final_res = eval_res.get(timeout=self.timeout)
+                        # print("evlaute result get done.")
+                        if isinstance(final_res, Exception):
+                            msg = mode + " run fail:"
+                            # print(final_res.__class__)
+                            if isinstance(final_res, mp.TimeoutError):
+                                msg = msg + " Timeout "
+                            elif isinstance(final_res, tvm._ffi.base.TVMError):
+                                msg = msg + " TVMError "
+                            error_str = str(final_res)
+                            found = False
+                            for key_word in ["Error", "error", "Fail", "fail", "Invalid",
+                                             "invalid"]:
+                                if key_word in error_str:
+                                    msg = msg + error_str[error_str.index(key_word):1000]
+                                    found = True
+                                    break
+                            if not found:
+                                msg = msg + error_str
+                            # print(msg)
+                            ret_lst.append(float("inf"))
+                        else:
+                            ret_lst.append(final_res)
+
+                total_res_lst.extend(ret_lst)
+
+                for func_name in func_name_lst:
+                    try:
+                        os.remove(os.path.join(LIB_DIR, func_name))
+                    except FileNotFoundError:
+                        pass
+                        # print("File not found when deleting")
+            try:
+                shutil.rmtree(LIB_DIR)
+            except Exception as e:
+                print(e)
+            # print("parallel evaluate done.")
+            return total_res_lst
+
+        def _new_ver():
+            res_lst = []
+            lib_dir = mkdtemp(prefix="flextensor_lib_")
+            task_key = self.task_key
+            rpc_info = self.rpc_info
+            rewrite = self.rewrite
+
+            def _fetch_config(config):
+                if mode == "op":
+                    build_config = Config(old_configs.op_config_lst + [config],
+                                          old_configs.graph_config)
+                    op_pos = self.op_pos
+                elif mode == "graph":
+                    build_config = Config(old_configs.op_config_lst, config)
+                    op_pos = None
+                else:
+                    raise RuntimeError("Unknown mode %s" % mode)
+                return build_config, op_pos
+
+            def _serial_eval():
+                for config in new_configs:
+                    build_config, op_pos = _fetch_config(config)
+                    fd, lib = mkstemp(prefix="flextensor_builtin_function_", suffix=".so",
+                                      dir=lib_dir)
+                    os.close(fd)
+                    try:
+                        res = build_and_eval_wrapper(lib, task_key, build_config, op_pos,
+                                                     rpc_info, rewrite, number)
+                    except Exception as e:
                         res = float("inf")
-                except Exception as e:
-                    broken = True
-                    res = float("inf")
-                res_lst.append(res)
-            if broken:
-                del self._pool
-                self._pool = None
+                    res_lst.append(res)
 
-        try:
-            if self.parallel == 1:
-                _serial_eval()
-            else:
+            def _par_eval():
+                if self._pool is None:
+                    self._pool = ProcessPoolExecutor(
+                        max_workers=self.parallel,
+                        mp_context=mp.get_context())
+                fut_lst = []
+                for config in new_configs:
+                    build_config, op_pos = _fetch_config(config)
+                    fd, lib = mkstemp(prefix="flextensor_builtin_function_", suffix=".so",
+                                      dir=lib_dir)
+                    os.close(fd)
+                    fut_lst.append(self._pool.submit(
+                        master_routine,
+                        self.timeout,
+                        build_and_eval_wrapper,
+                        lib, self.task_key, build_config,
+                        op_pos, self.rpc_info, self.rewrite, number
+                    ))
+                broken = False
+                for fut in fut_lst:
+                    try:
+                        res = fut.result()
+                        if isinstance(res, Exception):
+                            res = float("inf")
+                    except Exception as e:
+                        broken = True
+                        res = float("inf")
+                    res_lst.append(res)
+                if broken:
+                    del self._pool
+                    self._pool = None
+
+            try:
+                # if self.parallel == 1:
+                #     _serial_eval()
+                # else:
+                #     _par_eval()
                 _par_eval()
-        finally:
-            shutil.rmtree(lib_dir)
-        return res_lst
+            finally:
+                shutil.rmtree(lib_dir)
+            return res_lst
+
+        # old_res = _old_ver()
+        new_res = _new_ver()
+        # for r1, r2 in zip(old_res, new_res):
+        #     if math.fabs(r1 - r2) > 1e-2:
+        #         print(r1, "vs", r2)
+        # return old_res
+        return new_res
 
 
 class OpScheduler(Scheduler):
@@ -636,6 +902,43 @@ class GraphScheduler(Scheduler):
             return _at_schedule
         else:
             raise RuntimeError("Currently no support for phase %s" % phase)
+
+
+class Result(object):
+    def __init__(self, p, q):
+        self.p = p
+        self.q = q
+
+    def get(self, timeout=1):
+        # beg = time.time()
+        # while time.time() - beg < timeout:
+        #     if self.q.empty():
+        #         time.sleep(.1)
+        #     else:
+        #         break
+        try:
+            # print("getting...")
+            # while self.q.empty():
+            #     pass
+            # print("queue is empty? ", self.q.empty())
+            res = self.q.get(block=True, timeout=timeout)
+            # print("done")
+            # while not self.q.empty():
+            #     _ = self.q.get(block=True)
+        except Exception as e:
+            # print(e.__class__)
+            res = RuntimeError(str(e))
+        if self.p.is_alive():
+            kill_child_processes(self.p.pid)
+            self.p.terminate()
+        self.p.join()
+        self.q.close()
+        # print("queue joining...")
+        self.q.join_thread()
+        # print("queue joined")
+        del self.p
+        del self.q
+        return res
 
 
 class OpState(object):

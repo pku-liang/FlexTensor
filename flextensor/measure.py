@@ -68,7 +68,8 @@ def master_routine(timeout, func, *args, **kwargs):
         ret = que.get(block=True, timeout=timeout)
     except Exception as e:
         ret = e
-    servant.kill()
+    servant.terminate()
+    servant.join()
     return ret
 
 
@@ -80,8 +81,8 @@ def build_and_eval(lib, s, bufs, target, dev_id, rpc_info: RpcInfo = None, numbe
     else:
         target_host, fcompile, use_rpc = None, None, None
 
-    mod = tvm.lower(s, bufs)
-    func = tvm.build(mod, target=target, target_host=target_host)
+    # mod = tvm.lower(s, bufs, simple_mode=True)
+    func = tvm.build(s, bufs, target=target, target_host=target_host)
 
     tvm_arys = []
     try:
@@ -89,8 +90,10 @@ def build_and_eval(lib, s, bufs, target, dev_id, rpc_info: RpcInfo = None, numbe
         remote = rpc_info.get_remote()
         ctx = (remote if remote else tvm).context(target, dev_id)
         for buf in bufs:
-            ary = tvm.nd.empty(buf.shape, buf.dtype, ctx)
-            tvm_arys.append(ary)
+            shape = to_tuple(buf.shape)
+            tmp = np.random.uniform(0, 1, size=shape).astype(buf.dtype)
+            tmp = tvm.nd.array(tmp, ctx)
+            tvm_arys.append(tmp)
 
         if use_rpc:
             remote.upload(lib)
