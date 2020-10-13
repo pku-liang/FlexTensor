@@ -13,21 +13,22 @@ class Config(namedtuple("Config", ("op_config_lst", "graph_config"))):
 
 
 class RpcInfo(object):
-    def __init__(self, host, port, target_host=None, device_key="", use_rpc=None, fcompile=None):
+    def __init__(self, host, port, target_host=None, device_key="", use_rpc=None, fcompile=None, sess_timeout=0):
         self.host = host
         self.port = port
         self.target_host = target_host
         self.device_key = device_key
         self.use_rpc = use_rpc
         self.fcompile = ndk.create_shared if fcompile == "ndk" else None
+        self.sess_timeout = sess_timeout
 
     def get_remote(self):
         remote = None
         if self.use_rpc == "tracker":
             tracker = rpc.connect_tracker(self.host, self.port)
-            remote = tracker.request(self.device_key)
+            remote = tracker.request(self.device_key, session_timeout=self.sess_timeout)
         elif self.use_rpc == "server":
-            remote = rpc.connect(self.host, self.port)
+            remote = rpc.connect(self.host, self.port, session_timeout=self.sess_timeout)
         return remote
 
 

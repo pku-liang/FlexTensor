@@ -292,7 +292,11 @@ class Scheduler(object):
         # warm up
         warm_up_epoches = self.warm_up_number
         warm_up_trials = self.warm_up_number
+
+        # old_parallel = self.parallel
+        # self.parallel = 1
         self._warm_up(warm_up_epoches, warm_up_trials, configs, type_keys, use_model=use_model)
+        # self.parallel = old_parallel
 
         # tune
         minimal = [{}, float("inf")]  # the minimal point found before
@@ -702,6 +706,11 @@ class Scheduler(object):
                     self._pool = ProcessPoolExecutor(
                         max_workers=self.parallel,
                         mp_context=mp.get_context())
+                elif self._pool._max_workers != self.parallel:
+                    del self._pool
+                    self._pool = ProcessPoolExecutor(
+                        max_workers=self.parallel,
+                        mp_context=mp.get_context())
                 fut_lst = []
                 for config in new_configs:
                     build_config, op_pos = _fetch_config(config)
@@ -710,7 +719,7 @@ class Scheduler(object):
                     os.close(fd)
                     fut_lst.append(self._pool.submit(
                         master_routine,
-                        self.timeout,
+                        self.timeout * max(2, self.parallel) // 2,
                         build_and_eval_wrapper,
                         lib, self.task_key, build_config,
                         op_pos, self.rpc_info, self.rewrite, number
@@ -739,13 +748,7 @@ class Scheduler(object):
                 shutil.rmtree(lib_dir)
             return res_lst
 
-        # old_res = _old_ver()
-        new_res = _new_ver()
-        # for r1, r2 in zip(old_res, new_res):
-        #     if math.fabs(r1 - r2) > 1e-2:
-        #         print(r1, "vs", r2)
-        # return old_res
-        return new_res
+        return _new_ver()
 
 
 class OpScheduler(Scheduler):

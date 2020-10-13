@@ -23,7 +23,8 @@ def evaluate(name, s, bufs, target, dev_id, number=3, rpc_info=None):
         target_host = rpc_info.target_host
         fcompile = rpc_info.fcompile
     else:
-        host, port, use_rpc, target_host, dev_key, fcompile = (None for _ in range(6))
+        host, port, use_rpc, target_host, dev_key, fcompile = (
+            None for _ in range(6))
 
     remote = rpc_info.get_remote()
     ctx = (remote if remote else tvm).context(target, dev_id)
@@ -63,7 +64,8 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
              method="searching", use_model=False, rpc_info=None, logfile=sys.stdout):
     ret = dict()
     for i, shape in enumerate(shapes):
-        print("Optimize gemm shape %s [%.6f]" % (str(shape), time.time()), flush=True)
+        print("Optimize gemm shape %s [%.6f]" %
+              (str(shape), time.time()), flush=True)
         N, K, M = shape
         # create an empty task but has the correct key we want
         task = Task(
@@ -81,12 +83,12 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
             rlevel=rlevel,
             op_trial=trials,
             timeout=timeout,
-            op_stop=30,
+            op_stop=trials // 2,
             method=method,
             use_model=use_model,
             parallel=parallel,
             rpc_info=rpc_info,
-            number=2
+            number=10
         )
         end = time.time()
         # print(tvm.lower(s, bufs, simple_mode=True))
@@ -106,7 +108,8 @@ def optimize(shapes, slevel=4, rlevel=3, target="llvm", dev_id=0, timeout=4.0, t
         line = task.key + ":" + string
         print(line, file=logfile, flush=True)
         s, bufs = schedule_with_config(task.key, configs)
-        time_cost = evaluate(task.key, s, bufs, target, dev_id, rpc_info=rpc_info)
+        time_cost = evaluate(task.key, s, bufs, target,
+                             dev_id, rpc_info=rpc_info)
         print("Use", time_cost, "ms")
         print("Cost", end - beg, "s")
         print()
@@ -124,17 +127,25 @@ def test(task_key, configs, dev_id=None, rpc_info=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-f", "--from_", help="From which shape", type=int, default=0)
-    parser.add_argument("-t", "--to", help="To which shape", type=int, default=-1)
-    parser.add_argument("-l", "--log", help="Log file name", type=str, default="")
+    parser.add_argument(
+        "-f", "--from_", help="From which shape", type=int, default=0)
+    parser.add_argument("-t", "--to", help="To which shape",
+                        type=int, default=-1)
+    parser.add_argument("-l", "--log", help="Log file name",
+                        type=str, default="")
     parser.add_argument("--test", help="test file name", type=str, default="")
-    parser.add_argument("--trials", help="number of trials for op", type=int, default=100)
-    parser.add_argument("--target", help="target device type", type=str, default="llvm")
-    parser.add_argument("--device", help="target device number", type=int, default=0)
-    parser.add_argument("--timeout", help="timeout", type=float, default=4.0)
+    parser.add_argument(
+        "--trials", help="number of trials for op", type=int, default=100)
+    parser.add_argument("--target", help="target device type",
+                        type=str, default="llvm")
+    parser.add_argument(
+        "--device", help="target device number", type=int, default=0)
+    parser.add_argument("--timeout", help="timeout", type=int, default=4)
     parser.add_argument("--parallel", help="parallel", type=int, default=1)
-    parser.add_argument("--use_model", help="use performance model", action="store_true")
-    parser.add_argument("--method", help="how to schedule", type=str, default="searching")
+    parser.add_argument(
+        "--use_model", help="use performance model", action="store_true")
+    parser.add_argument("--method", help="how to schedule",
+                        type=str, default="searching")
     parser.add_argument("--slevel", type=int, default=4)
     parser.add_argument("--rlevel", type=int, default=3)
     parser.add_argument("--host", type=str, default="0.0.0.0")
@@ -144,9 +155,10 @@ if __name__ == "__main__":
     parser.add_argument("--fcompile", type=str, choices=["ndk"])
     parser.add_argument("--port", type=int, default=9190)
     args = parser.parse_args()
-    shapes = gemm_shapes
+    shapes = [(2 ** n, 2 ** n, 2 ** n) for n in range(7, 13)]
     rpc_info = RpcInfo(args.host, args.port, args.target_host,
-                       args.device_key, args.use_rpc, args.fcompile)
+                       args.device_key, args.use_rpc, args.fcompile, args.timeout)
+
     if args.to < 0:
         end = len(shapes)
     else:
