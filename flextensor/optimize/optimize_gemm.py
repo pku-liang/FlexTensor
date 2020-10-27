@@ -10,8 +10,9 @@ from flextensor.utils import Config, RpcInfo
 from flextensor.task import Task, TASK_TABLE
 from flextensor.scheduler import schedule, schedule_with_config
 from flextensor.measure import _evaluate
-from flextensor.utils import to_tuple
+from flextensor.utils import to_tuple, test_allclose
 from flextensor.configs.gemm_config import gemm_shapes
+
 
 LOCAL_RPC = False
 LIB_DIR = "."
@@ -30,20 +31,27 @@ def evaluate(name, s, bufs, target, dev_id, number=3, rpc_info=None):
     ctx = (remote if remote else tvm).context(target, dev_id)
 
     tvm_arys = []
+    np_arys = []
     for buf in bufs:
         shape = to_tuple(buf.shape)
         tmp = np.random.uniform(-10, 10, size=shape).astype(buf.dtype)
+        np_arys.append(tmp)
         tmp = tvm.nd.array(tmp, ctx)
         tvm_arys.append(tmp)
-
+    org = np_arys[-1]
+    np_arys[-1] = np.matmul(np_arys[0], np_arys[1])
     func_file = f"{name}.so"
     time_cost = float("inf")
     try:
         func = tvm.build(s, bufs, target=target, target_host=target_host)
+        print(func.imported_modules[0].get_source())
         if use_rpc:
             func.export_library(os.path.join(LIB_DIR, func_file), fcompile)
             remote.upload(os.path.join(LIB_DIR, func_file))
             func = remote.load_module(func_file)
+        func(*tvm_arys)
+        # test_allclose(tvm_arys[-1].asnumpy(), org, rtol=1e-3, print_diff=True)
+        test_allclose(tvm_arys[-1].asnumpy(), np_arys[-1], rtol=1e-3, print_diff=True)
         evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
         time_cost = evaluator(*tvm_arys).mean * 1e3
     except Exception as e:
@@ -166,7 +174,7 @@ if __name__ == "__main__":
 
     if args.test != "":
         with open(args.test, "r") as fin:
-            for line in fin:
+            for line in list(fin.readlines())[args.from_:end]:
                 name, string = line.split(":", 1)
                 obj = json.loads(string)
                 configs = Config(obj[0], obj[1])

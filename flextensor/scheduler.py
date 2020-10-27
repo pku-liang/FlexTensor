@@ -17,8 +17,8 @@ except ImportError:
     print("[Warning] Import model module failed, please check if PyTorch is installed.")
 from flextensor.space import generate_space_inter_op, generate_space_intra_op
 from flextensor.utils import assert_print, to_tuple, Config, RpcInfo
-from flextensor.templates import _cpu_schedule_simple, _cuda_schedule_split_reorder_fuse, \
-    _opencl_schedule
+from flextensor.templates import cpu_schedule_simple, cuda_schedule_split_reorder_fuse, \
+    opencl_schedule_bifrost
 from flextensor.measure import build_and_eval, master_routine, mp
 from functools import partial
 from tempfile import mkstemp, mkdtemp
@@ -602,7 +602,7 @@ class Scheduler(object):
                                 break
                         if not found:
                             msg = msg + error_str
-                        # print(msg)
+                        print(msg)
                         eval_res_lst.append(float("inf"))
                         # print("check 2")
                     else:
@@ -649,7 +649,7 @@ class Scheduler(object):
                                     break
                             if not found:
                                 msg = msg + error_str
-                            # print(msg)
+                            print(msg)
                             ret_lst.append(float("inf"))
                         else:
                             ret_lst.append(final_res)
@@ -694,10 +694,11 @@ class Scheduler(object):
                     fd, lib = mkstemp(prefix="flextensor_builtin_function_", suffix=".so",
                                       dir=lib_dir)
                     os.close(fd)
-                    try:
-                        res = build_and_eval_wrapper(lib, task_key, build_config, op_pos,
-                                                     rpc_info, rewrite, number)
-                    except Exception as e:
+                    res = master_routine(self.timeout, build_and_eval_wrapper,
+                                         lib, task_key, build_config, op_pos,
+                                         rpc_info, rewrite, number)
+                    if isinstance(res, Exception):
+                        print(res)
                         res = float("inf")
                     res_lst.append(res)
 
@@ -729,8 +730,10 @@ class Scheduler(object):
                     try:
                         res = fut.result()
                         if isinstance(res, Exception):
+                            print(res)
                             res = float("inf")
                     except Exception as e:
+                        print(e)
                         broken = True
                         res = float("inf")
                     res_lst.append(res)
@@ -739,11 +742,10 @@ class Scheduler(object):
                     self._pool = None
 
             try:
-                # if self.parallel == 1:
-                #     _serial_eval()
-                # else:
-                #     _par_eval()
-                _par_eval()
+                if self.parallel == 1:
+                    _serial_eval()
+                else:
+                    _par_eval()
             finally:
                 shutil.rmtree(lib_dir)
             return res_lst
@@ -794,11 +796,11 @@ class OpScheduler(Scheduler):
             #     return _cuda_schedule_fuse_split
             # else:
             #     raise RuntimeError("Unknown hint: %s" % hint)
-            template = _cuda_schedule_split_reorder_fuse
+            template = cuda_schedule_split_reorder_fuse
         elif target == "llvm":
-            template = _cpu_schedule_simple
+            template = cpu_schedule_simple
         elif target == "opencl":
-            template = _opencl_schedule
+            template = opencl_schedule_bifrost
         elif target[0] == "c":
             # this is for c code generation
             dev_keys = target.split()
