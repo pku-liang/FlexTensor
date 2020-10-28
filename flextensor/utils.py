@@ -26,6 +26,13 @@ class RpcInfo(object):
         remote = None
         if self.use_rpc == "tracker":
             tracker = rpc.connect_tracker(self.host, self.port)
+            if (self.device_key.find("android") == 0):
+                cmds = [
+                    "adb reverse tcp:9190 tcp:9190",
+                    "adb forward tcp:5001 tcp:5001",
+                    "adb shell am start -n org.apache.tvm.tvmrpc/org.apache.tvm.tvmrpc.MainActivity 1> /dev/null 2> /dev/null",
+                ]
+                os.system("; ".join(cmds))
             remote = tracker.request(self.device_key, session_timeout=self.sess_timeout)
         elif self.use_rpc == "server":
             remote = rpc.connect(self.host, self.port, session_timeout=self.sess_timeout)
@@ -259,8 +266,9 @@ def nearest_power_of_two(val):
 
 def test_allclose(value, target, rtol=1e-5, print_diff=False):
     passed = 1
+    from tvm.testing import assert_allclose
     try:
-        tvm.testing.assert_allclose(value, target, rtol)
+        assert_allclose(value, target, rtol)
     except AssertionError:
         passed = 0
         if print_diff:
