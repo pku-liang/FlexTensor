@@ -44,14 +44,15 @@ def evaluate(name, s, bufs, target, dev_id, number=3, rpc_info=None):
     time_cost = float("inf")
     try:
         func = tvm.build(s, bufs, target=target, target_host=target_host)
-        print(func.imported_modules[0].get_source())
+        # print(func.imported_modules[0].get_source())
         if use_rpc:
             func.export_library(os.path.join(LIB_DIR, func_file), fcompile)
             remote.upload(os.path.join(LIB_DIR, func_file))
             func = remote.load_module(func_file)
         func(*tvm_arys)
         # test_allclose(tvm_arys[-1].asnumpy(), org, rtol=1e-3, print_diff=True)
-        test_allclose(tvm_arys[-1].asnumpy(), np_arys[-1], rtol=1e-3, print_diff=True)
+        test_allclose(tvm_arys[-1].asnumpy(),
+                      np_arys[-1], rtol=1e-2, print_diff=True)
         evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
         time_cost = evaluator(*tvm_arys).mean * 1e3
     except Exception as e:
@@ -163,7 +164,8 @@ if __name__ == "__main__":
     parser.add_argument("--fcompile", type=str, choices=["ndk"])
     parser.add_argument("--port", type=int, default=9190)
     args = parser.parse_args()
-    shapes = [(2 ** n, 2 ** n, 2 ** n) for n in range(7, 13)]
+    shapes = [(2 ** n, 2 ** n, 2 ** n) for n in range(7, 13)] + [(256, 128, 128),
+                                                                 (128, 256, 128), (128, 128, 256), (128, 256, 256), (256, 128, 256), (256, 256, 128)]
     rpc_info = RpcInfo(args.host, args.port, args.target_host,
                        args.device_key, args.use_rpc, args.fcompile, args.timeout)
 
@@ -173,12 +175,15 @@ if __name__ == "__main__":
         end = args.to
 
     if args.test != "":
+        selected_keys = [Task("gemm", "gemm", None, s, args.target, args.device).key
+                         for s in shapes[args.from_:end]]
         with open(args.test, "r") as fin:
-            for line in list(fin.readlines())[args.from_:end]:
+            for line in fin:
                 name, string = line.split(":", 1)
-                obj = json.loads(string)
-                configs = Config(obj[0], obj[1])
-                test(name, configs, args.device, rpc_info=rpc_info)
+                if name in selected_keys:
+                    obj = json.loads(string)
+                    configs = Config(obj[0], obj[1])
+                    test(name, configs, args.device, rpc_info=rpc_info)
 
     elif args.log != "":
         with open(args.log, "a") as flog:
