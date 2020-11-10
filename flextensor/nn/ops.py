@@ -6,7 +6,7 @@ Follow the convention of PyTorch.
 **Author**: `Size Zheng`
 """
 import tvm 
-import topi
+from tvm import topi
 from flextensor.utils import test_allclose, assert_print
 
 
