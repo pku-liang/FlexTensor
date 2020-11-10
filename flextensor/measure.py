@@ -62,7 +62,8 @@ def servant_routine(func, que, *args, **kwargs):
 
 def master_routine(timeout, func, *args, **kwargs):
     que = mp.Queue()
-    servant = mp.Process(target=servant_routine, args=(func, que, *args), kwargs=kwargs)
+    servant = mp.Process(target=servant_routine, args=(
+        func, que, *args), kwargs=kwargs)
     servant.start()
     try:
         ret = que.get(block=True, timeout=timeout)
@@ -82,12 +83,15 @@ def build_and_eval(lib, s, bufs, target, dev_id, rpc_info: RpcInfo = None, numbe
         target_host, fcompile, use_rpc = None, None, None
 
     # mod = tvm.lower(s, bufs, simple_mode=True)
+    # print("Building...")
     func = tvm.build(s, bufs, target=target, target_host=target_host)
 
     tvm_arys = []
     try:
         func.export_library(lib, fcompile)
+        # print("Connecting...")
         remote = rpc_info.get_remote()
+        # print("Allocating...")
         ctx = (remote if remote else tvm).context(target, dev_id)
         for buf in bufs:
             shape = to_tuple(buf.shape)
@@ -96,10 +100,12 @@ def build_and_eval(lib, s, bufs, target, dev_id, rpc_info: RpcInfo = None, numbe
             tvm_arys.append(tmp)
 
         if use_rpc:
+            # print("Uploading...")
             remote.upload(lib)
             func = remote.load_module(os.path.split(lib)[-1])
         else:
             func = tvm.runtime.module.load_module(lib)
+        # print("Evaluating...")
         evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
         time_cost = evaluator(*tvm_arys).mean * 1e3
     finally:

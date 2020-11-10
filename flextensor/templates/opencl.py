@@ -2,11 +2,19 @@ import math
 from tvm import te
 from functools import reduce
 from . import utils
+from flextensor.utils import is_power_of_x
 
 __all__ = [
     'opencl_schedule',
     'opencl_schedule_bifrost',
 ]
+
+
+def _lower_power2(x):
+    p2 = 1
+    while p2 <= x:
+        p2 *= 2
+    return p2 // 2
 
 
 def opencl_schedule_bifrost(config, s, op, op_state):
@@ -49,8 +57,19 @@ def opencl_schedule_bifrost(config, s, op, op_state):
 
     # unroll and vectorize
     [s[op].unroll(axis) for axis in fused_parts[-1][:-1] if axis not in bound_axes]
-    if fused_parts[-1][-1] not in bound_axes:
-        s[op].vectorize(fused_parts[-1][-1])
+    last_part = fused_parts[-1][-1]
+    if last_part not in bound_axes:
+        last_ext = fused_part_exts[-1][-1]
+        if last_ext > 16:
+            outer, inner = s[op].split(last_part, factor=16)
+            s[op].unroll(outer)
+            s[op].vectorize(inner)
+        elif not is_power_of_x(2, last_ext):
+            outer, inner = s[op].split(last_part, factor=_lower_power2(last_ext))
+            s[op].unroll(outer)
+            s[op].vectorize(inner)
+        else:
+            s[op].vectorize(last_part)
 
     # always compute at here
     s[write_cache].compute_at(s[op], local_write_pos)
@@ -66,13 +85,15 @@ def opencl_schedule_bifrost(config, s, op, op_state):
         # always reorder here
         reduce_reorder_parts = list(zip(*split_re_axes))
         last_part = reduce_reorder_parts[-1]
-        reorder_lst = reduce(lambda a, b: a + b, [list(p) for p in reduce_reorder_parts[:-1]], [])
+        reorder_lst = reduce(lambda a, b: a + b,
+                             [list(p) for p in reduce_reorder_parts[:-1]], [])
         utils.interleave_reorder(config, s, write_cache,
                                  spatial_remainder, last_part, reorder_lst)
 
     # unroll
     [s[write_cache].unroll(sp) for sp in spatial_remainder]
-    [s[write_cache].unroll(re) for re in split_re_axes[-1]]
+    if len(split_re_axes) > 0:
+        [s[write_cache].unroll(re) for re in split_re_axes[-1]]
     if "unroll" in config and len(config["unroll"]) > 0:
         step = config["unroll"][0][0]
         explicit = config["unroll"][0][1]
@@ -227,7 +248,8 @@ def opencl_schedule(config, s, op, op_state):
     splited_reduced_axes = []
     if "reduce" in config and len(config["reduce"]) > 0:
         # to align each axis
-        assert len(config["reduce"]) == len(reduced_axes), "align reduce failed"
+        assert len(config["reduce"]) == len(
+            reduced_axes), "align reduce failed"
         for axis, nparts in zip(reduced_axes, config["reduce"]):
             axes = []
             for count in range(len(nparts) - 1):

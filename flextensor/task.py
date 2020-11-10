@@ -296,6 +296,15 @@ for name in ["yolo", "google", "res", "squeeze", "vgg-16", "test", "yolo_b8", "m
                     ))
             register_task(
                 Task(
+                    "conv2d",
+                    name + str(i), 
+                    conv2d, 
+                    (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation, groups), 
+                    "opencl", 
+                    j
+                    ))
+            register_task(
+                Task(
                     "gemm_conv2d",
                     name + str(i), 
                     gemm_conv2d, 

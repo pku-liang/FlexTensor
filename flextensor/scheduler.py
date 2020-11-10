@@ -751,6 +751,7 @@ class Scheduler(object):
             return res_lst
 
         return _new_ver()
+        # return _old_ver()
 
 
 class OpScheduler(Scheduler):
