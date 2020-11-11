@@ -6,11 +6,12 @@ import json
 import tvm
 import numpy as np
 from tvm import rpc
+from tvm import te
 from flextensor.utils import Config, RpcInfo
 from flextensor.task import Task, TASK_TABLE
 from flextensor.scheduler import schedule, schedule_with_config
 from flextensor.measure import _evaluate
-from flextensor.utils import to_tuple
+from flextensor.utils import to_tuple, test_allclose
 from flextensor.configs.conv2d_config import *
 
 
@@ -30,7 +31,7 @@ LOCAL_RPC = False
 LIB_DIR = "."
 
 
-def evaluate(name, s, bufs, target, dev_id, number=3, rpc_info=None):
+def evaluate(name, s, bufs, target, dev_id, number=3, rpc_info=None, result_generator=None):
     if rpc_info is not None:
         use_rpc = rpc_info.use_rpc
         target_host = rpc_info.target_host
@@ -42,12 +43,9 @@ def evaluate(name, s, bufs, target, dev_id, number=3, rpc_info=None):
     remote = rpc_info.get_remote()
     ctx = (remote if remote else tvm).context(target, dev_id)
 
-    tvm_arys = []
-    for buf in bufs:
-        shape = to_tuple(buf.shape)
-        tmp = np.random.uniform(-10, 10, size=shape).astype(buf.dtype)
-        tmp = tvm.nd.array(tmp, ctx)
-        tvm_arys.append(tmp)
+    np_arys = [
+        np.random.uniform(-10, 10, size=to_tuple(buf.shape)).astype(buf.dtype) for buf in bufs]
+    tvm_arys = [tvm.nd.array(arr, ctx) for arr in np_arys]
     func_file = f"{name}.so"
     time_cost = float("inf")
     try:
@@ -58,6 +56,13 @@ def evaluate(name, s, bufs, target, dev_id, number=3, rpc_info=None):
             remote.upload(os.path.join(LIB_DIR, func_file))
             func = remote.load_module(func_file)
         func(*tvm_arys)
+        if result_generator is not None:
+            print("Test computed...")
+            result = tvm_arys[-1].asnumpy()
+            test_allclose(result, np_arys[-1], rtol=1e-3, print_diff=True)
+            print("Test correct...")
+            expected = result_generator(np_arys)
+            test_allclose(result, expected, rtol=1e-3, print_diff=True)
         evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
         time_cost = evaluator(*tvm_arys).mean * 1e3
     except Exception as e:
@@ -131,14 +136,24 @@ def optimize(prefix, from_, shapes, target="llvm", dev_id=0, trials=100, timeout
     return ret
 
 
-def test(task_key, configs, dev_id=None, rpc_info=None):
+def test(task_key, configs, dev_id=None, rpc_info=None, check_result=False):
     task = TASK_TABLE[task_key]
+    result_generator = None
+    if check_result:
+        def _generator(np_arys):
+            ops, bufs = task.func(*task.args)
+            s = te.create_schedule(ops)
+            func = tvm.build(s, bufs, target="llvm")
+            ctx = tvm.cpu(0)
+            tvm_arys = [tvm.nd.array(arr, ctx) for arr in np_arys]
+            func(*tvm_arys)
+            return tvm_arys[-1].asnumpy()
+        result_generator = _generator
+
     s, bufs = schedule_with_config(task_key, configs)
-    # print(tvm.lower(s, bufs, simple_mode=True))
-    # func = tvm.build(s, bufs, "cuda")
-    # print(func.imported_modules[0].get_source())
     dev_id = dev_id if dev_id is not None else task.dev_id
-    time_cost = evaluate(task_key, s, bufs, task.target, dev_id, 10, rpc_info)
+    time_cost = evaluate(task_key, s, bufs, task.target,
+                         dev_id, 10, rpc_info, result_generator)
     print(task_key, "use", time_cost, "ms")
     print()
 
@@ -222,4 +237,5 @@ if __name__ == "__main__":
                 name, string = line.split(":", 1)
                 obj = json.loads(string)
                 configs = Config(obj[0], obj[1])
-                test(name, configs, dev_id=args.device, rpc_info=rpc_info)
+                test(name, configs, dev_id=args.device,
+                     rpc_info=rpc_info, check_result=True)
