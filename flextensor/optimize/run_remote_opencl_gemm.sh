@@ -15,8 +15,8 @@ running() {
         --parallel 6 \
         -f $beg -t $end \
         -l gemm-config.log \
-        --test gemm-config.log
-        # 1>gemm-$beg.log 2>gemm-$beg.log
+        1>gemm-$beg.log 2>gemm-$beg.log
+    # --test gemm-config.log
 }
 
 start=${1:-0}

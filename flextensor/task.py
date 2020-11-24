@@ -237,6 +237,15 @@ for shape in conv1d_shapes:
                 ))
         register_task(
             Task(
+                "conv1d", 
+                "conv1d", 
+                conv1d, 
+                (batch, in_channel, length, out_channel, k_len, stride, padding, dilation, groups), 
+                "opencl", 
+                j
+                ))
+        register_task(
+            Task(
                 "conv_transpose1d", 
                 "conv_transpose1d", 
                 conv_transpose1d, 

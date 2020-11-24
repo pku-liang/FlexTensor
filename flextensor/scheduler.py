@@ -957,7 +957,7 @@ class OpState(object):
 
 
 def schedule(task_key, slevel=4, rlevel=3, op_trial=50, graph_trial=10, op_stop=15, graph_stop=5,
-             number=1, timeout=5.0, parallel=8, method="searching", **kwargs):
+             number=1, timeout=5, parallel=8, method="searching", **kwargs):
     """Schedule a task
 
     perform sequential schedule
