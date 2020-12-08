@@ -34,8 +34,8 @@ def evaluate(name, s, bufs, target, dev_id, number=10, rpc_info=None, result_gen
         with open(f"./{name}", "w") as fp:
             print(tvm.lower(s, bufs), file=fp)
         func = tvm.build(s, bufs, target=target, target_host=target_host)
-        print(f"Generated Kernels of {name}:")
-        print(func.imported_modules[0].get_source())
+        # print(f"Generated Kernels of {name}:")
+        # print(func.imported_modules[0].get_source())
         if use_rpc:
             func.export_library(os.path.join(LIB_DIR, func_file), fcompile)
             remote.upload(os.path.join(LIB_DIR, func_file))

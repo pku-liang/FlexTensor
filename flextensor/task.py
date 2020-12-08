@@ -389,6 +389,15 @@ for shape in depthwise_shapes:
                 "cuda", 
                 j
                 ))
+        register_task(
+            Task(
+                "conv2d", 
+                "depthwise", 
+                depthwise_conv2d, 
+                (batch, in_channel, H, W, factor, k, stride, padding, dilation), 
+                "opencl", 
+                j
+                ))
 
 for shape in grouped_shapes:
     batch, in_channel, H, W, out_channel, k, _, stride, padding, dilation, groups = shape
