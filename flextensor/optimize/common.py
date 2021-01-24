@@ -34,8 +34,8 @@ def evaluate(name, s, bufs, target, dev_id, number=10, rpc_info=None, result_gen
         with open(f"./{name}", "w") as fp:
             print(tvm.lower(s, bufs), file=fp)
         func = tvm.build(s, bufs, target=target, target_host=target_host)
-        # print(f"Generated Kernels of {name}:")
-        # print(func.imported_modules[0].get_source())
+        with open(f"./{name}.cl", "w") as fp:
+            print(func.imported_modules[0].get_source(), flush=True, file=fp)
         if use_rpc:
             func.export_library(os.path.join(LIB_DIR, func_file), fcompile)
             remote.upload(os.path.join(LIB_DIR, func_file))
@@ -81,7 +81,7 @@ def test(task_key, configs, dev_id=None, rpc_info=None, check_result=False):
     s, bufs = schedule_with_config(task_key, configs)
     dev_id = dev_id if dev_id is not None else task.dev_id
     time_cost = evaluate(task_key, s, bufs, task.target,
-                         dev_id, 10, rpc_info, result_generator)
+                         dev_id, 100, rpc_info, result_generator)
     print(task_key, "use", time_cost, "ms")
     print()
 

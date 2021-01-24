@@ -14,9 +14,9 @@ running() {
         --timeout $timeout \
         --parallel 6 \
         -f $beg -t $end \
-        -l gemm-config.log \
-        1>gemm-$beg.log 2>gemm-$beg.log
-    # --test gemm-config.log
+        --test gemm-config.log --check
+        # -l gemm-config.log \
+        # 1>gemm-$beg.log 2>gemm-$beg.log
 }
 
 start=${1:-0}

@@ -602,7 +602,7 @@ class Scheduler(object):
                                 break
                         if not found:
                             msg = msg + error_str
-                        print(msg)
+                        print(msg, flush=True)
                         eval_res_lst.append(float("inf"))
                         # print("check 2")
                     else:
@@ -649,7 +649,7 @@ class Scheduler(object):
                                     break
                             if not found:
                                 msg = msg + error_str
-                            print(msg)
+                            print(msg, flush=True)
                             ret_lst.append(float("inf"))
                         else:
                             ret_lst.append(final_res)

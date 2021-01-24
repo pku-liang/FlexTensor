@@ -20,7 +20,7 @@ def split_axes(config, s, op, axes, axis_type):
     else:
         for axis in axes:
             split_axes.append([axis])
-            split_exts.append([axis.dom.extent.value])
+            split_exts.append([axis.dom.extent.value if axis.dom is not None else None])
     return split_axes, split_exts
 
 

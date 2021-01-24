@@ -91,7 +91,7 @@ if __name__ == "__main__":
                 name, string = line.split(":", 1)
                 obj = json.loads(string)
                 configs = Config(obj[0], obj[1])
-                test(name, configs, args.device, rpc_info=rpc_info)
+                test(name, configs, args.device, rpc_info=rpc_info, check_result=args.check)
 
     elif args.log != "":
         with open(args.log, "a") as flog:

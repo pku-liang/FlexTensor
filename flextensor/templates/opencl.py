@@ -17,9 +17,15 @@ def _lower_power2(x):
     return p2 // 2
 
 
+MAX_THREADS_PER_BLOCK = 384
+
+
 def opencl_schedule_bifrost(config, s, op, op_state):
     # always cache write here
     write_cache = s.cache_write(op.output(0), "local")
+
+    read_caches = [s.cache_read(t, "local", [write_cache]) for t in
+                   op.input_tensors]
 
     # spatial split
     spatial_axes = [axis for axis in s[op].op.axis]
@@ -33,7 +39,8 @@ def opencl_schedule_bifrost(config, s, op, op_state):
     # always reorder here
     reorder_parts = list(zip(*split_sp_axes))
     reorder_part_exts = list(zip(*split_sp_exts))
-    reorder_lst = reduce(lambda a, b: a + b, [list(p) for p in reorder_parts], [])
+    reorder_lst = reduce(lambda a, b: a + b, [list(p) for p in reorder_parts],
+                         [])
     s[op].reorder(*reorder_lst)
 
     # handle fuse request and record op state
@@ -55,8 +62,18 @@ def opencl_schedule_bifrost(config, s, op, op_state):
         [blocks, vthreads, threads],
         [block_exts, vthread_exts, thread_exts])
 
+    n_threads_per_block = reduce(
+        lambda a, b: a * b, (ext for ext in thread_exts if ext != -1), 1)
+    if n_threads_per_block > MAX_THREADS_PER_BLOCK:
+        raise RuntimeError(
+            "Work group excess limit size: {} (required) vs. {} (given)".format(
+                n_threads_per_block, MAX_THREADS_PER_BLOCK))
+
+    # print(block_exts, thread_exts, flush=True)
+
     # unroll and vectorize
-    [s[op].unroll(axis) for axis in fused_parts[-1][:-1] if axis not in bound_axes]
+    [s[op].unroll(axis) for axis in fused_parts[-1][:-1] if
+     axis not in bound_axes]
     last_part = fused_parts[-1][-1]
     if last_part not in bound_axes:
         last_ext = fused_part_exts[-1][-1]
@@ -65,7 +82,8 @@ def opencl_schedule_bifrost(config, s, op, op_state):
             s[op].unroll(outer)
             s[op].vectorize(inner)
         elif not is_power_of_x(2, last_ext):
-            outer, inner = s[op].split(last_part, factor=_lower_power2(last_ext))
+            outer, inner = s[op].split(last_part,
+                                       factor=_lower_power2(last_ext))
             s[op].unroll(outer)
             s[op].vectorize(inner)
         else:
@@ -78,10 +96,15 @@ def opencl_schedule_bifrost(config, s, op, op_state):
     reduce_axes = s[write_cache].op.reduce_axis
     split_re_axes, split_re_exts = utils.split_axes(
         config, s, write_cache, reduce_axes, "reduce")
+    split_re_parts = list(zip(*split_re_axes))
 
     spatial_remainder = s[write_cache].op.axis
+
+    cache_pos = None
     # if has reduce axes
     if len(split_re_axes) > 0:
+        n_re_level = len(split_re_axes[0])
+
         # always reorder here
         reduce_reorder_parts = list(zip(*split_re_axes))
         last_part = reduce_reorder_parts[-1]
@@ -89,6 +112,41 @@ def opencl_schedule_bifrost(config, s, op, op_state):
                              [list(p) for p in reduce_reorder_parts[:-1]], [])
         utils.interleave_reorder(config, s, write_cache,
                                  spatial_remainder, last_part, reorder_lst)
+
+        if n_re_level == 1:
+            cache_pos = last_part[-1]
+        else:
+            mid = math.ceil(n_re_level / 2.0) - 1
+            cache_pos = split_re_parts[mid][-1]
+
+    if cache_pos is not None:
+        for cache in read_caches:
+            s[cache].compute_at(s[write_cache], cache_pos)
+    else:
+        for cache in read_caches:
+            s[cache].compute_inline()
+
+    # always cooperative fetching
+    if cache_pos is not None:
+        for cache in read_caches:
+            fuse_lst = s[cache].op.axis
+            fused = s[cache].fuse(*fuse_lst)
+            count = 2
+            cur = 1
+            limit = 1024
+            while count >= 0:
+                factor = thread_exts[count]
+                if factor < 0:
+                    defined = False
+                    factor = 16
+                else:
+                    defined = True
+                cur *= factor
+                if not defined and cur > limit:
+                    break
+                fused, inner = s[cache].split(fused, factor=factor)
+                s[cache].bind(inner, threads[count])
+                count -= 1
 
     # unroll
     [s[write_cache].unroll(sp) for sp in spatial_remainder]
@@ -226,7 +284,8 @@ def opencl_schedule(config, s, op, op_state):
         bind_option[1] = (fused_parts[1], fused_part_extents[1])
         bind_option[2] = (fused_parts[2], fused_part_extents[2])
         local_pos = fused_parts[2][:len(bind_candidate[2])][-1]
-    for option, candidate, extents in zip(bind_option, bind_candidate, candiate_extents):
+    for option, candidate, extents in zip(bind_option, bind_candidate,
+                                          candiate_extents):
         if option is not None:
             for i, axis in enumerate(option[0][:len(candidate)]):
                 s[op].bind(axis, candidate[i])
