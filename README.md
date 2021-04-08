@@ -1,5 +1,7 @@
 # FlexTensor
 
+### FlexTensor is moving to https://github.com/pku-liang
+
 ## Introductions
 
 Tensor computation plays a paramount role in a broad range
