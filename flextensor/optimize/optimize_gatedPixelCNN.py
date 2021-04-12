@@ -35,9 +35,9 @@ def evaluate(name, s, bufs, target, dev_id, number, rpc_info):
         use_rpc = True
     if use_rpc:
         remote = rpc.connect(host, port)
-        ctx = remote.context(target, dev_id)
+        ctx = remote.device(target, dev_id)
     else:
-        ctx = tvm.context(target, dev_id)
+        ctx = tvm.device(target, dev_id)
     tvm_arys = []
     for buf in bufs:
         shape = to_tuple(buf.shape)
