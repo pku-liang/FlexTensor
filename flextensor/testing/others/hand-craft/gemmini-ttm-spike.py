@@ -247,7 +247,7 @@ def main():
     print('Uploading', mod_path)
     remote.upload(mod_path)
     func = remote.load_module(os.path.split(mod_path)[1])
-    ctx = remote.context(target, 0)
+    ctx = remote.device(target, 0)
 
     time_f = func.time_evaluator(func.entry_name, ctx)
 

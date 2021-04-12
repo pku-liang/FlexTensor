@@ -47,7 +47,7 @@ def evaluate(name, s, bufs, target, dev_id, number, rpc_info):
         use_rpc = True
     if use_rpc:
         remote = rpc.connect(host, port)
-        ctx = remote.context(target, dev_id)
+        ctx = remote.device(target, dev_id)
     else:
         ctx = tvm.device(target, dev_id)
     tvm_arys = []

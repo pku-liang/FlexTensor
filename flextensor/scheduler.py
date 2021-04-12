@@ -99,7 +99,7 @@ def eval_func(func_file, bufs_shape, dtype, target, number=1, dev_id=0, rpc_info
         use_rpc = None
 
     remote = rpc_info.get_remote()
-    ctx = (remote if remote else tvm).context(target, dev_id)
+    ctx = (remote if remote else tvm).device(target, dev_id)
 
     tvm_arys = []
     for i, shape in enumerate(bufs_shape):
