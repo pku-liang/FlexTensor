@@ -75,8 +75,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     init_arg_parser(parser)
     args = parser.parse_args()
-    shapes = [(2 ** n, 2 ** n, 2 ** n) for n in range(7, 13)] + [(256, 128, 128),
-                                                                 (128, 256, 128), (128, 128, 256), (128, 256, 256), (256, 128, 256), (256, 256, 128)]
+    # shapes = [(2 ** n, 2 ** n, 2 ** n) for n in range(7, 13)] + [(256, 128, 128),
+    #                                                              (128, 256, 128), (128, 128, 256), (128, 256, 256), (256, 128, 256), (256, 256, 128)]
+    shapes = [(256, 128, 128), (256, 256, 256)]
     rpc_info = RpcInfo(args.host, args.port, args.target_host,
                        args.device_key, args.use_rpc, args.fcompile, args.timeout)
 
@@ -91,7 +92,8 @@ if __name__ == "__main__":
                 name, string = line.split(":", 1)
                 obj = json.loads(string)
                 configs = Config(obj[0], obj[1])
-                test(name, configs, args.device, rpc_info=rpc_info, check_result=args.check)
+                test(name, configs, args.device,
+                     rpc_info=rpc_info, check_result=args.check)
 
     elif args.log != "":
         with open(args.log, "a") as flog:
