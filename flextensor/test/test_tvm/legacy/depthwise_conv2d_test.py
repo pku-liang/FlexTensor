@@ -69,7 +69,7 @@ def test_depthwise_conv2d_nchw():
         if not tvm.runtime.module.enabled(device):
             print("Skip because %s is not enabled" % device)
             return
-        ctx = tvm.context(device, 0)
+        ctx = tvm.device(device, 0)
         # Build the kernel
         f1 = tvm.build(s1, [Input, Filter, DepthwiseConv2d], device)
         f2 = tvm.build(s2, [Input, Filter, Scale, Shift, ScaleShift], device)
@@ -159,7 +159,7 @@ def test_depthwise_conv2d_nhwc():
         if not tvm.runtime.module.enabled(device):
             print("Skip because %s is not enabled" % device)
             return
-        ctx = tvm.context(device, 0)
+        ctx = tvm.device(device, 0)
         # Build the kernel
         f1 = tvm.build(s1, [Input, Filter, DepthwiseConv2d], device)
         f2 = tvm.build(s2, [Input, Filter, Scale, Shift, ScaleShift], device)

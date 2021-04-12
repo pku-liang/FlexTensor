@@ -340,7 +340,7 @@ def tune_and_evaluate(tuning_opt):
 
         # upload parameters to device
         # ctx = remote.context(str(target), 0)
-        ctx = tvm.context("cuda", 0)
+        ctx = tvm.device("cuda", 0)
         module = runtime.create(graph, lib, ctx)
         data_tvm = tvm.nd.array((np.random.uniform(size=input_shape)).astype(dtype))
         module.set_input('data', data_tvm)

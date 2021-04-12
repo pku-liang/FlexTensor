@@ -148,7 +148,7 @@ def tvm_generic(N, H, W, C, kernel_size, K, stride=1, padding=0, dilation=1, gro
         with relay.build_config(opt_level=3):
             graph, lib, params = relay.build_module.build(op, target=target, params=params)
 
-        ctx = tvm.context(str(target), 0)
+        ctx = tvm.device(str(target), 0)
         data_tvm = tvm.nd.array((np.random.uniform(size=data_shape)).astype("float32"))
         module = runtime.create(graph, lib, ctx)
         module.set_input("data", data_tvm)
@@ -330,7 +330,7 @@ def run(name, N, H, W, CO, CI, KH, KW, stride, pad, dilation, trials=100, timeou
     w_np = np.random.uniform(size=(CO, CI, KH, KW)).astype(np.float32)
     # c_np = conv2d_nchw_python(a_np, w_np, strides, padding)
 
-    ctx = tvm.context(str(target), dev)
+    ctx = tvm.device(str(target), dev)
     a_tvm = tvm.nd.array(a_np, ctx=ctx)
     w_tvm = tvm.nd.array(w_np, ctx=ctx)
     c_tvm = tvm.nd.empty((N, CO, (H + 2 * pad - dilation * (KH - 1) - 1) // stride + 1, (W + 2 * pad - dilation * (KW - 1) - 1) // stride + 1), ctx=ctx)

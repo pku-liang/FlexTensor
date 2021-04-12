@@ -14,7 +14,7 @@ def array_mul(N):
 def test_array_mul(extent=1024, target="llvm", dev_id=0, number=10, verbose=False):
     time_cost_lst = []
     for N in range(1, extent+1):
-        ctx = tvm.context(target, dev_id)
+        ctx = tvm.device(target, dev_id)
         ary_ops, ary_bufs = array_mul(N)
         ary_inputs = [tvm.nd.array(np.random.uniform(size=to_tuple(buf.shape)).astype(buf.dtype), ctx) for buf in ary_bufs[:-1]]
         ary_inputs += [tvm.nd.array(np.zeros(shape=to_tuple(buf.shape), dtype=buf.dtype), ctx) for buf in ary_bufs[-1:]]

@@ -55,7 +55,7 @@ dC_np = np.random.uniform(-1, 1, [N, K, P, Q]).astype("float32")
 
 dA_np = np.zeros([N, nC, H, W]).astype("float32")
 
-ctx = tvm.context("llvm", 0)
+ctx = tvm.device("llvm", 0)
 A_tvm = tvm.nd.array(A_np, ctx)
 B_tvm = tvm.nd.array(B_np, ctx)
 dC_tvm = tvm.nd.array(dC_np, ctx)

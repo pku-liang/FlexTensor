@@ -26,7 +26,7 @@ A_np = np.random.uniform(-10, 10, shape_size).astype("float32")
 dC_np = np.ones(shape_size).astype("float32")
 dA_np = np.zeros(shape_size).astype("float32")
 
-ctx = tvm.context("llvm", 0)
+ctx = tvm.device("llvm", 0)
 A_tvm = tvm.nd.array(A_np, ctx)
 dC_tvm = tvm.nd.array(dC_np, ctx)
 dA_tvm = tvm.nd.array(dA_np, ctx)

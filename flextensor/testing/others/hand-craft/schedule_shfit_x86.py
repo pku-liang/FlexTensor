@@ -45,7 +45,7 @@ def evaluate(shape, schedule_func):
 
     Output_torch = torch.zeros(output_shape, dtype=torch.float32)
 
-    ctx = tvm.context("llvm", DEV_ID)
+    ctx = tvm.device("llvm", DEV_ID)
 
     Img_tvm = tvm.nd.array(Img_torch.numpy().astype(np.float32), ctx)
     KernelIndex_tvm = tvm.nd.array(KernelIndex_torch.numpy().astype(np.int32), ctx)

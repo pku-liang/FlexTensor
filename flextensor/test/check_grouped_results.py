@@ -41,7 +41,7 @@ def test(task_key, configs, dev_id=None, number=10):
 
 
 def check_result(configs, shape, target="cuda", dev_id=0):
-    ctx = tvm.context(target, dev_id)
+    ctx = tvm.device(target, dev_id)
     name, configs = configs
     batch, in_channel, H, W, out_channel, k, _, stride, padding, dilation, groups = shape
     A_np = np.random.uniform(-10, 10, size=[batch, in_channel, H, W]).astype("float32")

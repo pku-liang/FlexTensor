@@ -129,7 +129,7 @@ if __name__ == "__main__":
     trials = 400
 
     compute_graph = nnvm.graph.create(output)
-    ctx = tvm.context("cuda", 0)
+    ctx = tvm.device("cuda", 0)
     params = generate_random_parameters(compute_graph, "data", data_shape, with_input=True, context=ctx)
     input_data = params["data"]
     deploy_graph, lib, params = nnvm.compiler.build(compute_graph, target="cuda", 

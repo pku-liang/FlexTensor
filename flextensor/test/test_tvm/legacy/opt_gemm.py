@@ -57,7 +57,7 @@ dtype = "float32"
 # To get the best performance, please change the following line
 # to llvm -mcpu=core-avx2, or specific type of CPU you use
 target = 'llvm'
-ctx = tvm.context(target, 0)
+ctx = tvm.device(target, 0)
 
 # Random generated tensor for testing
 a = tvm.nd.array(numpy.random.rand(M, K).astype(dtype), ctx)

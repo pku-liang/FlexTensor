@@ -55,7 +55,7 @@ E_np = np.zeros([1]).astype("float32")
 
 dA_np = np.zeros([N, H]).astype("float32")
 
-ctx = tvm.context("llvm", 0)
+ctx = tvm.device("llvm", 0)
 A_tvm = tvm.nd.array(A_np, ctx)
 label_tvm = tvm.nd.array(label_np, ctx)
 D_tvm = tvm.nd.array(D_np, ctx)

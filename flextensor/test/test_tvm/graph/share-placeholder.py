@@ -24,7 +24,7 @@ func2 = tvm.build(s2, [A, C], target=target)
 
 func3 = tvm.build(s3, [A, B, C], target=target)
 
-ctx = tvm.context(target)
+ctx = tvm.device(target)
 
 A_np = np.random.uniform(-1, 1, [4, 4]).astype(dtype)
 B_np = np.zeros([4, 4]).astype(dtype)

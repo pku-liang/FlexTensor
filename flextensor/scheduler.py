@@ -55,7 +55,7 @@ def flatten_graph(ops):
 
 def verify_code(mod, target, dev_id):
     if target == "cuda":
-        ctx = tvm.nd.context(target, dev_id)  # just use device 0
+        ctx = tvm.nd.device(target, dev_id)  # just use device 0
         if not ctx.exist:
             # print("Fail to get device %s devid=%d"%(target, dev_id))
             return False

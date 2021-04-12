@@ -8,7 +8,7 @@ from flextensor.nn import conv2d_nchw
 
 
 def evaluate(s, bufs, target, dev_id, number=10):
-    ctx = tvm.context(target, dev_id)
+    ctx = tvm.device(target, dev_id)
     tvm_arys = []
     for arg in bufs:
         shape = to_tuple(arg.shape)

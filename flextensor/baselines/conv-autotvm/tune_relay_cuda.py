@@ -222,7 +222,7 @@ def tune_and_evaluate(tuning_opt):
         lib.export_library(tmp.relpath(filename))
 
         # load parameters
-        ctx = tvm.context(str(target), 0)
+        ctx = tvm.device(str(target), 0)
         module = runtime.create(graph, lib, ctx)
         data_tvm = tvm.nd.array((np.random.uniform(size=input_shape)).astype(dtype))
         module.set_input('data', data_tvm)

@@ -23,19 +23,15 @@ def evaluate(name, s, bufs, target, dev_id, number=10, rpc_info=None, result_gen
         use_rpc, target_host, fcompile = None, None, None
 
     remote = rpc_info.get_remote()
-    ctx = (remote if remote else tvm).context(target, dev_id)
+    dev = (remote if remote else tvm).device(target, dev_id)
 
     np_arys = [
         np.random.uniform(-10, 10, size=to_tuple(buf.shape)).astype(buf.dtype) for buf in bufs]
-    tvm_arys = [tvm.nd.array(arr, ctx) for arr in np_arys]
+    tvm_arys = [tvm.nd.array(arr, dev) for arr in np_arys]
     func_file = f"{name}.so"
     time_cost = float("inf")
     try:
-        with open(f"./{name}", "w") as fp:
-            print(tvm.lower(s, bufs), file=fp)
         func = tvm.build(s, bufs, target=target, target_host=target_host)
-        with open(f"./{name}.cl", "w") as fp:
-            print(func.imported_modules[0].get_source(), flush=True, file=fp)
         if use_rpc:
             func.export_library(os.path.join(LIB_DIR, func_file), fcompile)
             remote.upload(os.path.join(LIB_DIR, func_file))
@@ -48,7 +44,7 @@ def evaluate(name, s, bufs, target, dev_id, number=10, rpc_info=None, result_gen
             print("Test correctness...")
             expected = result_generator(np_arys)
             test_allclose(result, expected, rtol=1e-3, print_diff=True)
-        evaluator = func.time_evaluator(func.entry_name, ctx, number=number)
+        evaluator = func.time_evaluator(func.entry_name, dev, number=number)
         time_cost = evaluator(*tvm_arys).mean * 1e3
     except Exception as e:
         print(e)

@@ -163,7 +163,7 @@ def try_yolo_conv(batch_size, config):
     stmt = tvm.lower(s, arg_bufs, simple_mode=True)
     # print(stmt)
     dev_id = 0
-    ctx = tvm.nd.context("cuda", dev_id)
+    ctx = tvm.nd.device("cuda", dev_id)
     max_dims = ctx.max_thread_dimensions
     kwargs = {
         "max_shared_memory_per_block": ctx.max_shared_memory_per_block,

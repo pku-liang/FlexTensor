@@ -251,7 +251,7 @@ class Learner:
         self.print_freq = print_freq
         self.target = target
         self.dtype = dtype
-        self.ctx = tvm.context(target)
+        self.ctx = tvm.device(target)
 
         self._build_func()
         self._allocate_buffers_for_endpoints()

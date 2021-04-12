@@ -678,6 +678,14 @@ def depthwise_conv2d_nchw(inputs, weight, bias=None, stride=1, padding=0, dilati
     return output
 
 
+def winograd_conv2d_nchw(data, kernel, stride=1, padding=0, dilation=1):
+    dtype = data.dtype
+    from tvm.topi.cuda.conv2d_winograd import winograd_cuda
+    cfg = tvm.autotvm.get_config()
+    output = winograd_cuda(cfg, data, kernel, stride, padding, dilation, dtype, False)
+    return output
+
+
 def conv3d_ncdhw(inputs, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
     """Convolution 3d NCDHW layout
 

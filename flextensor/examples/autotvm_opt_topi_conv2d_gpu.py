@@ -77,7 +77,7 @@ def tune_and_evaluate(tuning_opt, number, tune=True):
         with relay.build_config(opt_level=3):
             graph, lib, params = relay.build_module.build(op, target=target, params=params)
 
-        ctx = tvm.context(str(target), 0)
+        ctx = tvm.device(str(target), 0)
         data_tvm = tvm.nd.array((np.random.uniform(size=data_shape)).astype(dtype))
         module = runtime.create(graph, lib, ctx)
         module.set_input("data", data_tvm)

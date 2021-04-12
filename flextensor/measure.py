@@ -7,7 +7,7 @@ from flextensor.utils import RpcInfo, to_tuple
 
 def verify_code(mod, target, dev_id):
     if target == "cuda":
-        ctx = tvm.nd.context(target, dev_id)  # just use device 0
+        ctx = tvm.nd.device(target, dev_id)  # just use device 0
         if not ctx.exist:
             # print("Fail to get device %s devid=%d"%(target, dev_id))
             return False
@@ -27,7 +27,7 @@ def verify_code(mod, target, dev_id):
 
 
 def _evaluate(s, bufs, target, dev_id, number=1, q=None):
-    ctx = tvm.context(target, dev_id)
+    ctx = tvm.device(target, dev_id)
     tvm_arys = []
     for arg in bufs:
         shape = to_tuple(arg.shape)
@@ -92,7 +92,7 @@ def build_and_eval(lib, s, bufs, target, dev_id, rpc_info: RpcInfo = None, numbe
         # print("Connecting...")
         remote = rpc_info.get_remote()
         # print("Allocating...")
-        ctx = (remote if remote else tvm).context(target, dev_id)
+        ctx = (remote if remote else tvm).device(target, dev_id)
         for buf in bufs:
             shape = to_tuple(buf.shape)
             tmp = np.random.uniform(0, 1, size=shape).astype(buf.dtype)
