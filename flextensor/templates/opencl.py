@@ -238,7 +238,7 @@ class OpenCLScheduler:
                     # unroll and vectorize
                     rc_sp_ivs = rc_stg.op.axis
                     # print([self._get_iv_extent(iv) for iv in rc_sp_ivs[:-1]], flush=True)
-                    # [rc_stg.unroll(iv) for iv in rc_sp_ivs[:-1]]
+                    [rc_stg.unroll(iv) for iv in rc_sp_ivs[:-1]]
                     last_iv = rc_sp_ivs[-1]
                     last_ext = self._get_iv_extent(rc_sp_ivs[-1])
                     def vec(x):
