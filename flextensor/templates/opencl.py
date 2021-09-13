@@ -185,51 +185,74 @@ class OpenCLScheduler:
             last_iv = sp_levels[-1][-1]
             if last_iv not in bound_axes:
                 last_ext = self._get_iv_extent(last_iv)
-                if last_ext > 16:
-                    outer, inner = self._split(op_stg, last_iv, factor=16)
+                def vec(x):
+                    outer, inner = self._split(op_stg, last_iv, factor=x)
                     op_stg.unroll(outer)
                     op_stg.vectorize(inner)
-                elif not is_power_of_x(2, last_ext):
-                    outer, inner = self._split(op_stg, last_iv,
-                                               factor=_lower_power2(last_ext))
-                    op_stg.unroll(outer)
-                    op_stg.vectorize(inner)
-                else:
-                    op_stg.vectorize(last_iv)
+                if last_ext % 16 == 0:
+                    vec(16)
+                elif last_ext % 8 == 0:
+                    vec(8) 
+                elif last_ext % 4 == 0:
+                    vec(4)
+                elif last_ext % 2 == 0:
+                    vec(2)
         unroll_and_vectorize()
 
         def handle_write_cache():
+            local_read_pos = None
             # compute at
             wc_stg.compute_at(op_stg, local_write_pos)
             # split reduce axis
-            re_ivs = wc_stg.op.reduce_axis
-            re_parts = self._split_axes(
-                wc_stg, re_ivs, self._config["reduce"])
-            re_levels = list(zip(*re_parts))
             wc_sp_ivs = wc_stg.op.axis
-            last_lv = re_levels[-1]
-            # interleave reorder
-            reorder_lst = [iv for lv in re_levels[:-1] for iv in lv]
-            pos = self._config["reorder"]
-            if pos is None:
-                reorder_lst.extend(last_lv + wc_sp_ivs)
-            else:
-                reorder_lst.extend(_interleave_shift(last_lv, wc_sp_ivs, pos))
-            wc_stg.reorder(*reorder_lst)
-            # unroll
-            [wc_stg.unroll(iv) for iv in wc_sp_ivs]
+            re_ivs = wc_stg.op.reduce_axis
+            if len(re_ivs) > 0:
+                re_parts = self._split_axes(
+                    wc_stg, re_ivs, self._config["reduce"])
+                re_levels = list(zip(*re_parts))
+                last_lv = re_levels[-1]
+                # interleave reorder
+                reorder_lst = [iv for lv in re_levels[:-1] for iv in lv]
+                pos = self._config["reorder"]
+                if pos is None:
+                    reorder_lst.extend(last_lv + wc_sp_ivs)
+                else:
+                    reorder_lst.extend(_interleave_shift(last_lv, wc_sp_ivs, pos))
+                wc_stg.reorder(*reorder_lst)
+                # unroll
+                [wc_stg.unroll(iv) for iv in wc_sp_ivs]
 
-            return last_lv[-1]
+                local_read_pos = last_lv[-1]
+
+            return local_read_pos
         local_read_pos = handle_write_cache()
+
 
         def handle_read_caches():
             for rc_stg in rc_stgs:
-                # compute at
-                rc_stg.compute_at(wc_stg, local_read_pos)
-                # unroll and vectorize
-                rc_sp_ivs = rc_stg.op.axis
-                [rc_stg.unroll(iv) for iv in rc_sp_ivs[:-1]]
-                rc_stg.vectorize(rc_sp_ivs[-1])
+                if local_read_pos is None:
+                    rc_stg.compute_inline()
+                else:
+                    # compute at
+                    rc_stg.compute_at(wc_stg, local_read_pos)
+                    # unroll and vectorize
+                    rc_sp_ivs = rc_stg.op.axis
+                    # print([self._get_iv_extent(iv) for iv in rc_sp_ivs[:-1]], flush=True)
+                    # [rc_stg.unroll(iv) for iv in rc_sp_ivs[:-1]]
+                    last_iv = rc_sp_ivs[-1]
+                    last_ext = self._get_iv_extent(rc_sp_ivs[-1])
+                    def vec(x):
+                        outer, inner = self._split(rc_stg, last_iv, factor=x)
+                        rc_stg.unroll(outer)
+                        rc_stg.vectorize(inner)
+                    if last_ext % 16 == 0:
+                        vec(16)
+                    elif last_ext % 8 == 0:
+                        vec(8) 
+                    elif last_ext % 4 == 0:
+                        vec(4)
+                    elif last_ext % 2 == 0:
+                        vec(2)
         handle_read_caches()
 
 
