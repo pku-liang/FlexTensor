@@ -9,6 +9,7 @@ import json
 import flextensor.space as Space
 from flextensor.utils import assert_print
 
+from typing import List, Dict
 
 global_walker_judger_model_path_prefix = "walker_judger_model_"
 global_walker_judger_data_path_prefix = "walker_judger_data_"
@@ -47,11 +48,13 @@ class Walker(nn.Module):
         self.model_path = global_walker_judger_model_path_prefix + name + ".pkl"
         self.data_path = global_walker_judger_data_path_prefix + name + ".txt"
     
+    # RZNOTE Walker.random_batch 在scheduler warm-up时会用到
     def random_batch(self, batch_size):
         batch_indices = np.random.randint(0, self.subspace.size, batch_size)
         ret_entities = self._get_batch(batch_indices)
         return ret_entities, batch_indices
 
+    # RZNOTE Walker.best_batch 好像没用到过，不然self.judger没定义过肯定会报错……
     def best_batch(self, batch_size):
         batch_size = min(batch_size, self.subspace.size)
         p_values = self.judger(self.inputs_to_judger).reshape(-1)
@@ -86,6 +89,7 @@ class Walker(nn.Module):
             ret_choice_lst.append(int(choice))
         return ret_index_lst, ret_choice_lst
 
+    # RZNOTE subspace朝各个方向都尝试走一步
     def full_walk(self, index):
         new_index_lst = []
         for d in self.subspace.directions:
@@ -229,10 +233,11 @@ class PerformanceModel(nn.Module):
 
 
 class WalkerGroup(object):
-    def __init__(self, group_name, space, lr=0.02):
+    def __init__(self, group_name, space: Space, lr=0.02):
         self.space = space
         self.lr = lr
-        self.walkers = dict()
+        self.walkers: Dict[str, Walker] = dict()
+        # RZNOTE 每个subspace配一个walker
         for name, subspace in self.space.items():
             self.walkers[name] = Walker(group_name + "_" + name, subspace, self.space.dim)
         self.memory = []
@@ -249,7 +254,7 @@ class WalkerGroup(object):
         for name, walker in self.walkers.items():
             if policy == "random":
                 ret_entities, ret_p_values = walker.random_batch(batch_size)
-            elif policy == "best":
+            elif policy == "best": # RZNOTE 没用过这个分支
                 ret_entities, ret_p_values = walker.best_batch(batch_size)
             ret[name] = (ret_entities, ret_p_values)
         return ret
@@ -381,7 +386,7 @@ class WalkerGroup(object):
                         action_lst.append((name, action))                            
                 else:
                     next_indices_lst.append(next_indices)
-                    action_lst.append(action)
+                    action_lst.append((name, action))
         return next_indices_lst, action_lst
     
     def add_data(self, name, pre_state, action, post_state, reward):

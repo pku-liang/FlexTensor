@@ -6,6 +6,7 @@ import tvm
 import numpy as np
 import signal
 from queue import Empty
+from typing import List
 
 from concurrent.futures import ProcessPoolExecutor
 from collections import deque
@@ -22,6 +23,7 @@ from flextensor.templates import cpu_schedule_simple, cuda_schedule_split_reorde
 from flextensor.measure import build_and_eval, master_routine, mp
 from functools import partial
 from tempfile import mkstemp, mkdtemp
+from .space import Space
 
 try:
     import psutil
@@ -200,7 +202,7 @@ class Scheduler(object):
                  early_stop=30,
                  rpc_info=None, rewrite=False):
         self.task_key = task_key
-        self.space = space
+        self.space: Space = space
         self.parallel = max(parallel, 1)  # at least 1
         self.timeout = timeout
         self.trial = trial
@@ -217,7 +219,7 @@ class Scheduler(object):
 
         self._pool = None
 
-    def _warm_up(self, warm_up_epoches, warm_up_trials, configs, type_keys, max_repeat=20,
+    def _warm_up(self, warm_up_epoches, warm_up_trials, configs: List[Config], type_keys, max_repeat=20,
                  use_model=False):
         # perform warmup
         warm_up_enough = False
@@ -226,7 +228,9 @@ class Scheduler(object):
         while not warm_up_enough:
             for ep in range(warm_up_epoches):
                 warm_up_ret = self.walker_group.forward(warm_up_trials, policy="random")
+                # RZNOTE warm_up_configs[trial_id][type_key][entity_id] = entity
                 warm_up_configs = [{} for _ in range(warm_up_trials)]  # empty configs
+                # RZNOTE warmp_up_configs[trial_id][subspace_name] = index (entity在该subspace中的index)
                 warm_up_indices = [{} for _ in range(warm_up_trials)]  # the indices
                 for count in range(warm_up_trials):
                     config = warm_up_configs[count]
@@ -239,10 +243,11 @@ class Scheduler(object):
                     # hack here
                     # if self.op_pos == 1:
                     #     warm_up_configs[count] = {
-                    #         "spatial": [[1, 1, 1, 1], [64, 2, 8, 1], [1, 1, 7, 1], [1, 1, 7, 1]],
-                    #         "reduce": [[64, 1, 16], [1, 3, 1], [1, 1, 3]],
-                    #         "unroll": [[1500, 1]]
+                    #         "spatial": [[1, 1, 1, 1], [64, 2, 8, 1]],
+                    #         "reduce": [[64, 1, 16]],
+                    #         "unroll": [[1500, 1]],
                     #     }
+                    #     warp_up_indices[count] = { "split_i_0": 11, "split_j_1": 45, "split_k_0": 14, "unroll": 0 }
                     # hack here
                     # warm_up_configs[count] = {"inline": [[False, False]]}
                 if use_model:
@@ -285,7 +290,7 @@ class Scheduler(object):
             self._warm_up(warm_up_epoches, warm_up_trials, configs, type_keys, use_model=use_model)
         return self.walker_group.to_config(self.walker_group.top1())
 
-    def _searching_schedule(self, configs, type_keys, use_model=False):
+    def _searching_schedule(self, configs: Config, type_keys, use_model=False):
         # prepare model
         if use_model:
             self.walker_group.load_or_create_model()
@@ -295,6 +300,7 @@ class Scheduler(object):
 
         # old_parallel = self.parallel
         # self.parallel = 1
+        # RZNOTE warm-up，采一些样本到walk_group的memory里
         self._warm_up(warm_up_epoches, warm_up_trials, configs, type_keys, use_model=use_model)
         # self.parallel = old_parallel
 
@@ -314,10 +320,12 @@ class Scheduler(object):
                 self._warm_up(warm_up_epoches, warm_up_trials, configs, type_keys,
                               use_model=use_model)
                 continue
+            # RZNOTE 以一定概率随机选一个点作为walking center，或者用当前最优的点
             from_indices, from_value = self.walker_group.top_random(with_value=True)
             # # print("check from", from_indices)
             # get all directions
-            next_indices_lst, action_lst = self.walker_group.full_walk(from_indices, no_repeat=True)
+            # RZNOTE 收集walking center的邻接点
+            next_indices_lst, action_lst = self.walker_group.full_walk(from_indices, no_repeat=True) # RZNOTE 这里加了no_repeat，因此walk的结果可能为空集。
             # # print("check action", action_lst)
             next_configs = [self.walker_group.to_config(indices) for indices in next_indices_lst]
             # if empty
@@ -328,6 +336,7 @@ class Scheduler(object):
             if use_model:
                 results = self.walker_group.query_performance(next_indices_lst)
             else:
+                # RZNOTE profile邻接点的性能
                 results = self.parallel_evaluate(configs, next_configs, number=self.number)
                 # the results are really measured
                 self.walker_group.add_perf_data(next_indices_lst, results)
@@ -348,6 +357,7 @@ class Scheduler(object):
                     indices,  # post_state
                     reward  # reward
                 )
+                # RZNOTE 将邻接点的性能数据记录到walk_group的memory里
                 self.walker_group.record(indices, result, random_reject=True)
                 if result < self.walker_group.top1_value():
                     is_local_minimal = False
@@ -357,8 +367,7 @@ class Scheduler(object):
                 if top.value < minimal[1]:
                     if minimal[1] < float("inf"):
                         retired_indices.append(minimal)
-                    minimal[1] = top.value
-                    minimal[0] = top.indices
+                    minimal = [top.indices, top.value]
                 else:
                     retired_indices.append([top.indices, top.value])
             # report best
@@ -396,6 +405,7 @@ class Scheduler(object):
                     minimal[0] = {}
                     minimal[1] = float("inf")
 
+                    # RZNOTE 选最优的k个点重测性能
                     indices_lst = self.walker_group.topk(self.re_evalutate_number, modify=True)
                     next_configs = [self.walker_group.to_config(indices) for indices in indices_lst]
                     # use serialized evaluation
@@ -532,7 +542,7 @@ class Scheduler(object):
     def parallel_evaluate(self, old_configs, new_configs, number=1):
         raise NotImplementedError()
 
-    def _parallel_evaluate(self, old_configs, new_configs, mode="op", number=1):
+    def _parallel_evaluate(self, old_configs: Config, new_configs, mode="op", number=1):
         # print("check config", old_configs, new_configs)
         def _old_ver():
             target = self.task.target
@@ -1120,13 +1130,14 @@ def schedule_with_config(task_key, configs, op_pos=None, rewrite=False):
     return s, bufs
 
 
-def schedule_with_config_ops(ops, bufs, configs, op_pos=None, target="llvm"):
+def schedule_with_config_ops(ops, bufs, configs: Config, op_pos=None, target="llvm"):
     """Schedule a task with given configs
 
     perform sequential schedule
     """
     # sort the ops, so that we can distinguish each op
     op_lst, down_graph = flatten_graph(ops)
+    # input -> output topo
     # state of ops
     op_states = [OpState() for op in op_lst]
     for count_op, op in enumerate(op_lst):
@@ -1162,6 +1173,7 @@ def schedule_with_config_ops(ops, bufs, configs, op_pos=None, target="llvm"):
         if not op_states[i].inline:
             op = op_lst[i]
             config = op_config_lst[i]
+            # {"spatial": [[1, 2, 3], [3, 4, 5]], "reduce": [[1, 2, 3]], "unroll": [[0, 1]]}
             template = OpScheduler.generate_op_schedule(target, config)
             template(s, op, op_states[i])
 
