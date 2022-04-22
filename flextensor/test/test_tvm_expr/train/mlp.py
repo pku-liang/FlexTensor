@@ -115,7 +115,7 @@ def main():
     var_np = np.zeros(shape).astype(dtype)
     inits.append(var_np)
 
-  ctx = tvm.context("llvm")
+  ctx = tvm.device("llvm")
 
   img_tvm = tvm.nd.array(img_np, ctx)
   label_tvm = tvm.nd.array(label_np, ctx)

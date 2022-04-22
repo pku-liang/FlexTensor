@@ -296,7 +296,7 @@ def run(name, N, H, W, CO, CI, KH, KW, mask_type, bias, stride, pad, dilation, t
     w_np = np.random.uniform(size=(CO, CI, KH, KW)).astype(np.float32)
     # c_np = conv2d_nchw_python(a_np, w_np, strides, padding)
 
-    ctx = tvm.context(str(target), dev)
+    ctx = tvm.device(str(target), dev)
     a_tvm = tvm.nd.array(a_np, ctx=ctx)
     w_tvm = tvm.nd.array(w_np, ctx=ctx)
     c_tvm = tvm.nd.empty((N, CO, (H + 2 * pad - dilation * (KH - 1) - 1) // stride + 1, (W + 2 * pad - dilation * (KW - 1) - 1) // stride + 1), ctx=ctx)

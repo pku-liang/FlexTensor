@@ -101,7 +101,7 @@ def test_matmul(N_end, M_end, L_end):
                 co, ci = s[ops].split(c, factor=fl)
                 s[ops].reorder(ao, bo, co, ai, bi, ci)
                 func = tvm.build(s, arg_bufs, "llvm")
-                ctx = tvm.context("llvm", 0)
+                ctx = tvm.device("llvm", 0)
                 evaluator = func.time_evaluator(func.entry_name, ctx, number=1)
                 A = np.random.uniform(-10, 10, size=(N, M)).astype("float32")
                 B = np.random.uniform(-10, 10, size=(M, L)).astype("float32")

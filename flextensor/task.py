@@ -4,7 +4,7 @@ from flextensor.nn import conv2d_nchw, gemm as op_gemm, conv1d as op_conv1d, con
     gemm_conv2d_nchw, gemv as op_gemv, bilinear as op_bilinear, MTTKRP3d, conv_transpose1d as op_conv_transpose1d, \
     conv_transpose2d_nchw, conv_transpose3d_ncdhw, depthwise_conv2d_nchw, block_circulant_matrix as op_block_circulant_matrix, \
     PixelCNN as op_pixel_cnn, GatedPixelCNN as op_gated_pixel_cnn, MaxUnpooling1d as op_maxunpool1d, MaxUnpooling2d as op_maxunpool2d, \
-    ShiftConv2d_nhwc as op_shift_conv2d, conv2d_nchwc
+    ShiftConv2d_nhwc as op_shift_conv2d, conv2d_nchwc, winograd_conv2d_nchw
 
 from flextensor.configs.conv1d_config import conv1d_shapes
 from flextensor.configs.conv2d_config import yolo_shapes, res_shapes, google_shapes, squeeze_shapes, \
@@ -98,6 +98,13 @@ def depthwise_conv2d(N, C, H, W, factor, kernel_size, stride=1, padding=0, dilat
     W = tvm.te.placeholder((C, factor, kernel_size, kernel_size))
     Ouput = depthwise_conv2d_nchw(Img, W, stride=stride, padding=padding, dilation=dilation)
     return [Ouput.op], [Img, W, Ouput]
+
+
+def winograd_conv2d(N, C, H, W, K, kernel_size, stride=1, padding=0, dilation=1):
+    Img = tvm.te.placeholder((N, C, H, W))
+    W = tvm.te.placeholder((K, C, kernel_size, kernel_size))
+    Output = winograd_conv2d_nchw(Img, W, stride, padding, dilation)
+    return [Output.op], [Img, W, Output]
 
 
 def conv_transpose2d(N, C, H, W, K, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1):
@@ -237,6 +244,15 @@ for shape in conv1d_shapes:
                 ))
         register_task(
             Task(
+                "conv1d", 
+                "conv1d", 
+                conv1d, 
+                (batch, in_channel, length, out_channel, k_len, stride, padding, dilation, groups), 
+                "opencl", 
+                j
+                ))
+        register_task(
+            Task(
                 "conv_transpose1d", 
                 "conv_transpose1d", 
                 conv_transpose1d, 
@@ -292,6 +308,42 @@ for name in ["yolo", "google", "res", "squeeze", "vgg-16", "test", "yolo_b8", "m
                     conv2d, 
                     (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation, groups), 
                     "cuda", 
+                    j
+                    ))
+            register_task(
+                Task(
+                    "conv2d",
+                    name + str(i), 
+                    conv2d, 
+                    (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation, groups), 
+                    "opencl", 
+                    j
+                    ))
+            register_task(
+                Task(
+                    "winograd_conv2d",
+                    name + str(i), 
+                    winograd_conv2d, 
+                    (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation), 
+                    "llvm", 
+                    j
+                    ))
+            register_task(
+                Task(
+                    "winograd_conv2d",
+                    name + str(i), 
+                    winograd_conv2d, 
+                    (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation), 
+                    "cuda", 
+                    j
+                    ))
+            register_task(
+                Task(
+                    "winograd_conv2d",
+                    name + str(i), 
+                    winograd_conv2d, 
+                    (batch, in_channel, height, width, out_channel, k_h, stride, padding, dilation), 
+                    "opencl", 
                     j
                     ))
             register_task(
@@ -369,6 +421,15 @@ for shape in depthwise_shapes:
                 depthwise_conv2d, 
                 (batch, in_channel, H, W, factor, k, stride, padding, dilation), 
                 "cuda", 
+                j
+                ))
+        register_task(
+            Task(
+                "conv2d", 
+                "depthwise", 
+                depthwise_conv2d, 
+                (batch, in_channel, H, W, factor, k, stride, padding, dilation), 
+                "opencl", 
                 j
                 ))
 
@@ -472,6 +533,7 @@ for shape in gemm_shapes:
     for j in range(4):
         register_task(Task("gemm", "gemm", gemm, (N, K, M), "llvm", j))
         register_task(Task("gemm", "gemm", gemm, (N, K, M), "cuda", j))
+        register_task(Task("gemm", "gemm", gemm, (N, K, M), "opencl", j))
 
 # for shape in test_gemm_shapes:
 #     N, K, M = shape

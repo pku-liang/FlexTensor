@@ -64,7 +64,7 @@ To run the baselines, `PyTorch` is required.
 
 For example, write a `gemm` kernel.
 This uses TVM DSL in Python.
-```py
+```python
 import tvm
 
 def gemm(A, B):
@@ -92,7 +92,8 @@ Existing computes for some common tensor computations are in `nn/ops.py`.
 ### 2. Register optimization tasks
 Take the `gemm` kernel above as example.
 First wrap the kernel.
-```py
+
+```python
 def wrap_gemm(N, K, M):
     A = tvm.placeholder((N, K))
     B = tvm.placeholder((K, M))
@@ -100,7 +101,7 @@ def wrap_gemm(N, K, M):
     return [Output.op], [A, B, Output]
 ```
 Then register a task.
-```py
+```python
 from flextensor.task import register_task, Task
 
 '''
@@ -127,7 +128,7 @@ Existing tasks are registered in `task.py`.
 
 ### 3. Push the button
 
-```py
+```python
 from flextensor.scheduler import schedule
 
 s, bufs, configs = schedule(
@@ -147,7 +148,7 @@ Wait patiently for the scheudling process to finish. This usually cost tens of m
 
 The resulting `s` and `bufs` can be directly used to generate codes, the resulting `configs` can be saved to retrieve schedules.
 
-```py
+```python
 # directly use the results
 func = tvm.build(s, bufs, task.target)
 # use the configs

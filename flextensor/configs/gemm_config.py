@@ -9,9 +9,9 @@ old_gemm_shapes = [
 ]
 
 gemm_shapes = []
-for i in range(5, 11):
-    for j in range(5, 11):
-        for k in range(5, 11):
+for i in range(5, 13):
+    for j in range(5, 13):
+        for k in range(5, 13):
             gemm_shapes.append([2**i, 2**k, 2**j])
 
 

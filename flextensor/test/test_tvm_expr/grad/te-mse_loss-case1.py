@@ -33,7 +33,7 @@ for i in range(batch_size):
 loss_np = np.zeros([1]).astype(dtype)
 dloss_np = np.random.uniform(-1, 1, [1]).astype(dtype) * 0 + 1
 
-ctx = tvm.context("llvm", 0)
+ctx = tvm.device("llvm", 0)
 A_tvm = tvm.nd.array(A_np, ctx)
 dA_tvm = tvm.nd.array(dA_np, ctx)
 targets_tvm = tvm.nd.array(targets_np, ctx)

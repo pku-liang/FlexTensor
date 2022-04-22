@@ -58,7 +58,7 @@ with relay.build_config(opt_level=3):
   graph, lib, params = relay.build_module.build(
       mod, target=target, params=params)
 
-ctx = tvm.context(str(target), 0)
+ctx = tvm.device(str(target), 0)
 
 print("Create runtime...")
 module = runtime.create(graph, lib, ctx)

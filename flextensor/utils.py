@@ -4,6 +4,8 @@ import tvm
 import numpy as np
 import math
 from collections import namedtuple
+from tvm.contrib import ndk
+from tvm import rpc
 
 
 class Config(namedtuple("Config", ("op_config_lst", "graph_config"))):
@@ -11,10 +13,30 @@ class Config(namedtuple("Config", ("op_config_lst", "graph_config"))):
 
 
 class RpcInfo(object):
-    def __init__(self, host, port, target_host=None):
+    def __init__(self, host, port, target_host=None, device_key="", use_rpc=None, fcompile=None, sess_timeout=0):
         self.host = host
         self.port = port
         self.target_host = target_host
+        self.device_key = device_key
+        self.use_rpc = use_rpc
+        self.fcompile = ndk.create_shared if fcompile == "ndk" else None
+        self.sess_timeout = sess_timeout
+
+    def get_remote(self):
+        remote = None
+        if self.use_rpc == "tracker":
+            tracker = rpc.connect_tracker(self.host, self.port)
+            if (self.device_key.find("android") == 0):
+                cmds = [
+                    "adb reverse tcp:9190 tcp:9190",
+                    "adb forward tcp:5001 tcp:5001",
+                    "adb shell am start -n org.apache.tvm.tvmrpc/org.apache.tvm.tvmrpc.MainActivity 1> /dev/null 2> /dev/null",
+                ]
+                os.system("; ".join(cmds))
+            remote = tracker.request(self.device_key, session_timeout=self.sess_timeout)
+        elif self.use_rpc == "server":
+            remote = rpc.connect(self.host, self.port, session_timeout=self.sess_timeout)
+        return remote
 
 
 def to_int(expr):
@@ -244,8 +266,9 @@ def nearest_power_of_two(val):
 
 def test_allclose(value, target, rtol=1e-5, print_diff=False):
     passed = 1
+    from tvm.testing import assert_allclose
     try:
-        tvm.testing.assert_allclose(value, target, rtol)
+        assert_allclose(value, target, rtol)
     except AssertionError:
         passed = 0
         if print_diff:
@@ -265,7 +288,9 @@ def free_cuda():
     if torch.cuda.is_available():
         filename = "flextensor_check_cuda_free_memory_{}".format(time.time())
         os.system("nvidia-smi -q -d Memory | grep -A4 GPU | grep Free > {}".format(filename))
-        memory_gpu = list(filter(lambda x: x[0] > 0, [(int(x.split()[2]), i) for i, x in enumerate(open(filename, 'r').readlines())]))
+        memory_gpu = list(
+            filter(lambda x: x[0] > 0,
+                   [(int(x.split()[2]), i) for i, x in enumerate(open(filename, 'r').readlines())]))
         memory_gpu = sorted(memory_gpu, key=lambda x: x[0], reverse=True)
         os.remove(filename)
         return [x[1] for x in memory_gpu]

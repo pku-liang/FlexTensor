@@ -130,7 +130,7 @@ def main():
   func = tvm.build(s, [img, label, *weight_to_update, *old_hc, *loss_and_result, *new_hc, *grad_list], target= target_platform)
 
   weight_np, old_hc_np, loss_result_np, new_hc_np, grad_np = numpy_init(weight_to_update, old_hc, loss_and_result, new_hc, grad_list)
-  ctx = tvm.context(target_platform)
+  ctx = tvm.device(target_platform)
 
   for ep in range(num_epoches):
     train_num_covered = 0

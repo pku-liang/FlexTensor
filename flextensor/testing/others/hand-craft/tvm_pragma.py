@@ -71,7 +71,7 @@ def run_aocl():
     fadd_dev = tvm.runtime.module.load_module("myadd.aocx")
     fadd.import_module(fadd_dev)
 
-    ctx = tvm.context(tgt, 0)
+    ctx = tvm.device(tgt, 0)
 
     n = 1024
     a = tvm.nd.array(np.random.uniform(size=n).astype("float32"), ctx)

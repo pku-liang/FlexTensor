@@ -79,7 +79,7 @@ def tvm_unpool2d_cuda(B, C, H, W, kernel_size, stride, padding, number=10, dev=0
     s, bufs = maxunpooling2d(B, C, Input.shape[2], Input.shape[3], kernel_size, stride, padding)
     s =  tvm.te.create_schedule(s)
     f = tvm.build(s, bufs, "cuda")
-    ctx = tvm.context("cuda", dev_id=dev)
+    ctx = tvm.device("cuda", dev_id=dev)
 
     im = tvm.nd.array(Input.numpy().astype(np.float32), ctx)
     fi = tvm.nd.array(indices.numpy().astype(np.float32), ctx)

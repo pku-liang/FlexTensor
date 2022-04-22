@@ -43,7 +43,7 @@ WORKLOADS = [(56, 56, 64, 64, 3, 3, 1, 1, 1, 1),
 
 TARGET_NAME = 'llvm -mcpu=skylake-avx512'
 NUM_VEC_LANES = 16
-CTX = tvm.context(TARGET_NAME, 0)
+CTX = tvm.device(TARGET_NAME, 0)
 
 def get_shape(im_height, im_width, in_filter, out_filter, k_h, k_w, hpad, wpad,
               hstride, wstride, out_dtype):

@@ -29,7 +29,7 @@ def test_conv1d():
     output_torch = torch.nn.functional.conv1d(
         inputs_torch, weight_torch, bias_torch, stride=2, padding=1, dilation=2, groups=3)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     weight_tvm = tvm.nd.array(weight_np, tvm_ctx)
     bias_tvm = tvm.nd.array(bias_np, tvm_ctx)
@@ -62,7 +62,7 @@ def test_conv_transpose1d():
     output_torch = torch.nn.functional.conv_transpose1d(
         inputs_torch, weight_torch, bias_torch, stride=2, padding=1, output_padding=1, dilation=1, groups=3)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     weight_tvm = tvm.nd.array(weight_np, tvm_ctx)
     bias_tvm = tvm.nd.array(bias_np, tvm_ctx)
@@ -95,7 +95,7 @@ def test_conv2d_nchw():
     output_torch = torch.nn.functional.conv2d(
         inputs_torch, weight_torch, bias_torch, stride=2, padding=1, dilation=2, groups=3)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     weight_tvm = tvm.nd.array(weight_np, tvm_ctx)
     bias_tvm = tvm.nd.array(bias_np, tvm_ctx)
@@ -128,7 +128,7 @@ def test_conv_transpose2d_nchw():
     output_torch = torch.nn.functional.conv_transpose2d(
         inputs_torch, weight_torch, bias_torch, stride=2, padding=1, output_padding=1, dilation=2, groups=3)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     weight_tvm = tvm.nd.array(weight_np, tvm_ctx)
     bias_tvm = tvm.nd.array(bias_np, tvm_ctx)
@@ -162,7 +162,7 @@ def test_depthwise_conv2d_nchw():
     output_torch = torch.nn.functional.conv2d(
         inputs_torch, weight_torch, bias_torch, stride=2, padding=1, dilation=2, groups=6)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     # for depthwise
     weight_np = np.reshape(weight_np, [6, 3, 3, 3])# np.ones([6, 3, 3, 3]).astype(np.float32)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
@@ -197,7 +197,7 @@ def test_conv3d_ncdhw():
     output_torch = torch.nn.functional.conv3d(
         inputs_torch, weight_torch, bias_torch, stride=2, padding=1, dilation=2, groups=3)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     weight_tvm = tvm.nd.array(weight_np, tvm_ctx)
     bias_tvm = tvm.nd.array(bias_np, tvm_ctx)
@@ -230,7 +230,7 @@ def test_conv_transpose3d_ncdhw():
     output_torch = torch.nn.functional.conv_transpose3d(
         inputs_torch, weight_torch, bias_torch, stride=2, padding=1, output_padding=1, dilation=2, groups=3)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     weight_tvm = tvm.nd.array(weight_np, tvm_ctx)
     bias_tvm = tvm.nd.array(bias_np, tvm_ctx)
@@ -264,7 +264,7 @@ def test_gemm_conv2d_nchw():
     output_torch = torch.nn.functional.conv2d(
         inputs_torch, weight_torch, bias_torch, stride=1, padding=0, dilation=1, groups=1)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     weight_tvm = tvm.nd.array(weight_np, tvm_ctx)
     bias_tvm = tvm.nd.array(bias_np, tvm_ctx)
@@ -296,7 +296,7 @@ def test_linear():
     bias_torch = torch.tensor(bias_np)
     output_torch = torch.nn.functional.linear(inputs_torch, weight_torch, bias_torch)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     weight_tvm = tvm.nd.array(weight_np, tvm_ctx)
     bias_tvm = tvm.nd.array(bias_np, tvm_ctx)
@@ -330,7 +330,7 @@ def test_bilinear():
     bias_torch = torch.tensor(bias_np)
     output_torch = torch.nn.functional.bilinear(inputs_torch, another_torch, weight_torch, bias_torch)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     another_tvm = tvm.nd.array(another_np, tvm_ctx)
     weight_tvm = tvm.nd.array(weight_np, tvm_ctx)
@@ -360,7 +360,7 @@ def test_mean():
     inputs_torch = torch.tensor(inputs_np)
     output_torch = torch.mean(inputs_torch, dim=2)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     output_tvm = tvm.nd.array(np.zeros(output_torch.shape).astype(np.float32), tvm_ctx)
     inputs_t = tvm.te.placeholder(inputs_np.shape, dtype="float32")
@@ -384,7 +384,7 @@ def test_variance():
     inputs_torch = torch.tensor(inputs_np)
     output_torch = inputs_torch.var(dim=2)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     output_tvm = tvm.nd.array(np.zeros(output_torch.shape).astype(np.float32), tvm_ctx)
     inputs_t = tvm.te.placeholder(inputs_np.shape, dtype="float32")
@@ -410,7 +410,7 @@ def test_batch_norm():
     running_var = inputs_torch.var(dim=0)
     output_torch = torch.nn.functional.batch_norm(inputs_torch, running_mean, running_var)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     output_tvm = tvm.nd.array(np.zeros(output_torch.shape).astype(np.float32), tvm_ctx)
     inputs_t = tvm.te.placeholder(inputs_np.shape, dtype="float32")
@@ -449,7 +449,7 @@ def test_block_circulant_matrix():
                     vec[FFT * k: FFT * (k + 1)] = sub_vec
             output_np[FFT * i + j][:] = copy.deepcopy(vec)
 
-    tvm_ctx = tvm.context('llvm', 0)
+    tvm_ctx = tvm.device('llvm', 0)
     input_tvm = tvm.nd.array(input_np, tvm_ctx)
     output_tvm = tvm.nd.array(np.zeros(output_np.shape).astype(np.float32), tvm_ctx)
     input_t = tvm.te.placeholder(input_np.shape, dtype='float32')
@@ -477,7 +477,7 @@ def test_conv2d_nchwc():
 
     output_np = pyimpl.conv2d_nchwc(inputs_np, weight_np, bias_np, stride=2, padding=1, dilation=2, groups=3)
 
-    tvm_ctx = tvm.context("llvm", 0)
+    tvm_ctx = tvm.device("llvm", 0)
     inputs_tvm = tvm.nd.array(inputs_np, tvm_ctx)
     weight_tvm = tvm.nd.array(weight_np, tvm_ctx)
     bias_tvm = tvm.nd.array(bias_np, tvm_ctx)

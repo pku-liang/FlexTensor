@@ -120,7 +120,7 @@ def flatten_graph(ops):
 
 
 def _evaluate(s, bufs, target, dev_id, number=1, q=None):
-    ctx = tvm.context(target, dev_id)
+    ctx = tvm.device(target, dev_id)
     tvm_arys = []
     for arg in bufs:
         shape = utils.to_tuple(arg.shape)

@@ -31,7 +31,7 @@ dC_np = np.ones([dim0, dim1+dim2]).astype("float32")
 dA_np = np.zeros(shape_size1).astype("float32")
 dB_np = np.zeros(shape_size2).astype("float32")
 
-ctx = tvm.context("llvm", 0)
+ctx = tvm.device("llvm", 0)
 A_tvm = tvm.nd.array(A_np, ctx)
 B_tvm = tvm.nd.array(B_np, ctx)
 

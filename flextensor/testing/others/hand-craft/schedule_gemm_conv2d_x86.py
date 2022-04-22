@@ -226,7 +226,7 @@ def try_yolo_conv(batch_size=2, number=100):
     # to test the correctness, currently the result is wrong becasue of the schedule
     # if you change line 148 to 'outer = s[write_cache].fuse(gemm_g, gemm_go)'
     # the result is correct
-    ctx = tvm.context("llvm", 0)
+    ctx = tvm.device("llvm", 0)
     inputs_np = np.random.random(inputs.shape).astype("float32") * 100
     weight_np = np.random.random(to_tuple(weight.shape)).astype(weight.dtype) * 100
     outputs_np = np.zeros(shape=to_tuple(outputs.shape), dtype=np.float32) 

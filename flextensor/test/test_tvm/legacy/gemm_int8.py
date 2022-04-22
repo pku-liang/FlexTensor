@@ -130,7 +130,7 @@ if __name__ == '__main__':
             s, arg_bufs = gemm_int8(n, m, l)
             f = tvm.build(s, arg_bufs, 'cuda', name='gemm_int8')
 
-    ctx = tvm.context('cuda', 0)
+    ctx = tvm.device('cuda', 0)
 
     a_np = np.random.randint(size=(n, l), low=-128, high=127, dtype='int8')
     b_np = np.random.randint(size=(m, l), low=-128, high=127, dtype='int8')
