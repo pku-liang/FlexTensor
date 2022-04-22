@@ -708,7 +708,7 @@ class Scheduler(object):
                                          lib, task_key, build_config, op_pos,
                                          rpc_info, rewrite, number)
                     if isinstance(res, Exception):
-                        print(res)
+                        # print(res)
                         res = float("inf")
                     res_lst.append(res)
 
@@ -740,10 +740,10 @@ class Scheduler(object):
                     try:
                         res = fut.result()
                         if isinstance(res, Exception):
-                            print(res)
+                            # print(res)
                             res = float("inf")
                     except Exception as e:
-                        print(e)
+                        # print(e)
                         broken = True
                         res = float("inf")
                     res_lst.append(res)
