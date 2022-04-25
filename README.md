@@ -43,9 +43,9 @@ on NVIDIA V100 GPU compared to the state-of-the-art.
 
 ## Installation
 
-Requires: `Python 3.5+`, `Numpy`, `TVM commit 89da63e228eae2b0b4fe39770031a042858c52a7`
+Requires: `Python 3.5+`, `Numpy`, `tvm: https://github.com/KnowingNothing/tvm/tree/mirror`
 
-1. Install TVM, follow the [instructions](https://docs.tvm.ai/install/from_source.html), but remember to put `export PYTHONPATH=$PYTHONPATH:$TVM_HOME/topi/python` in your environment file becasue the newest TVM changes the path of TOPI and eliminates this line from the environment file.
+1. Install TVM, follow the [instructions](https://docs.tvm.ai/install/from_source.html).
 2. Clone this repo:
    ```sh
    git clone https://github.com/KnowingNothing/FlexTensor.git
